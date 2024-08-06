@@ -29,8 +29,8 @@ class HandMotionPredictor(nn.Module):
         torch.save(model.state_dict(), model_path)
 
     @staticmethod
-    def load_data(batch_size, num_workers=0):
-        dataset = HandMotionVideoDataset('../hand_motion.db')
+    def load_data(batch_size, num_workers=2):
+        dataset = HandMotionVideoDataset()
         train_size = int(0.8 * len(dataset))
         test_size = len(dataset) - train_size
         train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
@@ -40,7 +40,7 @@ class HandMotionPredictor(nn.Module):
 
     @staticmethod
     def train_model(model, train_loader, test_loader, criterion, optimzer, epochs, scheduler=None, early_stopping_patience=None, trial=None):
-        pass
+        return model
 
     @staticmethod
     def evaluate(model, test_loader, criterion):
@@ -62,6 +62,5 @@ if __name__ == '__main__':
     criterion = nn.MSELoss()
 
     train_loader, test_loader = HandMotionPredictor.load_data(batch_size)
-    for data, labels in train_loader:
-        print(f'Data shape: {data.shape}, Label count: {len(labels)}')
-        break
+    model = HandMotionPredictor.train_model(model, train_loader, test_loader, criterion, optimizer, epochs, scheduler=scheduler)
+    model.save_model(model, 'hand_motion_predictor.pth')
