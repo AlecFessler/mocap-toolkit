@@ -25,5 +25,5 @@ def verify_hdf5_file(db_path):
                 print(f"  Labels dataset shape: {labels_shape}")
 
 if __name__ == '__main__':
-    db_path = '../hand_motions.h5'
+    db_path = '../hand_motions_labels.h5'
     verify_hdf5_file(db_path)

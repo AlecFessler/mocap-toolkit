@@ -11,7 +11,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     mp_hands = mp.solutions.hands
-    db_path = '../hand_motions.h5'
+    db_path = '../hand_motions_labels.h5'
     open_mode = 'a' if os.path.exists(db_path) else 'w'
     with h5py.File(db_path, open_mode) as db:
         if 'version' not in db.attrs:
@@ -47,8 +47,8 @@ if __name__ == '__main__':
         fps = cap.get(cv2.CAP_PROP_FPS)
         video_grp.attrs['fps'] = fps
 
-        fourcc = cv2.VideoWriter_fourcc(*'X265')
-        video_out = cv2.VideoWriter(f'../hand_motion_videos/{grp_name}.mp4', fourcc, fps, db_video_resolution)
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+        video_out = cv2.VideoWriter(f'../hand_motions_videos/{grp_name}.avi', fourcc, fps, db_video_resolution)
 
         frame_count = 0
         labels = []
