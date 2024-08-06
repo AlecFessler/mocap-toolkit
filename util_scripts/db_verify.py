@@ -19,11 +19,6 @@ def verify_hdf5_file(db_path):
             print(f"  FPS: {video_grp.attrs['fps']}")
             print(f"  Number of frames: {video_grp.attrs['num_frames']}")
 
-            # Verify frames dataset
-            if 'frames' in video_grp:
-                frames_shape = video_grp['frames'].shape
-                print(f"  Frames dataset shape: {frames_shape}")
-
             # Verify labels dataset
             if 'labels' in video_grp:
                 labels_shape = video_grp['labels'].shape
