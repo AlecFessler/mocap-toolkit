@@ -3,6 +3,7 @@ import h5py
 import mediapipe as mp
 import numpy as np
 import os
+import subprocess
 import sys
 
 if __name__ == '__main__':
@@ -47,8 +48,25 @@ if __name__ == '__main__':
         fps = cap.get(cv2.CAP_PROP_FPS)
         video_grp.attrs['fps'] = fps
 
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        video_out = cv2.VideoWriter(f'../hand_motions_videos/{grp_name}.avi', fourcc, fps, db_video_resolution)
+        # FFmpeg command to encode raw video frames:
+        # -y: overwrite output file if exists
+        # -f rawvideo: input format is raw video
+        # -vcodec rawvideo: specify input codec as raw video
+        # -s {frame_width}x{frame_height}: input frame resolution
+        # -pix_fmt bgr24: pixel format is BGR with 8 bits per channel
+        # -r {fps}: input frame rate
+        # -i -: read input from stdin
+        # -vf scale={db_video_resolution[0]}:{db_video_resolution[1]}: resize to target resolution
+        # -an: disable audio
+        # -c:v libx265: encode video with H.265 codec
+        # -crf 28: set quality level (lower is better quality)
+        # {grp_name}.mkv: output file name in MKV format
+        ffmpeg_command = [
+                'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-s', f'{frame_width}x{frame_height}',
+                '-pix_fmt', 'bgr24', '-r', str(int(fps)), '-i', '-', '-vf', f'scale={db_video_resolution[0]}:{db_video_resolution[1]}',
+                '-an', '-c:v', 'libx265', '-crf', '28', f'../hand_motions_videos/{grp_name}.mkv'
+        ]
+        ffmpeg = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
 
         frame_count = 0
         labels = []
@@ -74,11 +92,12 @@ if __name__ == '__main__':
                 landmarks_arr = [[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]
                 labels.append(landmarks_arr)
 
-                resized_frame = cv2.resize(frame, db_video_resolution)
-                video_out.write(resized_frame)
+                ffmpeg.stdin.write(frame.tobytes())
 
         cap.release()
-        video_out.release()
+        ffmpeg.stdin.close()
+        ffmpeg.wait()
+
         # casting to f16 to save space
         video_grp.create_dataset('labels', data=np.array(labels, dtype=np.float16), compression='gzip', compression_opts=9)
         video_grp.attrs['num_frames'] = frame_count
