@@ -46,20 +46,24 @@ int main() {
   }
 
   // Register the process ID with the kernel module
-  fd = open("/dev/gpio17_interrupt", O_WRONLY);
+  fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
   if (fd < 0) {
-    std::cerr << "Failed to open /dev/gpio17_interrupt" << std::endl;
+    std::cerr << "Failed to open /proc/gpio_interrupt_pid" << std::endl;
     return -1;
   }
   std::ostringstream oss;
   oss << pid;
   std::string pid_str = oss.str();
-  if (write(fd, pid_str.c_str(), pid_str.length()) < 0) {
-      std::cerr << "Failed to write PID to /dev/gpio17_interrupt" << std::endl;
+  ssize_t bytes_written = write(fd, pid_str.c_str(), pid_str.length());
+  if (bytes_written < 0) {
+      std::cerr << "Failed to write PID to /proc/gpio_interrupt_pid" << std::endl;
+      close(fd);
+      return -1;
+  } else if (bytes_written != static_cast<ssize_t>(pid_str.length())) {
+      std::cerr << "Incomplete write of PID to /proc/gpio_interrupt_pid" << std::endl;
       close(fd);
       return -1;
   }
-  close(fd);
 
   while (1) {
     pause(); // Wait indefinitely for signal

@@ -6,11 +6,17 @@
 #include <linux/pid.h>
 #include <linux/signal.h>
 #include <linux/gpio/consumer.h>
+#include <linux/proc_fs.h>
+#include <linux/of_gpio.h>
+#include <linux/delay.h>
 
-static unsigned int gpio_pin = 17;
+#define PROC_NAME "gpio_interrupt_pid"
+#define GPIO_PIN 588
+
 static unsigned int irq_num;
-
 static struct task_struct *user_task = NULL;
+static struct proc_dir_entry *proc_file;
+static struct gpio_desc *gpiod;
 
 static irqreturn_t gpio_isr(int irq, void *dev_id) {
     struct kernel_siginfo info;
@@ -36,50 +42,6 @@ static irqreturn_t gpio_isr(int irq, void *dev_id) {
     return IRQ_HANDLED;
 }
 
-static int __init gpio_isr_init(void) {
-    int result = 0;
-    struct gpio_desc *gpiod;
-
-    if (!gpio_is_valid(gpio_pin)) {
-        printk(KERN_ERR "Invalid GPIO pin\n");
-        return -ENODEV;
-    }
-
-    gpiod = gpio_to_desc(gpio_pin);
-    if (!gpiod) {
-        printk(KERN_ERR "Failed to get GPIO descriptor\n");
-        return -ENODEV;
-    }
-
-    gpiod_set_debounce(gpiod, 30);
-    gpiod_direction_input(gpiod);
-
-    irq_num = gpiod_to_irq(gpiod);
-
-    result = request_irq(irq_num,
-                         (irq_handler_t) gpio_isr,
-                         IRQF_TRIGGER_RISING,
-                         "gpio17_interrupt",
-                         NULL);
-
-    if (result < 0) {
-        printk(KERN_ERR "GPIO IRQ request failed\n");
-        return result;
-    }
-
-    printk(KERN_INFO "gpio17_interrupt_driver loaded\n");
-    return 0;
-}
-
-static void __exit gpio_isr_exit(void) {
-    struct gpio_desc *gpiod;
-    gpiod = gpio_to_desc(gpio_pin);
-    if (gpiod) {
-        free_irq(irq_num, NULL);
-    }
-    printk(KERN_INFO "gpio17_interrupt_driver unloaded\n");
-}
-
 static ssize_t register_user_pid(struct file *file, const char __user *buffer, size_t count, loff_t *pos) {
     pid_t pid;
     struct pid *pid_struct;
@@ -101,9 +63,77 @@ static ssize_t register_user_pid(struct file *file, const char __user *buffer, s
     return count;
 }
 
-static const struct file_operations fops = {
-    .write = register_user_pid,
+static const struct proc_ops proc_fops = {
+    .proc_write = register_user_pid,
 };
+
+static int __init gpio_isr_init(void) {
+    int result = 0;
+
+    gpiod = gpio_to_desc(GPIO_PIN);
+    if (IS_ERR(gpiod)) {
+        printk(KERN_ERR "Failed to get GPIO descriptor for GPIO %d, error: %ld\n", GPIO_PIN, PTR_ERR(gpiod));
+        return PTR_ERR(gpiod);
+    }
+
+    // Explicitly configure GPIO as input
+    result = gpiod_direction_input(gpiod);
+    if (result < 0) {
+        printk(KERN_ERR "Failed to set GPIO %d as input, error: %d\n", GPIO_PIN, result);
+        goto error_direction;
+    }
+
+    // Try to get IRQ number
+    irq_num = gpiod_to_irq(gpiod);
+    if (irq_num < 0) {
+        printk(KERN_ERR "gpiod_to_irq failed for GPIO %d, error: %d\n", GPIO_PIN, irq_num);
+        result = irq_num;
+        goto error_irq;
+    }
+
+    // Request IRQ
+    result = request_irq(irq_num,
+                         (irq_handler_t) gpio_isr,
+                         IRQF_TRIGGER_RISING | IRQF_SHARED,
+                         "gpio_interrupt",
+                         gpiod);  // Use gpiod as the device ID
+    if (result < 0) {
+        printk(KERN_ERR "GPIO IRQ request failed for GPIO %d, IRQ %d, error: %d\n", GPIO_PIN, irq_num, result);
+        goto error_request_irq;
+    }
+
+    // Create proc file
+    proc_file = proc_create(PROC_NAME, 0222, NULL, &proc_fops);
+    if (!proc_file) {
+        printk(KERN_ERR "Failed to create proc file\n");
+        result = -ENOMEM;
+        goto error_proc_create;
+    }
+
+    printk(KERN_INFO "gpio_interrupt_driver loaded successfully for GPIO %d\n", GPIO_PIN);
+    return 0;
+
+error_proc_create:
+    free_irq(irq_num, gpiod);
+error_request_irq:
+error_irq:
+error_direction:
+    gpiod_put(gpiod);
+    return result;
+}
+
+static void __exit gpio_isr_exit(void) {
+    if (irq_num > 0) {
+        free_irq(irq_num, gpiod);
+    }
+    if (gpiod) {
+        gpiod_put(gpiod);
+    }
+    if (proc_file) {
+        proc_remove(proc_file);
+    }
+    printk(KERN_INFO "gpio_interrupt_driver unloaded for GPIO %d\n", GPIO_PIN);
+}
 
 module_init(gpio_isr_init);
 module_exit(gpio_isr_exit);
