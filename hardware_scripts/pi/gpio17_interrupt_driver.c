@@ -1,11 +1,11 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/sched.h>
 #include <linux/pid.h>
 #include <linux/signal.h>
+#include <linux/gpio/consumer.h>
 
 static unsigned int gpio_pin = 17;
 static unsigned int irq_num;
@@ -13,7 +13,7 @@ static unsigned int irq_num;
 static struct task_struct *user_task = NULL;
 
 static irqreturn_t gpio_isr(int irq, void *dev_id) {
-    struct siginfo info;
+    struct kernel_siginfo info;
     int ret;
 
     if (user_task == NULL) {
@@ -21,7 +21,7 @@ static irqreturn_t gpio_isr(int irq, void *dev_id) {
         return IRQ_HANDLED;
     }
 
-    memset(&info, 0, sizeof(struct siginfo));
+    memset(&info, 0, sizeof(struct kernel_siginfo));
     info.si_signo = SIGUSR1;
     info.si_code = SI_QUEUE;
     info.si_int = 1; // Unused
@@ -38,18 +38,23 @@ static irqreturn_t gpio_isr(int irq, void *dev_id) {
 
 static int __init gpio_isr_init(void) {
     int result = 0;
+    struct gpio_desc *gpiod;
 
     if (!gpio_is_valid(gpio_pin)) {
         printk(KERN_ERR "Invalid GPIO pin\n");
         return -ENODEV;
     }
 
-    gpio_request(gpio_pin, "sysfs");
-    gpio_direction_input(gpio_pin);
-    gpio_set_debounce(gpio_pin, 30);
-    gpio_export(gpio_pin, false);
+    gpiod = gpio_to_desc(gpio_pin);
+    if (!gpiod) {
+        printk(KERN_ERR "Failed to get GPIO descriptor\n");
+        return -ENODEV;
+    }
 
-    irq_num = gpio_to_irq(gpio_pin);
+    gpiod_set_debounce(gpiod, 30);
+    gpiod_direction_input(gpiod);
+
+    irq_num = gpiod_to_irq(gpiod);
 
     result = request_irq(irq_num,
                          (irq_handler_t) gpio_isr,
@@ -67,9 +72,11 @@ static int __init gpio_isr_init(void) {
 }
 
 static void __exit gpio_isr_exit(void) {
-    free_irq(irq_num, NULL);
-    gpio_unexport(gpio_pin);
-    gpio_free(gpio_pin);
+    struct gpio_desc *gpiod;
+    gpiod = gpio_to_desc(gpio_pin);
+    if (gpiod) {
+        free_irq(irq_num, NULL);
+    }
     printk(KERN_INFO "gpio17_interrupt_driver unloaded\n");
 }
 
