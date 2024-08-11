@@ -5,7 +5,6 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <pthread.h>
-#include <sys/capability.h>
 
 //#include "VFQ.h"
 
@@ -49,16 +48,6 @@ int main() {
     std::cerr << "Failed to set real-time scheduling" << std::endl;
     return -1;
   }
-
-  // Remove capabilities after setting real-time scheduling
-  cap_t caps = cap_get_proc();
-  cap_clear(caps);
-  if (cap_set_proc(caps) < 0) {
-    std::cerr << "Failed to remove capabilities" << std::endl;
-    cap_free(caps);
-    return -1;
-  }
-  cap_free(caps);
 
   // Register the process ID with the kernel module
   fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
