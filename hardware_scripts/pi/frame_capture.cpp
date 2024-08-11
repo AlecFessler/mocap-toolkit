@@ -3,9 +3,9 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sstream>
 #include <sched.h>
 #include <pthread.h>
+#include <sys/capability.h>
 
 //#include "VFQ.h"
 
@@ -13,6 +13,11 @@ void sig_handler(int signo, siginfo_t *info, void *context) {
   if (signo == SIGUSR1) {
     std::cout << "Received SIGUSR1 signal" << std::endl;
   }
+}
+
+void sigint_handler(int signo) {
+  std::cout << "Received signal " << signo << ". Exiting..." << std::endl;
+  exit(0);
 }
 
 int main() {
@@ -45,25 +50,33 @@ int main() {
     return -1;
   }
 
+  // Remove capabilities after setting real-time scheduling
+  cap_t caps = cap_get_proc();
+  cap_clear(caps);
+  if (cap_set_proc(caps) < 0) {
+    std::cerr << "Failed to remove capabilities" << std::endl;
+    cap_free(caps);
+    return -1;
+  }
+  cap_free(caps);
+
   // Register the process ID with the kernel module
   fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
   if (fd < 0) {
     std::cerr << "Failed to open /proc/gpio_interrupt_pid" << std::endl;
     return -1;
   }
-  std::ostringstream oss;
-  oss << pid;
-  std::string pid_str = oss.str();
-  ssize_t bytes_written = write(fd, pid_str.c_str(), pid_str.length());
-  if (bytes_written < 0) {
-      std::cerr << "Failed to write PID to /proc/gpio_interrupt_pid" << std::endl;
-      close(fd);
-      return -1;
-  } else if (bytes_written != static_cast<ssize_t>(pid_str.length())) {
-      std::cerr << "Incomplete write of PID to /proc/gpio_interrupt_pid" << std::endl;
-      close(fd);
-      return -1;
+  if (dprintf(fd, "%d", pid) < 0) {
+    std::cerr << "Failed to write to /proc/gpio_interrupt_pid" << std::endl;
+    close(fd);
+    return -1;
   }
+  close(fd);
+
+  std::cout << "PID " << pid << " registered with kernel module. Waiting for signals..." << std::endl;
+
+  signal(SIGINT, sigint_handler);
+  signal(SIGTERM, sigint_handler);
 
   while (1) {
     pause(); // Wait indefinitely for signal
