@@ -15,7 +15,7 @@ std::atomic<bool> running(true);
 int vfq_id = create_vfq(KEY);
 std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
 int buffersCount = 4;
-std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(1, 30000);
+std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
 CameraHandler cam = CameraHandler(resolution, buffersCount, frameDurationLimits);
 
 void sig_handler(int signo, siginfo_t *info, void *context) {
