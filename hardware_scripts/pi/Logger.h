@@ -4,6 +4,9 @@
 #include <fstream>
 #include <string>
 
+#define LOG_EVENT(timestamp, event) \
+  "Event: " + event + " at: " + timestamp
+
 class Logger {
 private:
   static Logger* instance_;
