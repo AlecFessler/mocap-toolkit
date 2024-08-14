@@ -7,8 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-constexpr int FRAME_WIDTH = 400;
-constexpr int FRAME_HEIGHT = 400;
+constexpr key_t KEY = 0x1234;
+constexpr int FRAME_WIDTH = 1280;
+constexpr int FRAME_HEIGHT = 720;
 constexpr int COLOR_CHANNELS = 3;
 constexpr size_t FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT * COLOR_CHANNELS;
 constexpr long MSG_TYPE = 1;
