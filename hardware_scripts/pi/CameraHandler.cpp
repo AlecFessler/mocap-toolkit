@@ -1,4 +1,7 @@
 #include "CameraHandler.h"
+#include "Logger.h"
+
+#include <string>
 
 using namespace libcamera;
 
@@ -61,7 +64,7 @@ CameraHandler::~CameraHandler() {
   cm_->stop();
 }
 
-void CameraHandler::QueueRequest() {
+void CameraHandler::queueRequest() {
   size_t index = nextRequestIndex_.load();
   if (camera_->queueRequest(requests_[index].get()) < 0)
     throw std::runtime_error("Failed to queue request");
@@ -71,6 +74,8 @@ void CameraHandler::QueueRequest() {
 void CameraHandler::requestComplete(Request *request) {
   if (request->status() == Request::RequestCancelled)
     return;
+
+  Logger::getLogger().log(LOG_EVENT(Logger::timestamp(), std::string("request complete")), Logger::Level::INFO);
 
   const std::map<const Stream*, FrameBuffer*> &buffers = request->buffers();
   for (const auto &[stream, buffer] : buffers)

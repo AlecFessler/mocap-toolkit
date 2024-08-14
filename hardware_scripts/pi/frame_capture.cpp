@@ -1,12 +1,14 @@
-#include <signal.h>
-#include <iostream>
-#include <cstdlib>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <pthread.h>
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <fcntl.h>
+#include <iostream>
 #include <memory>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
+#include <string>
+#include <unistd.h>
 
 #include "CameraHandler.h"
 #include "Logger.h"
@@ -15,6 +17,7 @@
 std::atomic<bool> running(true);
 int vfq_id = create_vfq(KEY);
 Logger& logger = Logger::getLogger("frame_cap_logs.txt");
+
 std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
 int buffersCount = 4;
 std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
@@ -22,7 +25,8 @@ CameraHandler cam = CameraHandler(resolution, buffersCount, frameDurationLimits)
 
 void sig_handler(int signo, siginfo_t *info, void *context) {
   if (signo == SIGUSR1) {
-    cam.QueueRequest();
+    cam.queueRequest();
+    logger.log(LOG_EVENT(Logger::timestamp(), std::string("queued request")), Logger::INFO);
   } else if (signo == SIGINT || signo == SIGTERM) {
     running = false;
     std::cout << "Received signal " << signo << ", exiting..." << std::endl;

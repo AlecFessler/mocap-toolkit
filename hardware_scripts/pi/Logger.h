@@ -5,7 +5,7 @@
 #include <string>
 
 #define LOG_EVENT(timestamp, event) \
-  "Event: " + event + " at: " + timestamp
+  "Event: " + event + " at: " + timestamp + "\n"
 
 class Logger {
 private:
@@ -22,6 +22,7 @@ public:
   };
 
   static Logger& getLogger(const std::string& logFile = "log.txt");
+  static std::string timestamp();
   void log(const std::string& message, Level level);
 
   ~Logger();

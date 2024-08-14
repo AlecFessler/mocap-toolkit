@@ -1,5 +1,9 @@
 #include "Logger.h"
+
+#include <chrono>
+#include <iomanip>
 #include <stdexcept>
+#include <sstream>
 
 Logger* Logger::instance_ = nullptr;
 
@@ -16,6 +20,18 @@ Logger& Logger::getLogger(const std::string& logFile) {
   if (instance_ == nullptr)
     instance_ = new Logger(logFile);
   return *instance_;
+}
+
+std::string Logger::timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto duration = now.time_since_epoch();
+    auto uS = std::chrono::duration_cast<std::chrono::microseconds>(duration) % std::chrono::seconds(1);
+    std::tm now_tm = *std::gmtime(&now_time_t);
+    std::ostringstream oss;
+    oss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S")
+        << '.' << std::setw(6) << std::setfill('0') << uS.count() << 'Z';
+    return oss.str();
 }
 
 void Logger::log(const std::string& message, Level level) {

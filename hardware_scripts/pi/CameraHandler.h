@@ -21,7 +21,7 @@ public:
   CameraHandler& operator=(const CameraHandler&) = delete;
   CameraHandler(CameraHandler&&) = delete;
   CameraHandler& operator=(CameraHandler&&) = delete;
-  void QueueRequest();
+  void queueRequest();
 private:
   std::unique_ptr<CameraManager> cm_;
   std::shared_ptr<Camera> camera_;
