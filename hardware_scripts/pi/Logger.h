@@ -10,18 +10,18 @@ private:
   std::ofstream logFile_;
 
   Logger(const std::string& logFile);
-  ~Logger();
 
 public:
-  enum LogLevel {
+  enum Level {
     INFO,
     WARNING,
     ERROR
   };
 
   static Logger& getLogger(const std::string& logFile = "log.txt");
-  void log(const std::string& message, LogLevel level);
+  void log(const std::string& message, Level level);
 
+  ~Logger();
   Logger(Logger const&) = delete;
   void operator=(Logger const&) = delete;
   Logger(Logger&&) = delete;

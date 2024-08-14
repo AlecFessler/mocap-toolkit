@@ -9,10 +9,12 @@
 #include <memory>
 
 #include "CameraHandler.h"
+#include "Logger.h"
 #include "VFQ.h"
 
 std::atomic<bool> running(true);
 int vfq_id = create_vfq(KEY);
+Logger& logger = Logger::getLogger("frame_cap_logs.txt");
 std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
 int buffersCount = 4;
 std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);

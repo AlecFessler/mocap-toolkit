@@ -3,7 +3,7 @@
 
 Logger* Logger::instance_ = nullptr;
 
-Logger::Logger(const std::string& logFile) : logFile_(logFile) {
+Logger::Logger(const std::string& logFile) : logFile_(logFile, std::ios::app) {
   if (!logFile_.is_open())
     throw std::runtime_error("Could not open log file");
 }
@@ -18,15 +18,15 @@ Logger& Logger::getLogger(const std::string& logFile) {
   return *instance_;
 }
 
-void Logger::log(const std::string& message, LogLevel level) {
+void Logger::log(const std::string& message, Level level) {
   switch (level) {
-    case LogLevel::INFO:
+    case Level::INFO:
       logFile_ << "[INFO] " << message << std::endl;
       break;
-    case LogLevel::WARNING:
+    case Level::WARNING:
       logFile_ << "[WARNING] " << message << std::endl;
       break;
-    case LogLevel::ERROR:
+    case Level::ERROR:
       logFile_ << "[ERROR] " << message << std::endl;
       break;
     default:
