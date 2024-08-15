@@ -34,19 +34,19 @@ std::string Logger::timestamp() {
     return oss.str();
 }
 
-void Logger::log(const std::string& message, Level level) {
+void Logger::log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message) {
   switch (level) {
     case Level::INFO:
-      logFile_ << "[INFO] " << message << std::endl;
+      logFile_ << timestamp << " [INFO] " << file << ":" << line << " - " << message << std::endl;
       break;
     case Level::WARNING:
-      logFile_ << "[WARNING] " << message << std::endl;
+      logFile_ << timestamp << " [WARNING] " << file << ":" << line << " - " << message << std::endl;
       break;
     case Level::ERROR:
-      logFile_ << "[ERROR] " << message << std::endl;
+      logFile_ << timestamp << " [ERROR] " << file << ":" << line << " - " << message << std::endl;
       break;
     default:
-      logFile_ << "[UNKNOWN] " << message << std::endl;
+      logFile_ << timestamp << " [UNKNOWN] " << file << ":" << line << " - " << message << std::endl;
       break;
   }
 }

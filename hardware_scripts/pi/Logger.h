@@ -4,9 +4,6 @@
 #include <fstream>
 #include <string>
 
-#define LOG_EVENT(timestamp, event) \
-  "Event: " + event + " at: " + timestamp + "\n"
-
 class Logger {
 private:
   static Logger* instance_;
@@ -23,7 +20,7 @@ public:
 
   static Logger& getLogger(const std::string& logFile = "log.txt");
   static std::string timestamp();
-  void log(const std::string& message, Level level);
+  void log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message);
 
   ~Logger();
   Logger(Logger const&) = delete;
