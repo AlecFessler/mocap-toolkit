@@ -4,10 +4,12 @@
 #include <atomic>
 #include <memory>
 #include <vector>
-
 #include <libcamera/libcamera.h>
+#include "PCtx.h"
 
 using namespace libcamera;
+
+class PCtx;
 
 class CameraHandler {
 public:
@@ -23,6 +25,7 @@ public:
   CameraHandler& operator=(CameraHandler&&) = delete;
   void queueRequest();
 private:
+  PCtx& pctx_;
   std::unique_ptr<CameraManager> cm_;
   std::shared_ptr<Camera> camera_;
   std::unique_ptr<CameraConfiguration> config_;

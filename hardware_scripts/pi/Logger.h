@@ -2,14 +2,13 @@
 #define LOGGER_H
 
 #include <fstream>
+#include <queue>
 #include <string>
 
 class Logger {
 private:
-  static Logger* instance_;
   std::ofstream logFile_;
-
-  Logger(const std::string& logFile);
+  std::queue<std::string> queue_;
 
 public:
   enum Level {
@@ -18,10 +17,12 @@ public:
     ERROR
   };
 
-  static Logger& getLogger(const std::string& logFile = "log.txt");
   static std::string timestamp();
   void log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message);
+  void queue(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message);
+  void flush();
 
+  Logger(const std::string& logFile);
   ~Logger();
   Logger(Logger const&) = delete;
   void operator=(Logger const&) = delete;

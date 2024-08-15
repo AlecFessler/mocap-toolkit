@@ -5,21 +5,16 @@
 #include <stdexcept>
 #include <sstream>
 
-Logger* Logger::instance_ = nullptr;
-
 Logger::Logger(const std::string& logFile) : logFile_(logFile, std::ios::app) {
   if (!logFile_.is_open())
     throw std::runtime_error("Could not open log file");
 }
 
 Logger::~Logger() {
+  try {
+    this->flush();
+  } catch (...) {}
   logFile_.close();
-}
-
-Logger& Logger::getLogger(const std::string& logFile) {
-  if (instance_ == nullptr)
-    instance_ = new Logger(logFile);
-  return *instance_;
 }
 
 std::string Logger::timestamp() {
@@ -34,19 +29,36 @@ std::string Logger::timestamp() {
     return oss.str();
 }
 
-void Logger::log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message) {
+static std::string logString(const std::string& timestamp, Logger::Level level, const std::string& file, int line, const std::string& message) {
+  std::ostringstream oss;
   switch (level) {
-    case Level::INFO:
-      logFile_ << timestamp << " [INFO] " << file << ":" << line << " - " << message << std::endl;
-      break;
-    case Level::WARNING:
-      logFile_ << timestamp << " [WARNING] " << file << ":" << line << " - " << message << std::endl;
-      break;
-    case Level::ERROR:
-      logFile_ << timestamp << " [ERROR] " << file << ":" << line << " - " << message << std::endl;
-      break;
+    case Logger::Level::INFO:
+      oss << timestamp << " [INFO] " << file << ":" << line << " - " << message << std::endl;
+      return oss.str();
+    case Logger::Level::WARNING:
+      oss << timestamp << " [WARNING] " << file << ":" << line << " - " << message << std::endl;
+      return oss.str();
+    case Logger::Level::ERROR:
+      oss << timestamp << " [ERROR] " << file << ":" << line << " - " << message << std::endl;
+      return oss.str();
     default:
-      logFile_ << timestamp << " [UNKNOWN] " << file << ":" << line << " - " << message << std::endl;
-      break;
+      oss << timestamp << " [UNKNOWN] " << file << ":" << line << " - " << message << std::endl;
+      return oss.str();
+  }
+}
+
+void Logger::log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message) {
+  this->flush();
+  logFile_ << logString(timestamp, level, file, line, message);
+}
+
+void Logger::queue(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message) {
+  queue_.push(logString(timestamp, level, file, line, message));
+}
+
+void Logger::flush() {
+  while (!queue_.empty()) {
+    logFile_ << queue_.front();
+    queue_.pop();
   }
 }
