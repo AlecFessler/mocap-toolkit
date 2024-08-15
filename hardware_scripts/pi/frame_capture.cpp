@@ -1,5 +1,3 @@
-#include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
 #include <iostream>
@@ -7,7 +5,6 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
-#include <string>
 #include <unistd.h>
 
 #include "CameraHandler.h"
@@ -16,9 +13,10 @@
 
 void sig_handler(int signo, siginfo_t *info, void *context) {
   static PCtx& pctx = PCtx::getInstance();
+  static const char* infostr = "Capture request queued";
   if (signo == SIGUSR1 && pctx.running) {
     pctx.cam->queueRequest();
-    pctx.logger->queue(Logger::timestamp(), Logger::Level::INFO, __FILE__, __LINE__, "Capture request queued");
+    pctx.logger->log(Logger::Level::INFO, __FILE__, __LINE__, infostr);
   } else if (signo == SIGINT || signo == SIGTERM) {
     pctx.running = 0;
   }
@@ -41,7 +39,8 @@ int main() {
   if (sigaction(SIGUSR1, &action, NULL) < 0 ||
       sigaction(SIGINT, &action, NULL) < 0 ||
       sigaction(SIGTERM, &action, NULL) < 0) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to set signal handler");
+    static const char* errstr = "Failed to set signal handler";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     return -EINVAL;
   }
 
@@ -49,25 +48,29 @@ int main() {
   CPU_ZERO(&cpuset);
   CPU_SET(3, &cpuset);
   if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to set CPU affinity, likely due to insufficient permissions");
+    static const char* errstr = "Failed to set CPU affinity, likely due to insufficient permissions";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     return -EPERM;
   }
 
   struct sched_param param;
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to set scheduler policy, likely due to insufficient permissions");
+    static const char* errstr = "Failed to set scheduler policy, likely due to insufficient permissions";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     return -EPERM;
   }
 
   int fd;
   fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
   if (fd < 0) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to open /proc/gpio_interrupt_pid");
+    static const char* errstr = "Failed to open /proc/gpio_interrupt_pid";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     return -errno;
   }
   if (dprintf(fd, "%d", pid) < 0) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to write to /proc/gpio_interrupt_pid");
+    static const char* errstr = "Failed to write to /proc/gpio_interrupt_pid";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     close(fd);
     return -errno;
   }
@@ -79,7 +82,8 @@ int main() {
   try {
     pctx.cam = std::make_unique<CameraHandler>(resolution, buffersCount, frameDurationLimits);
   } catch (const std::exception& e) {
-    pctx.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, "Failed to initialize camera");
+    static const char* errstr = "Failed to initialize camera";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, errstr);
     return -EIO;
   }
 

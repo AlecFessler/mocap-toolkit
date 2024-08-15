@@ -7,8 +7,7 @@
 
 class Logger {
 private:
-  std::ofstream logFile_;
-  std::queue<std::string> queue_;
+  int fd_;
 
 public:
   enum Level {
@@ -17,12 +16,9 @@ public:
     ERROR
   };
 
-  static std::string timestamp();
-  void log(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message);
-  void queue(const std::string& timestamp, Level level, const std::string& file, int line, const std::string& message);
-  void flush();
+  void log(Level level, const char* file, int line, const char* message);
 
-  Logger(const std::string& logFile);
+  Logger(const char* filename);
   ~Logger();
   Logger(Logger const&) = delete;
   void operator=(Logger const&) = delete;
