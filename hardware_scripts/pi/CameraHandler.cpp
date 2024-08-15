@@ -108,7 +108,7 @@ void CameraHandler::queueRequest() {
   size_t index = nextRequestIndex_.load();
   if (camera_->queueRequest(requests_[index].get()) < 0) {
     std::string err = "Failed to queue request";
-    pctx_.logger->log(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, err);
+    pctx_.logger->queue(Logger::timestamp(), Logger::Level::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
   nextRequestIndex_.store((index + 1) % requests_.size());
