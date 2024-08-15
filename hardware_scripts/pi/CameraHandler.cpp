@@ -117,8 +117,7 @@ void CameraHandler::requestComplete(Request *request) {
   if (request->status() == Request::RequestCancelled)
     return;
 
-  static const char* info = "Request completed";
-  pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
+  pctx_.requestComplete = 1;
 
   request->reuse(Request::ReuseBuffers);
 }

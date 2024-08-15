@@ -11,6 +11,8 @@ class CameraHandler;
 class PCtx {
 public:
   volatile sig_atomic_t running;
+  volatile sig_atomic_t queueRequest;
+  volatile sig_atomic_t requestComplete;
   std::unique_ptr<Logger> logger;
   std::unique_ptr<CameraHandler> cam;
 
