@@ -22,7 +22,9 @@ extern char **environ;
 void sig_handler(int signo, siginfo_t *info, void *context) {
   static PCtx& pctx = PCtx::getInstance();
   if (signo == SIGUSR1 && pctx.running) {
-    pctx.queueRequest = 1;
+    pctx.cam->queueRequest();
+    static const char* info = "Capture request queued";
+    pctx.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
   } else if (signo == SIGINT || signo == SIGTERM) {
     pctx.running = 0;
   }
@@ -137,17 +139,6 @@ int main() {
   pctx.running = 1;
   while (pctx.running) {
     pause();
-    if (pctx.queueRequest) {
-      pctx.cam->queueRequest();
-      const char* info = "Capture request queued";
-      pctx.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
-      pctx.queueRequest = 0;
-    }
-    if (pctx.requestComplete) {
-      const char* info = "Request completed";
-      pctx.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
-      pctx.requestComplete = 0;
-    }
   }
 
   munmap(shmPtr, shmSize);
