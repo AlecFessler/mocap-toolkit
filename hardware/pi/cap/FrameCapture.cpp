@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <fcntl.h>
-#include <iostream>
 #include <memory>
 #include <pthread.h>
 #include <sched.h>
@@ -9,7 +8,6 @@
 #include <spawn.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "CameraHandler.h"
@@ -80,6 +78,34 @@ int main() {
     return spawnStatus;
   }
 
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(3, &cpuset);
+  if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
+    const char* err = "Failed to set CPU affinity";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
+
+  struct sched_param param;
+  param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+  if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
+    const char* err = "Failed to set real-time scheduling policy";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
+
+  std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
+  int buffersCount = 4;
+  std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
+  try {
+    pctx.cam = std::make_unique<CameraHandler>(resolution, buffersCount, frameDurationLimits);
+  } catch (const std::exception& e) {
+    const char* err = "Failed to initialize camera";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -EIO;
+  }
+
   struct sigaction action;
   pid_t pid = getpid();
   action.sa_sigaction = sig_handler;
@@ -91,23 +117,6 @@ int main() {
     const char* err = "Failed to set signal handler";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -EINVAL;
-  }
-
-  cpu_set_t cpuset;
-  CPU_ZERO(&cpuset);
-  CPU_SET(3, &cpuset);
-  if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
-    const char* err = "Failed to set CPU affinity, likely due to insufficient permissions";
-    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    return -EPERM;
-  }
-
-  struct sched_param param;
-  param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-  if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
-    const char* err = "Failed to set scheduler policy, likely due to insufficient permissions";
-    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    return -EPERM;
   }
 
   int fd;
@@ -124,17 +133,6 @@ int main() {
     return -errno;
   }
   close(fd);
-
-  std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
-  int buffersCount = 4;
-  std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
-  try {
-    pctx.cam = std::make_unique<CameraHandler>(resolution, buffersCount, frameDurationLimits);
-  } catch (const std::exception& e) {
-    const char* err = "Failed to initialize camera";
-    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    return -EIO;
-  }
 
   pctx.running = 1;
   while (pctx.running) {
