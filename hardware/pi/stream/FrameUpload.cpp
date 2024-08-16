@@ -1,6 +1,6 @@
 #include <fcntl.h>
-#include <iostream>
 #include <memory>
+#include <sched.h>
 #include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -16,6 +16,23 @@ int main() {
     logger = std::make_unique<Logger>("stream_logs.txt");
   } catch (const std::exception& e) {
     return -EIO;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(2, &cpuset);
+  if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
+    const char* err = "Failed to set CPU affinity";
+    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
+
+  struct sched_param param;
+  param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+  if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
+    const char* err = "Failed to set real-time scheduling policy";
+    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
   }
 
   const char* shmName = "/video_frames";
