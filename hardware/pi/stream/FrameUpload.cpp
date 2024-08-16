@@ -2,15 +2,20 @@
 #include <memory>
 #include <sched.h>
 #include <semaphore.h>
+#include <signal.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <iostream>
 
 #include "Logger.h"
 
 constexpr size_t IMAGE_BYTES = 1920 * 1080 * 3;
 
 int main() {
+  prctl(PR_SET_PDEATHSIG, SIGINT);
+
   std::unique_ptr<Logger> logger;
   try {
     logger = std::make_unique<Logger>("stream_logs.txt");
@@ -50,7 +55,7 @@ int main() {
     return -errno;
   }
 
-  void* shmPtr = mmap(nullptr, shmSize, PROT_READ, MAP_SHARED, shmFd, 0);
+  void* shmPtr = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
   if (shmPtr == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
@@ -63,7 +68,7 @@ int main() {
 
   while (true) {
     sem_wait(sem);
-    // Process frame
+    std::cout << "Received frame" << std::endl;
     sem_post(sem);
   }
 

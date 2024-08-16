@@ -36,6 +36,17 @@ int main() {
     return -EIO;
   }
 
+  std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
+  int buffersCount = 4;
+  std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
+  try {
+    pctx.cam = std::make_unique<CameraHandler>(resolution, buffersCount, frameDurationLimits);
+  } catch (const std::exception& e) {
+    const char* err = "Failed to initialize camera";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -EIO;
+  }
+
   const char* shmName = "/video_frames";
   size_t shmSize = IMAGE_BYTES + sizeof(sem_t);
   int shmFd = shm_open(shmName, O_CREAT | O_RDWR, 0666);
@@ -51,16 +62,17 @@ int main() {
     return -errno;
   }
 
-  void* shmPtr = mmap(nullptr, shmSize, PROT_WRITE, MAP_SHARED, shmFd, 0);
+  void* shmPtr = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
   if (shmPtr == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
   close(shmFd);
+  pctx.sharedMem = shmPtr;
 
   sem_t* sem = (sem_t*)((char*)shmPtr);
-  if (sem_init(sem, 1, 0) < 0) {
+  if (sem_init(sem, 1, 1) < 0) {
     const char* err = "Failed to initialize semaphore";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
@@ -93,17 +105,6 @@ int main() {
     const char* err = "Failed to set real-time scheduling policy";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
-  }
-
-  std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
-  int buffersCount = 4;
-  std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
-  try {
-    pctx.cam = std::make_unique<CameraHandler>(resolution, buffersCount, frameDurationLimits);
-  } catch (const std::exception& e) {
-    const char* err = "Failed to initialize camera";
-    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    return -EIO;
   }
 
   struct sigaction action;

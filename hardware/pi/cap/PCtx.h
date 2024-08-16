@@ -13,6 +13,7 @@ public:
   volatile sig_atomic_t running;
   std::unique_ptr<Logger> logger;
   std::unique_ptr<CameraHandler> cam;
+  void* sharedMem;
 
   static PCtx& getInstance() noexcept;
 

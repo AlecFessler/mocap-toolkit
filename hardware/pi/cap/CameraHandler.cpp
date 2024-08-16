@@ -1,3 +1,4 @@
+#include <semaphore.h>
 #include "CameraHandler.h"
 #include "Logger.h"
 
@@ -117,8 +118,11 @@ void CameraHandler::requestComplete(Request *request) {
   if (request->status() == Request::RequestCancelled)
     return;
 
+  static sem_t* sem = static_cast<sem_t*>(pctx_.sharedMem);
+  sem_wait(sem);
   const char* info = "Request completed";
   pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
+  sem_post(sem);
 
   request->reuse(Request::ReuseBuffers);
 }
