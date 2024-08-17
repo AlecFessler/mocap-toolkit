@@ -79,6 +79,7 @@ int main() {
   while (true) {
     sem_wait(captureSync);
     logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
+    // Process frame
     sem_post(captureSync);
     usleep(100);
   }
