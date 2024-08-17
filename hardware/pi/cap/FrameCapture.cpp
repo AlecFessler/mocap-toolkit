@@ -14,7 +14,9 @@
 #include "Logger.h"
 #include "PCtx.h"
 
-constexpr size_t IMAGE_BYTES = 1920 * 1080 * 3;
+constexpr unsigned int IMAGE_WIDTH = 1920;
+constexpr unsigned int IMAGE_HEIGHT = 1080;
+constexpr size_t IMAGE_BYTES = IMAGE_WIDTH * IMAGE_HEIGHT * 3;
 extern char **environ;
 
 void sig_handler(int signo, siginfo_t *info, void *context) {
@@ -36,7 +38,7 @@ int main() {
     return -EIO;
   }
 
-  std::pair<unsigned int, unsigned int> resolution = std::make_pair(1920, 1080);
+  std::pair<unsigned int, unsigned int> resolution = std::make_pair(IMAGE_WIDTH, IMAGE_HEIGHT);
   int buffersCount = 4;
   std::pair<std::int64_t, std::int64_t> frameDurationLimits = std::make_pair(16667, 16667);
   try {
@@ -48,37 +50,55 @@ int main() {
   }
 
   const char* shmName = "/video_frames";
-  size_t shmSize = IMAGE_BYTES + sizeof(sem_t);
-  int shmFd = shm_open(shmName, O_CREAT | O_RDWR, 0666);
-  if (shmFd < 0) {
+  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
+  auto shmDeleter = [shmName](int* fd) {
+    if (fd && *fd >= 0) {
+      close(*fd);
+      shm_unlink(shmName);
+    }
+    delete fd;
+  };
+  int shm_fd = shm_open(shmName, O_CREAT | O_RDWR, 0666);
+  if (shm_fd < 0) {
     const char* err = "Failed to open shared memory";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
+  std::unique_ptr<int, decltype(shmDeleter)> shmFd(new int(shm_fd), shmDeleter);
 
-  if (ftruncate(shmFd, shmSize) < 0) {
+  if (ftruncate(*shmFd.get(), shmSize) < 0) {
     const char* err = "Failed to truncate shared memory";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  void* shmPtr = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
-  if (shmPtr == MAP_FAILED) {
+  auto munmapDeleter = [shmSize](void* ptr) {
+    if (ptr && ptr != MAP_FAILED)
+      munmap(ptr, shmSize);
+  };
+  std::unique_ptr<void, decltype(munmapDeleter)> shmPtr(mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, *shmFd.get(), 0), munmapDeleter);
+  if (shmPtr.get() == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
-  close(shmFd);
-  pctx.sharedMem = shmPtr;
+  pctx.sharedMem = shmPtr.get();
 
-  sem_t* sem = (sem_t*)((char*)shmPtr);
-  if (sem_init(sem, 1, 1) < 0) {
-    const char* err = "Failed to initialize semaphore";
+#define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
+
+  sem_t* childProcessReady = CAST_SHM(sem_t*, 0);
+  if (sem_init(childProcessReady, 1, 0) < 0) {
+    const char* err = "Failed to initialize child process ready semaphore";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  unsigned char* frame = (unsigned char*)((char*)shmPtr + sizeof(sem_t));
+  sem_t* captureSync = CAST_SHM(sem_t*, sizeof(sem_t));
+  if (sem_init(captureSync, 1, 1) < 0) {
+    const char* err = "Failed to initialize capture sync semaphore";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
 
   pid_t childPid;
   char* path = (char*)"/home/afessler/Documents/video_capture/framestream";
@@ -117,7 +137,7 @@ int main() {
       sigaction(SIGTERM, &action, NULL) < 0) {
     const char* err = "Failed to set signal handler";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    return -EINVAL;
+    return -errno;
   }
 
   int fd;
@@ -135,13 +155,11 @@ int main() {
   }
   close(fd);
 
+  sem_wait(childProcessReady);
   pctx.running = 1;
   while (pctx.running) {
     pause();
   }
-
-  munmap(shmPtr, shmSize);
-  shm_unlink(shmName);
 
   return 0;
 }

@@ -117,11 +117,13 @@ void CameraHandler::queueRequest() {
 void CameraHandler::requestComplete(Request *request) {
   if (request->status() == Request::RequestCancelled)
     return;
-
-  static sem_t* sem = static_cast<sem_t*>(pctx_.sharedMem);
-  sem_wait(sem);
+#define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(pctx_.sharedMem) + offset)
+  static sem_t* sem = CAST_SHM(sem_t*, sizeof(sem_t));
+  static unsigned char* imageBuffer = CAST_SHM(unsigned char*, sizeof(sem_t) * 2);
   const char* info = "Request completed";
   pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
+  sem_wait(sem);
+  // Write image to shared memory
   sem_post(sem);
 
   request->reuse(Request::ReuseBuffers);
