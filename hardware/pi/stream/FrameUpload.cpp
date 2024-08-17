@@ -41,7 +41,7 @@ int main() {
   }
 
   const char* shmName = "/video_frames";
-  size_t shmSize = IMAGE_BYTES + sizeof(sem_t);
+  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
   int shmFd = shm_open(shmName, O_RDWR, 0666);
   if (shmFd < 0) {
     const char* err = "Failed to open shared memory";
@@ -52,27 +52,36 @@ int main() {
   if (ftruncate(shmFd, shmSize) < 0) {
     const char* err = "Failed to truncate shared memory";
     logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    close(shmFd);
     return -errno;
   }
 
-  void* shmPtr = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
-  if (shmPtr == MAP_FAILED) {
+  auto munmapDeleter = [shmSize](void* ptr) {
+    if (ptr && ptr != MAP_FAILED) {
+      munmap(ptr, shmSize);
+    }
+  };
+  std::unique_ptr<void, decltype(munmapDeleter)> shmPtr(mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0), munmapDeleter);
+  if (shmPtr.get() == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    close(shmFd);
     return -errno;
   }
   close(shmFd);
 
-  sem_t* sem = (sem_t*)((char*)shmPtr);
-  unsigned char* frame = (unsigned char*)((char*)shmPtr + sizeof(sem_t));
+#define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
+  sem_t* processReady = CAST_SHM(sem_t*, 0);
+  sem_t* captureSync = CAST_SHM(sem_t*, sizeof(sem_t));
+  unsigned char* frame = CAST_SHM(unsigned char*, sizeof(sem_t) * 2);
 
+  sem_post(processReady);
   while (true) {
-    sem_wait(sem);
-    std::cout << "Received frame" << std::endl;
-    sem_post(sem);
+    sem_wait(captureSync);
+    logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
+    sem_post(captureSync);
+    usleep(100);
   }
-
-  munmap(shmPtr, shmSize);
 
   return 0;
 }
