@@ -7,14 +7,21 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <iostream>
 
 #include "Logger.h"
 
 constexpr size_t IMAGE_BYTES = 1920 * 1080 * 3;
 
 int main() {
+  /*******************************************/
+  /* Ensure process is killed if parent dies */
+  /*******************************************/
+
   prctl(PR_SET_PDEATHSIG, SIGINT);
+
+  /*************************/
+  /* Initialize the logger */
+  /*************************/
 
   std::unique_ptr<Logger> logger;
   try {
@@ -22,6 +29,10 @@ int main() {
   } catch (const std::exception& e) {
     return -EIO;
   }
+
+  /*****************************/
+  /* Pin the process to core 2 */
+  /*****************************/
 
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
@@ -32,6 +43,10 @@ int main() {
     return -errno;
   }
 
+  /***************************************************/
+  /* Set scheduling policy to FIFO with max priority */
+  /***************************************************/
+
   struct sched_param param;
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
@@ -39,6 +54,15 @@ int main() {
     logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
+
+  /**********************************************************/
+  /* Open shared memory to size of 2 semaphores and 1 frame */
+  /*                                                        */
+  /* shared memory structure:                               */
+  /*  - processReady semaphore                              */
+  /*  - captureSync semaphore                               */
+  /*  - image frame                                         */
+  /**********************************************************/
 
   const char* shmName = "/video_frames";
   size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
@@ -56,6 +80,10 @@ int main() {
     return -errno;
   }
 
+  /**********************************/
+  /* Map shared memory into process */
+  /**********************************/
+
   auto munmapDeleter = [shmSize](void* ptr) {
     if (ptr && ptr != MAP_FAILED) {
       munmap(ptr, shmSize);
@@ -70,10 +98,18 @@ int main() {
   }
   close(shmFd);
 
-#define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
+  /************************************/
+  /* Set up pointers to shared memory */
+  /************************************/
+
+  #define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
   sem_t* processReady = CAST_SHM(sem_t*, 0);
   sem_t* captureSync = CAST_SHM(sem_t*, sizeof(sem_t));
   unsigned char* frame = CAST_SHM(unsigned char*, sizeof(sem_t) * 2);
+
+  /*******************************************************/
+  /* Signal ready to parent process then wait for frames */
+  /*******************************************************/
 
   sem_post(processReady);
   while (true) {
@@ -81,6 +117,7 @@ int main() {
     logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
     // Process frame
     sem_post(captureSync);
+    // prevent tight loop from locking up the semaphore
     usleep(100);
   }
 

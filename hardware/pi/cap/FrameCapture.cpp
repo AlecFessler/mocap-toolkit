@@ -31,12 +31,21 @@ void sig_handler(int signo, siginfo_t *info, void *context) {
 }
 
 int main() {
+
+  /*************************/
+  /* Initialize the logger */
+  /*************************/
+
   PCtx& pctx = PCtx::getInstance();
   try {
     pctx.logger = std::make_unique<Logger>("cap_logs.txt");
   } catch (const std::exception& e) {
     return -EIO;
   }
+
+  /*************************/
+  /* Initialize the camera */
+  /*************************/
 
   std::pair<unsigned int, unsigned int> resolution = std::make_pair(IMAGE_WIDTH, IMAGE_HEIGHT);
   int buffersCount = 4;
@@ -48,6 +57,10 @@ int main() {
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -EIO;
   }
+
+  /************************************************************************/
+  /* Initialize shared memory to the size of the image and two semaphores */
+  /************************************************************************/
 
   const char* shmName = "/video_frames";
   size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
@@ -72,6 +85,10 @@ int main() {
     return -errno;
   }
 
+  /****************************************/
+  /* Map the shared memory to the process */
+  /****************************************/
+
   auto munmapDeleter = [shmSize](void* ptr) {
     if (ptr && ptr != MAP_FAILED)
       munmap(ptr, shmSize);
@@ -84,7 +101,11 @@ int main() {
   }
   pctx.sharedMem = shmPtr.get();
 
-#define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
+  /*****************************/
+  /* Initialize the semaphores */
+  /*****************************/
+
+  #define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
 
   sem_t* childProcessReady = CAST_SHM(sem_t*, 0);
   if (sem_init(childProcessReady, 1, 0) < 0) {
@@ -100,6 +121,10 @@ int main() {
     return -errno;
   }
 
+  /***************************/
+  /* Spawn the child process */
+  /***************************/
+
   pid_t childPid;
   char* path = (char*)"/home/afessler/Documents/video_capture/framestream";
   char *argv[] = {path, nullptr};
@@ -110,6 +135,10 @@ int main() {
     return spawnStatus;
   }
 
+  /*****************************/
+  /* Pin the process to core 3 */
+  /*****************************/
+
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(3, &cpuset);
@@ -119,6 +148,10 @@ int main() {
     return -errno;
   }
 
+  /*******************************************************/
+  /* Set the scheduling policy to FIFO with max priority */
+  /*******************************************************/
+
   struct sched_param param;
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
@@ -126,6 +159,10 @@ int main() {
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
+
+  /**************************/
+  /* Set the signal handler */
+  /**************************/
 
   struct sigaction action;
   pid_t pid = getpid();
@@ -139,6 +176,10 @@ int main() {
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
+
+  /***********************************************/
+  /* Register the process with the kernel module */
+  /***********************************************/
 
   int fd;
   fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
@@ -154,6 +195,10 @@ int main() {
     return -errno;
   }
   close(fd);
+
+  /***************************************************************/
+  /* Wait for the child process, then begin and wait for signals */
+  /***************************************************************/
 
   sem_wait(childProcessReady);
   pctx.running = 1;
