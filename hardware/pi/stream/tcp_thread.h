@@ -1,12 +1,14 @@
 #ifndef TCP_THREAD_H
 #define TCP_THREAD_H
 
-#include <queue>
-#include <mutex>
 #include <pthread.h>
+#include <queue>
+#include <memory>
+#include <mutex>
+#include "shared_defs.h"
 
 struct shared_data {
-  std::queue<void*> queue;
+  std::queue<std::unique_ptr<unsigned char[]>> queue;
   pthread_mutex_t mutex;
 };
 

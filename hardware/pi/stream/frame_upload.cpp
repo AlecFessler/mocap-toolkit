@@ -1,3 +1,4 @@
+#include <cstring>
 #include <fcntl.h>
 #include <memory>
 #include <sched.h>
@@ -66,6 +67,9 @@ int main() {
   pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
   pthread_mutex_init(&child_thread_data.mutex, &attr);
 
+  std::queue<std::unique_ptr<unsigned char[]>>& queue = child_thread_data.queue;
+  pthread_mutex_t& mutex = child_thread_data.mutex;
+
   pthread_t child_thread;
   pthread_create(&child_thread, nullptr, tcp_thread, &child_thread_data);
 
@@ -120,7 +124,7 @@ int main() {
   sem_t* process_ready = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 0);
   sem_t* img_write_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t));
   sem_t* img_read_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 2 * sizeof(sem_t));
-  void* img_data = PTR_MATH_CAST(void, shared_mem_ptr.get(), 3 * sizeof(sem_t));
+  unsigned char* img_data = PTR_MATH_CAST(unsigned char, shared_mem_ptr.get(), 3 * sizeof(sem_t));
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */
@@ -130,10 +134,19 @@ int main() {
   while (true) {
     sem_wait(img_read_sem);
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Frame received");
-    pthread_mutex_lock(&child_thread_data.mutex);
-    // push image to shared queue
+
+    auto img_buffer = std::make_unique<unsigned char[]>(IMAGE_BYTES);
+    if (!img_buffer) {
+      const char* err = "Failed to allocate memory for image buffer";
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    }
+    memcpy(img_buffer.get(), img_data, IMAGE_BYTES);
+
+    pthread_mutex_lock(&mutex);
+    queue.push(std::move(img_buffer));
+    pthread_mutex_unlock(&mutex);
+
     sem_post(img_write_sem);
-    pthread_mutex_unlock(&child_thread_data.mutex);
   }
 
   return 0;

@@ -6,7 +6,16 @@
 #include <sys/prctl.h>
 
 void* tcp_thread(void* shared_data_ptr) {
+
+  /***************************************************/
+  /* Ensure thread is terminated with parent process */
+  /***************************************************/
+
   prctl(PR_SET_PDEATHSIG, SIGTERM);
+
+  /*********************/
+  /* Initialize logger */
+  /*********************/
 
   std::unique_ptr<logger_t> logger;
   try {
@@ -14,6 +23,10 @@ void* tcp_thread(void* shared_data_ptr) {
   } catch (const std::exception& e) {
     return nullptr;
   }
+
+  /*****************************************************************************/
+  /* Set real-time scheduling policy to one less than max (and parent process) */
+  /*****************************************************************************/
 
   struct sched_param param;
   param.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
@@ -23,14 +36,22 @@ void* tcp_thread(void* shared_data_ptr) {
     return nullptr;
   }
 
+  /*************************************/
+  /* Cast shared data and grab handles */
+  /*************************************/
+
   shared_data* s_data = static_cast<shared_data*>(shared_data_ptr);
-  std::queue<void*>& queue = s_data->queue;
+  std::queue<std::unique_ptr<unsigned char[]>>& queue = s_data->queue;
   pthread_mutex_t& mutex = s_data->mutex;
+
+  /***********************************************************/
+  /* Poll queue for images, and send over tcp when available */
+  /***********************************************************/
 
   while (true) {
     pthread_mutex_lock(&mutex);
     if (!queue.empty()) {
-      void* image = queue.front();
+      unsigned char* image = queue.front().get();
       queue.pop();
       static const char* info = "Received image from queue";
       logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
