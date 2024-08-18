@@ -8,8 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "Logger.h"
-#include "SharedDefs.h"
+#include "logger.h"
+#include "shared_defs.h"
 #include "tcp_thread.h"
 
 
@@ -24,9 +24,9 @@ int main() {
   /* Initialize the logger */
   /*************************/
 
-  std::unique_ptr<Logger> logger;
+  std::unique_ptr<logger_t> logger;
   try {
-    logger = std::make_unique<Logger>("stream_logs.txt");
+    logger = std::make_unique<logger_t>("stream_logs.txt");
   } catch (const std::exception& e) {
     return -EIO;
   }
@@ -40,7 +40,7 @@ int main() {
   CPU_SET(2, &cpuset);
   if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
     const char* err = "Failed to set CPU affinity";
-    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
@@ -52,7 +52,7 @@ int main() {
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
     const char* err = "Failed to set real-time scheduling policy";
-    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
@@ -73,25 +73,25 @@ int main() {
   /* Open memory shared with parent process                 */
   /*                                                        */
   /* shared memory structure:                               */
-  /*  - processReady semaphore                              */
-  /*  - imgWriteSem semaphore                               */
-  /*  - imgReadSem semaphore                                */
+  /*  - process_ready semaphore                             */
+  /*  - img_write_sem semaphore                             */
+  /*  - img_read_sem semaphore                              */
   /*  - image frame                                         */
   /**********************************************************/
 
-  const char* shmName = "/video_frames";
-  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 3;
-  int shmFd = shm_open(shmName, O_RDWR, 0666);
-  if (shmFd < 0) {
+  const char* shared_mem_name = "/video_frames";
+  size_t shared_mem_size = IMAGE_BYTES + sizeof(sem_t) * 3;
+  int shared_mem_fd = shm_open(shared_mem_name, O_RDWR, 0666);
+  if (shared_mem_fd < 0) {
     const char* err = "Failed to open shared memory";
-    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  if (ftruncate(shmFd, shmSize) < 0) {
+  if (ftruncate(shared_mem_fd, shared_mem_size) < 0) {
     const char* err = "Failed to truncate shared memory";
-    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    close(shmFd);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    close(shared_mem_fd);
     return -errno;
   }
 
@@ -99,40 +99,40 @@ int main() {
   /* Map shared memory into process */
   /**********************************/
 
-  auto munmapDeleter = [shmSize](void* ptr) {
+  auto mmap_cleanup = [shared_mem_size](void* ptr) {
     if (ptr && ptr != MAP_FAILED) {
-      munmap(ptr, shmSize);
+      munmap(ptr, shared_mem_size);
     }
   };
-  std::unique_ptr<void, decltype(munmapDeleter)> shmPtr(mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0), munmapDeleter);
-  if (shmPtr.get() == MAP_FAILED) {
+  std::unique_ptr<void, decltype(mmap_cleanup)> shared_mem_ptr(mmap(nullptr, shared_mem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shared_mem_fd, 0), mmap_cleanup);
+  if (shared_mem_ptr.get() == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
-    logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    close(shmFd);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    close(shared_mem_fd);
     return -errno;
   }
-  close(shmFd);
+  close(shared_mem_fd);
 
   /************************************/
   /* Set up pointers to shared memory */
   /************************************/
 
-  sem_t* processReady = PTR_MATH_CAST(sem_t, shmPtr.get(), 0);
-  sem_t* imgWriteSem = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
-  sem_t* imgReadSem = PTR_MATH_CAST(sem_t, shmPtr.get(), 2 * sizeof(sem_t));
-  unsigned char* frame = PTR_MATH_CAST(unsigned char, shmPtr.get(), 3 * sizeof(sem_t));
+  sem_t* process_ready = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 0);
+  sem_t* img_write_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t));
+  sem_t* img_read_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 2 * sizeof(sem_t));
+  unsigned char* img_data = PTR_MATH_CAST(unsigned char, shared_mem_ptr.get(), 3 * sizeof(sem_t));
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */
   /*******************************************************/
 
-  sem_post(processReady);
+  sem_post(process_ready);
   while (true) {
-    sem_wait(imgReadSem);
-    logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
+    sem_wait(img_read_sem);
+    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Frame received");
     pthread_mutex_lock(&child_thread_data.mutex);
     // push image to shared queue
-    sem_post(imgWriteSem);
+    sem_post(img_write_sem);
     pthread_mutex_unlock(&child_thread_data.mutex);
   }
 

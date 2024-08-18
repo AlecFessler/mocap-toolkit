@@ -1,26 +1,24 @@
 #include <cstring>
 #include <semaphore.h>
 #include <sys/mman.h>
-#include "CameraHandler.h"
-#include "SharedDefs.h"
-#include "Logger.h"
+#include "camera_handler.h"
+#include "shared_defs.h"
+#include "logger.h"
 
-using namespace libcamera;
-
-CameraHandler::CameraHandler(
+camera_handler_t::camera_handler_t(
   std::pair<unsigned int, unsigned int> resolution,
-  int bufferCount,
-  std::pair<std::int64_t, std::int64_t> frameDurationLimits
-) : pctx_(PCtx::getInstance()), nextRequestIndex_(0) {
+  int buffer_count,
+  std::pair<std::int64_t, std::int64_t> frame_duration_limits
+) : p_ctx_(p_ctx_t::get_instance()), next_req_idx_(0) {
 
   /*********************************/
   /* Initialize the Camera Manager */
   /*********************************/
 
-  cm_ = std::make_unique<CameraManager>();
+  cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -31,7 +29,7 @@ CameraHandler::CameraHandler(
   auto cameras = cm_->cameras();
   if (cameras.empty()) {
     const char* err = "No cameras available";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -42,12 +40,12 @@ CameraHandler::CameraHandler(
   camera_ = cm_->get(cameras[0]->id());
   if (!camera_) {
     const char* err = "Failed to retrieve camera";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
   if (camera_->acquire() < 0) {
     const char* err = "Failed to acquire camera";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -55,10 +53,10 @@ CameraHandler::CameraHandler(
   /* Generate the camera configuration */
   /*************************************/
 
-  config_ = camera_->generateConfiguration({ StreamRole::VideoRecording });
+  config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -66,21 +64,21 @@ CameraHandler::CameraHandler(
   /* Adjust the configuration to based on input parameters */
   /*********************************************************/
 
-  StreamConfiguration &cfg = config_->at(0);
+  libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.size = { resolution.first, resolution.second };
-  cfg.bufferCount = bufferCount;
+  cfg.bufferCount = buffer_count;
 
   /**************************************************/
   /* Validate and possibly adjust the configuration */
   /**************************************************/
 
-  if (config_->validate() == CameraConfiguration::Invalid) {
+  if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
-  } else if (config_->validate() == CameraConfiguration::Adjusted) {
+  } else if (config_->validate() == libcamera::CameraConfiguration::Adjusted) {
     const char* err = "Adjusted invalid camera configuration";
-    pctx_.logger->log(Logger::Level::WARNING, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::WARNING, __FILE__, __LINE__, err);
   }
 
   /***************************/
@@ -89,7 +87,7 @@ CameraHandler::CameraHandler(
 
   if (camera_->configure(config_.get()) < 0) {
     const char* err = "Failed to configure camera";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -97,11 +95,11 @@ CameraHandler::CameraHandler(
   /* Allocate buffers */
   /********************/
 
-  allocator_ = std::make_unique<FrameBufferAllocator>(camera_);
+  allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
   stream_ = cfg.stream();
   if (allocator_->allocate(stream_) < 0) {
     const char* err = "Failed to allocate buffers";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -109,25 +107,25 @@ CameraHandler::CameraHandler(
   /* Create requests, add buffers, and map buffers into shared memory */
   /********************************************************************/
 
-  uint64_t reqCookie = 0; // maps request to index in mmapBuffers_
-  for (const std::unique_ptr<FrameBuffer> &buffer : allocator_->buffers(stream_)) {
-    std::unique_ptr<Request> request = camera_->createRequest(reqCookie++);
+  uint64_t req_cookie = 0; // maps request to index in mmap_buffers_
+  for (const std::unique_ptr<libcamera::FrameBuffer>& buffer : allocator_->buffers(stream_)) {
+    std::unique_ptr<libcamera::Request> request = camera_->createRequest(req_cookie++);
     if (!request) {
       const char* err = "Failed to create request";
-      pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
     if (request->addBuffer(stream_, buffer.get()) < 0) {
       const char* err = "Failed to add buffer to request";
-      pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
     requests_.push_back(std::move(request));
 
-    const libcamera::FrameBuffer::Plane &plane = buffer->planes()[0];
+    const libcamera::FrameBuffer::Plane& plane = buffer->planes()[0];
     if (IMAGE_BYTES != plane.length) {
       const char* err = "Image size does not match expected size";
-      pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
@@ -141,29 +139,29 @@ CameraHandler::CameraHandler(
     ));
 
     if (data == MAP_FAILED) {
-      pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, "mmap failed");
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "mmap failed");
       throw std::runtime_error("Failed to mmap plane data");
     }
 
-    mmapBuffers_.push_back(data);
+    mmap_buffers_.push_back(data);
   }
 
   /**************************************************************************/
   /* Set request complete callback and start camera with specified controls */
   /**************************************************************************/
 
-  camera_->requestCompleted.connect(this, &CameraHandler::requestComplete);
-  controls_ = std::make_unique<ControlList>();
-  controls_->set(controls::FrameDurationLimits, Span<const std::int64_t, 2>({ frameDurationLimits.first, frameDurationLimits.second }));
+  camera_->requestCompleted.connect(this,& camera_handler_t::request_complete);
+  controls_ = std::make_unique<libcamera::ControlList>();
+  controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_limits.first, frame_duration_limits.second }));
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 }
 
-CameraHandler::~CameraHandler() {
-  for (unsigned char* data : mmapBuffers_)
+camera_handler_t::~camera_handler_t() {
+  for (unsigned char* data : mmap_buffers_)
     munmap(data, IMAGE_BYTES);
   camera_->stop();
   allocator_->free(stream_);
@@ -172,7 +170,7 @@ CameraHandler::~CameraHandler() {
   cm_->stop();
 }
 
-void CameraHandler::queueRequest() {
+void camera_handler_t::queue_request() {
   /**
    * Queue the next request in the sequence.
    *
@@ -184,16 +182,16 @@ void CameraHandler::queueRequest() {
    * Throws:
    *  - std::runtime_error: Failed to queue request
    */
-  size_t index = nextRequestIndex_.load();
+  size_t index = next_req_idx_.load();
   if (camera_->queueRequest(requests_[index].get()) < 0) {
     const char* err = "Failed to queue request";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-  nextRequestIndex_.store((index + 1) % requests_.size());
+  next_req_idx_.store((index + 1) % requests_.size());
 }
 
-void CameraHandler::requestComplete(Request *request) {
+void camera_handler_t::request_complete(libcamera::Request* request) {
   /**
    * Callback for when a request is completed.
    *
@@ -202,27 +200,27 @@ void CameraHandler::requestComplete(Request *request) {
    *
    * The shared memory is structured as follows:
    * - sem_t sem (not used here)
-   * - sem_t imgWriteSem
-   * - sem_t imgReadSem
+   * - sem_t img_write_sem
+   * - sem_t img_read_sem
    * - unsigned char imageBuffer[IMAGE_BYTES]
    *
    * Parameters:
    *  - request: The completed request
    */
-  if (request->status() == Request::RequestCancelled)
+  if (request->status() == libcamera::Request::RequestCancelled)
     return;
 
   const char* info = "Request completed";
-  pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
+  p_ctx_.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
-  static sem_t* imgWriteSem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, sizeof(sem_t));
-  static sem_t* imgReadSem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, 2 * sizeof(sem_t));
-  static unsigned char* sharedBuffer = PTR_MATH_CAST(unsigned char, pctx_.sharedMem, 3 * sizeof(sem_t));
+  static sem_t* img_write_sem = PTR_MATH_CAST(sem_t, p_ctx_.shared_mem, sizeof(sem_t));
+  static sem_t* img_read_sem = PTR_MATH_CAST(sem_t, p_ctx_.shared_mem, 2 * sizeof(sem_t));
+  static unsigned char* shared_img_buffer = PTR_MATH_CAST(unsigned char, p_ctx_.shared_mem, 3 * sizeof(sem_t));
 
-  unsigned char* data = mmapBuffers_[request->cookie()];
-  sem_wait(imgWriteSem);
-  memcpy(sharedBuffer, data, IMAGE_BYTES);
-  sem_post(imgReadSem);
+  unsigned char* data = mmap_buffers_[request->cookie()];
+  sem_wait(img_write_sem);
+  memcpy(shared_img_buffer, data, IMAGE_BYTES);
+  sem_post(img_read_sem);
 
-  request->reuse(Request::ReuseBuffers);
+  request->reuse(libcamera::Request::ReuseBuffers);
 }

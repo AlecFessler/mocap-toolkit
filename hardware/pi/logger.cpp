@@ -1,33 +1,33 @@
-#include "Logger.h"
+#include "logger.h"
 
 #include <cstring>
 #include <fcntl.h>
-#include <sys/time.h>
 #include <stdexcept>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
-Logger::Logger(const char* filename) {
+logger_t::logger_t(const char* filename) {
   fd_ = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd_ < 0)
     throw std::runtime_error("Failed to open log file");
 }
 
-Logger::~Logger() {
+logger_t::~logger_t() {
   if (fd_ >= 0) close(fd_);
 }
 
-static const char* levelToStr(Logger::Level level) {
+static const char* level_to_str(logger_t::level_t level) {
   constexpr const char* levels[] = {"INFO", "WARNING", "ERROR", "UNKNOWN"};
   switch (level) {
-    case Logger::Level::INFO: return levels[0];
-    case Logger::Level::WARNING: return levels[1];
-    case Logger::Level::ERROR: return levels[2];
+    case logger_t::level_t::INFO: return levels[0];
+    case logger_t::level_t::WARNING: return levels[1];
+    case logger_t::level_t::ERROR: return levels[2];
     default: return levels[3];
   }
 }
 
-static void intToStr(int value, char* buffer, int& offset) {
+static void i_to_str(int value, char* buffer, int& offset) {
   /**
    * Async-signal-safe integer to string conversion
    *
@@ -103,23 +103,23 @@ static void timestamp(char* buffer, int& offset) {
 
   int year = 1970;
   while (true) {
-    int secondsInYear = LEAP_YEAR(year) ?
+    int seconds_in_year = LEAP_YEAR(year) ?
                         SECONDS_PER_LEAP_YEAR :
                         SECONDS_PER_YEAR;
-    if (seconds < secondsInYear)
+    if (seconds < seconds_in_year)
       break;
-    seconds -= secondsInYear;
+    seconds -= seconds_in_year;
     year++;
   }
 
   int month = 1;
   while (true) {
-    int secondsInMonth = LEAP_YEAR(year) && month == 2 ?
+    int seconds_in_month = LEAP_YEAR(year) && month == 2 ?
                          SECONDS_PER_MONTH[0] :
                          SECONDS_PER_MONTH[month];
-    if (seconds < secondsInMonth)
+    if (seconds < seconds_in_month)
       break;
-    seconds -= secondsInMonth;
+    seconds -= seconds_in_month;
     month++;
   }
 
@@ -133,42 +133,42 @@ static void timestamp(char* buffer, int& offset) {
   nanos %= NANOS_PER_MILLISECOND;
   int micros = nanos / NANOS_PER_MICROSECOND;
 
-  intToStr(year, buffer, offset);
+  i_to_str(year, buffer, offset);
   buffer[offset++] = '-';
   if (month < 10)
     buffer[offset++] = '0';
-  intToStr(month, buffer, offset);
+  i_to_str(month, buffer, offset);
   buffer[offset++] = '-';
   if (day < 10)
     buffer[offset++] = '0';
-  intToStr(day, buffer, offset);
+  i_to_str(day, buffer, offset);
   buffer[offset++] = ' ';
   if (hour < 10)
     buffer[offset++] = '0';
-  intToStr(hour, buffer, offset);
+  i_to_str(hour, buffer, offset);
   buffer[offset++] = ':';
   if (minute < 10)
     buffer[offset++] = '0';
-  intToStr(minute, buffer, offset);
+  i_to_str(minute, buffer, offset);
   buffer[offset++] = ':';
   if (seconds < 10)
     buffer[offset++] = '0';
-  intToStr(seconds, buffer, offset);
+  i_to_str(seconds, buffer, offset);
   buffer[offset++] = '.';
   if (millis < 100)
     buffer[offset++] = '0';
   if (millis < 10)
     buffer[offset++] = '0';
-  intToStr(millis, buffer, offset);
+  i_to_str(millis, buffer, offset);
   if (micros < 100)
     buffer[offset++] = '0';
   if (micros < 10)
     buffer[offset++] = '0';
-  intToStr(micros, buffer, offset);
+  i_to_str(micros, buffer, offset);
   buffer[offset++] = 'Z';
 }
 
-void Logger::log(Logger::Level level, const char* file, int line, const char* message) {
+void logger_t::log(logger_t::level_t level, const char* file, int line, const char* message) {
   /**
    * Async-signal-safe logging function
    *
@@ -189,14 +189,14 @@ void Logger::log(Logger::Level level, const char* file, int line, const char* me
   timestamp(buffer, offset);
   buffer[offset++] = ' ';
   buffer[offset++] = '[';
-  for (const char* levelStr = levelToStr(level); *levelStr; levelStr++)
-    buffer[offset++] = *levelStr;
+  for (const char* level_str = level_to_str(level); *level_str; level_str++)
+    buffer[offset++] = *level_str;
   buffer[offset++] = ']';
   buffer[offset++] = ' ';
   for (const char* c = file; *c; c++)
     buffer[offset++] = *c;
   buffer[offset++] = ':';
-  intToStr(line, buffer, offset);
+  i_to_str(line, buffer, offset);
   buffer[offset++] = ':';
   buffer[offset++] = ' ';
   for (const char* c = message; *c; c++)
