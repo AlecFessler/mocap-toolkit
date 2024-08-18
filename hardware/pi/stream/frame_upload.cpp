@@ -138,8 +138,8 @@ int main() {
     memcpy(img_buffer.get(), img_data, IMAGE_BYTES);
 
     pthread_mutex_lock(&mutex);
-    pthread_cond_signal(&child_thread_data.cond);
     queue.push(std::move(img_buffer));
+    pthread_cond_signal(&child_thread_data.cond);
     pthread_mutex_unlock(&mutex);
 
     sem_post(&img_write_sem);
