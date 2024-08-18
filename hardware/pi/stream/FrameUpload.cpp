@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "ImageConstants.h"
+#include "SharedDefs.h"
 #include "Logger.h"
 
 
@@ -102,10 +102,9 @@ int main() {
   /* Set up pointers to shared memory */
   /************************************/
 
-  #define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
-  sem_t* processReady = CAST_SHM(sem_t*, 0);
-  sem_t* captureSync = CAST_SHM(sem_t*, sizeof(sem_t));
-  unsigned char* frame = CAST_SHM(unsigned char*, sizeof(sem_t) * 2);
+  sem_t* processReady = PTR_MATH_CAST(sem_t, shmPtr.get(), 0);
+  sem_t* captureSync = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
+  unsigned char* frame = PTR_MATH_CAST(unsigned char, shmPtr.get(), 2 * sizeof(sem_t));
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */
@@ -117,7 +116,7 @@ int main() {
     logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
     // Process frame
     sem_post(captureSync);
-    // prevent tight loop from locking up the semaphore
+    // prevent tight loop from locking up semaphore indefinitely
     usleep(100);
   }
 

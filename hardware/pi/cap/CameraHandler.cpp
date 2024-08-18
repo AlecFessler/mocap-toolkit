@@ -2,9 +2,8 @@
 #include <semaphore.h>
 #include <sys/mman.h>
 #include "CameraHandler.h"
-#include "ImageConstants.h"
+#include "SharedDefs.h"
 #include "Logger.h"
-#include <iostream>
 
 using namespace libcamera;
 
@@ -211,32 +210,16 @@ void CameraHandler::requestComplete(Request *request) {
    */
   if (request->status() == Request::RequestCancelled)
     return;
-  #define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(pctx_.sharedMem) + offset)
-  static sem_t* sem = CAST_SHM(sem_t*, sizeof(sem_t));
-  static unsigned char* imageBuffer = CAST_SHM(unsigned char*, sizeof(sem_t) * 2);
 
   const char* info = "Request completed";
   pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
 
+  static sem_t* sem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, sizeof(sem_t));
+  static unsigned char* sharedBuffer = PTR_MATH_CAST(unsigned char, pctx_.sharedMem, 2 * sizeof(sem_t));
+
   unsigned char* data = mmapBuffers_[request->cookie()];
-
-  if (data == nullptr) {
-    const char* err = "data is nullptr";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
-  }
-
-  if (imageBuffer == nullptr) {
-    const char* err = "imageBuffer is nullptr";
-    pctx_.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
-  }
-
-  std::cout << static_cast<void*>(data) << std::endl;
-  std::cout << static_cast<void*>(imageBuffer) << std::endl;
-
   sem_wait(sem);
-  memcpy(imageBuffer, data, IMAGE_BYTES);
+  memcpy(sharedBuffer, data, IMAGE_BYTES);
   sem_post(sem);
 
   request->reuse(Request::ReuseBuffers);

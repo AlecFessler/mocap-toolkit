@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "CameraHandler.h"
-#include "ImageConstants.h"
+#include "SharedDefs.h"
 #include "Logger.h"
 #include "PCtx.h"
 
@@ -103,16 +103,14 @@ int main() {
   /* Initialize the semaphores */
   /*****************************/
 
-  #define CAST_SHM(type, offset) reinterpret_cast<type>(reinterpret_cast<char*>(shmPtr.get()) + offset)
-
-  sem_t* childProcessReady = CAST_SHM(sem_t*, 0);
+  sem_t* childProcessReady = PTR_MATH_CAST(sem_t, shmPtr.get(), 0);
   if (sem_init(childProcessReady, 1, 0) < 0) {
     const char* err = "Failed to initialize child process ready semaphore";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  sem_t* captureSync = CAST_SHM(sem_t*, sizeof(sem_t));
+  sem_t* captureSync = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
   if (sem_init(captureSync, 1, 1) < 0) {
     const char* err = "Failed to initialize capture sync semaphore";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
