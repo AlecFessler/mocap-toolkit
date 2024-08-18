@@ -15,10 +15,6 @@ struct shared_data {
   pthread_cond_t cond;
 
   shared_data(volatile sig_atomic_t& running_ref) : running(running_ref), mutex(PTHREAD_MUTEX_INITIALIZER), cond(PTHREAD_COND_INITIALIZER) {};
-  ~shared_data() {
-    pthread_mutex_destroy(&mutex);
-    pthread_cond_destroy(&cond);
-  }
 };
 
 void* tcp_thread(void* shared_data);
