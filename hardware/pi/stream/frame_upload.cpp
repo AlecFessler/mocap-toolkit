@@ -120,7 +120,7 @@ int main() {
   sem_t* process_ready = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 0);
   sem_t* img_write_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t));
   sem_t* img_read_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 2 * sizeof(sem_t));
-  unsigned char* img_data = PTR_MATH_CAST(unsigned char, shared_mem_ptr.get(), 3 * sizeof(sem_t));
+  void* img_data = PTR_MATH_CAST(void, shared_mem_ptr.get(), 3 * sizeof(sem_t));
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */

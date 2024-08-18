@@ -31,7 +31,7 @@ private:
   std::unique_ptr<libcamera::ControlList> controls_;
   libcamera::Stream* stream_;
   std::vector<std::unique_ptr<libcamera::Request>> requests_;
-  std::vector<unsigned char*> mmap_buffers_;
+  std::vector<void*> mmap_buffers_;
   std::atomic<size_t> next_req_idx_;
   void request_complete(libcamera::Request* request);
 };
