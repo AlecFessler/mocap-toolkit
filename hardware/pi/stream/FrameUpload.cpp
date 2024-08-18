@@ -8,8 +8,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "SharedDefs.h"
 #include "Logger.h"
+#include "SharedDefs.h"
+#include "tcp_thread.h"
 
 
 int main() {
@@ -55,8 +56,21 @@ int main() {
     return -errno;
   }
 
+  /******************************************************/
+  /* Initialize child thread and shared queue and mutex */
+  /******************************************************/
+
+  shared_data child_thread_data;
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
+  pthread_mutex_init(&child_thread_data.mutex, &attr);
+
+  pthread_t child_thread;
+  pthread_create(&child_thread, nullptr, tcp_thread, &child_thread_data);
+
   /**********************************************************/
-  /* Open shared memory to size of 2 semaphores and 1 frame */
+  /* Open memory shared with parent process                 */
   /*                                                        */
   /* shared memory structure:                               */
   /*  - processReady semaphore                              */
@@ -116,8 +130,10 @@ int main() {
   while (true) {
     sem_wait(imgReadSem);
     logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
-    // Process frame
+    pthread_mutex_lock(&child_thread_data.mutex);
+    // push image to shared queue
     sem_post(imgWriteSem);
+    pthread_mutex_unlock(&child_thread_data.mutex);
   }
 
   return 0;
