@@ -193,16 +193,10 @@ void camera_handler_t::queue_request() {
 
 void camera_handler_t::request_complete(libcamera::Request* request) {
   /**
-   * Callback for when a request is completed.
+   * Signal handler for when a request is completed.
    *
    * This method is called by the camera manager when a request is completed.
    * The request is then reused and the image is written to shared memory.
-   *
-   * The shared memory is structured as follows:
-   * - sem_t sem (not used here)
-   * - sem_t img_write_sem
-   * - sem_t img_read_sem
-   * - void* imageBuffer[IMAGE_BYTES]
    *
    * Parameters:
    *  - request: The completed request
@@ -213,14 +207,14 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   const char* info = "Request completed";
   p_ctx_.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
-  static sem_t* img_write_sem = PTR_MATH_CAST(sem_t, p_ctx_.shared_mem, sizeof(sem_t));
-  static sem_t* img_read_sem = PTR_MATH_CAST(sem_t, p_ctx_.shared_mem, 2 * sizeof(sem_t));
-  static void* shared_img_buffer = PTR_MATH_CAST(void, p_ctx_.shared_mem, 3 * sizeof(sem_t));
+  sem_t& img_write_sem = p_ctx_.shared_mem->img_write_sem;
+  sem_t& img_read_sem = p_ctx_.shared_mem->img_read_sem;
+  void* shared_img_buffer = p_ctx_.shared_mem->img_data;
 
   void* data = mmap_buffers_[request->cookie()];
-  sem_wait(img_write_sem);
+  sem_wait(&img_write_sem);
   memcpy(shared_img_buffer, data, IMAGE_BYTES);
-  sem_post(img_read_sem);
+  sem_post(&img_read_sem);
 
   request->reuse(libcamera::Request::ReuseBuffers);
 }

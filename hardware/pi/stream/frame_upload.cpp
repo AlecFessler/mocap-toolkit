@@ -8,6 +8,7 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <iostream>
 
 #include "logger.h"
 #include "shared_defs.h"
@@ -15,12 +16,6 @@
 
 
 int main() {
-  /*******************************************/
-  /* Ensure process is killed if parent dies */
-  /*******************************************/
-
-  prctl(PR_SET_PDEATHSIG, SIGINT);
-
   /*************************/
   /* Initialize the logger */
   /*************************/
@@ -57,34 +52,11 @@ int main() {
     return -errno;
   }
 
-  /******************************************************/
-  /* Initialize child thread and shared queue and mutex */
-  /******************************************************/
-
-  shared_data child_thread_data;
-  pthread_mutexattr_t attr;
-  pthread_mutexattr_init(&attr);
-  pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
-  pthread_mutex_init(&child_thread_data.mutex, &attr);
-
-  std::queue<std::unique_ptr<unsigned char[]>>& queue = child_thread_data.queue;
-  pthread_mutex_t& mutex = child_thread_data.mutex;
-
-  pthread_t child_thread;
-  pthread_create(&child_thread, nullptr, tcp_thread, &child_thread_data);
-
-  /**********************************************************/
-  /* Open memory shared with parent process                 */
-  /*                                                        */
-  /* shared memory structure:                               */
-  /*  - process_ready semaphore                             */
-  /*  - img_write_sem semaphore                             */
-  /*  - img_read_sem semaphore                              */
-  /*  - image frame                                         */
-  /**********************************************************/
+  /******************************************/
+  /* Open memory shared with parent process */
+  /******************************************/
 
   const char* shared_mem_name = "/video_frames";
-  size_t shared_mem_size = IMAGE_BYTES + sizeof(sem_t) * 3;
   int shared_mem_fd = shm_open(shared_mem_name, O_RDWR, 0666);
   if (shared_mem_fd < 0) {
     const char* err = "Failed to open shared memory";
@@ -92,7 +64,7 @@ int main() {
     return -errno;
   }
 
-  if (ftruncate(shared_mem_fd, shared_mem_size) < 0) {
+  if (ftruncate(shared_mem_fd, sizeof(shared_mem_layout)) < 0) {
     const char* err = "Failed to truncate shared memory";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     close(shared_mem_fd);
@@ -103,36 +75,59 @@ int main() {
   /* Map shared memory into process */
   /**********************************/
 
-  auto mmap_cleanup = [shared_mem_size](void* ptr) {
+  auto mmap_cleanup = [](void* ptr) {
     if (ptr && ptr != MAP_FAILED) {
-      munmap(ptr, shared_mem_size);
+      munmap(ptr, sizeof(shared_mem_layout));
     }
   };
-  std::unique_ptr<void, decltype(mmap_cleanup)> shared_mem_ptr(mmap(nullptr, shared_mem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shared_mem_fd, 0), mmap_cleanup);
+  std::unique_ptr<void, decltype(mmap_cleanup)> shared_mem_ptr(mmap(nullptr, sizeof(shared_mem_layout), PROT_READ | PROT_WRITE, MAP_SHARED, shared_mem_fd, 0), mmap_cleanup);
   if (shared_mem_ptr.get() == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     close(shared_mem_fd);
     return -errno;
   }
+  shared_mem_layout& shared_mem = *static_cast<shared_mem_layout*>(shared_mem_ptr.get());
   close(shared_mem_fd);
 
-  /************************************/
-  /* Set up pointers to shared memory */
-  /************************************/
+  /********************************/
+  /* Get handles to shared memory */
+  /********************************/
 
-  sem_t* process_ready = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 0);
-  sem_t* img_write_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t));
-  sem_t* img_read_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 2 * sizeof(sem_t));
-  unsigned char* img_data = PTR_MATH_CAST(unsigned char, shared_mem_ptr.get(), 3 * sizeof(sem_t));
+  volatile sig_atomic_t& running = shared_mem.running;
+  sem_t& parent_process_ready = shared_mem.parent_process_ready_sem;
+  sem_t& this_process_ready = shared_mem.child_process_ready_sem;
+  sem_t& img_read_sem = shared_mem.img_read_sem;
+  sem_t& img_write_sem = shared_mem.img_write_sem;
+  unsigned char* img_data = shared_mem.img_data;
+
+  /******************************************************/
+  /* Initialize child thread and shared data structures */
+  /******************************************************/
+
+  shared_data child_thread_data(running);
+  child_thread_data.running = running;
+  std::queue<std::unique_ptr<unsigned char[]>>& queue = child_thread_data.queue;
+
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
+  pthread_mutex_init(&child_thread_data.mutex, &attr);
+  pthread_mutex_t& mutex = child_thread_data.mutex;
+
+  pthread_cond_init(&child_thread_data.cond, nullptr);
+
+  pthread_t child_thread;
+  pthread_create(&child_thread, nullptr, tcp_thread, &child_thread_data);
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */
   /*******************************************************/
 
-  sem_post(process_ready);
-  while (true) {
-    sem_wait(img_read_sem);
+  sem_post(&this_process_ready);
+  sem_wait(&parent_process_ready);
+  while (running) {
+    sem_wait(&img_read_sem);
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Frame received");
 
     auto img_buffer = std::make_unique<unsigned char[]>(IMAGE_BYTES);
@@ -143,10 +138,11 @@ int main() {
     memcpy(img_buffer.get(), img_data, IMAGE_BYTES);
 
     pthread_mutex_lock(&mutex);
+    pthread_cond_signal(&child_thread_data.cond);
     queue.push(std::move(img_buffer));
     pthread_mutex_unlock(&mutex);
 
-    sem_post(img_write_sem);
+    sem_post(&img_write_sem);
   }
 
   return 0;

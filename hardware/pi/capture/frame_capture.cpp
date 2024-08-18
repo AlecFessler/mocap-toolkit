@@ -19,12 +19,12 @@ extern char** environ;
 
 void sig_handler(int signo, siginfo_t* info, void* context) {
   static p_ctx_t& p_ctx = p_ctx_t::get_instance();
-  if (signo == SIGUSR1 && p_ctx.running) {
+  if (signo == SIGUSR1 && p_ctx.shared_mem->running) {
     p_ctx.cam->queue_request();
-    static const char* info = "Capture request queued";
+    const char* info = "Capture request queued";
     p_ctx.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
   } else if (signo == SIGINT || signo == SIGTERM) {
-    p_ctx.running = 0;
+    p_ctx.shared_mem->running = 0;
   }
 }
 
@@ -56,12 +56,11 @@ int main() {
     return -EIO;
   }
 
-  /************************************************************************/
-  /* Initialize shared memory to the size of the image and two semaphores */
-  /************************************************************************/
+  /****************************/
+  /* Initialize shared memory */
+  /****************************/
 
   const char* shared_mem_name = "/video_frames";
-  size_t shared_mem_size = IMAGE_BYTES + sizeof(sem_t) * 3;
   auto shared_mem_cleanup = [shared_mem_name](int* fd) {
     if (fd && *fd >= 0) {
       close(*fd);
@@ -77,7 +76,7 @@ int main() {
   }
   std::unique_ptr<int, decltype(shared_mem_cleanup)> shared_mem_fd_ptr(new int(shared_mem_fd), shared_mem_cleanup);
 
-  if (ftruncate(*shared_mem_fd_ptr.get(), shared_mem_size) < 0) {
+  if (ftruncate(*shared_mem_fd_ptr.get(), sizeof(shared_mem_layout)) < 0) {
     const char* err = "Failed to truncate shared memory";
     p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
@@ -87,38 +86,50 @@ int main() {
   /* Map the shared memory to the process */
   /****************************************/
 
-  auto mmap_cleanup = [shared_mem_size](void* ptr) {
+  auto mmap_cleanup = [](void* ptr) {
     if (ptr && ptr != MAP_FAILED)
-      munmap(ptr, shared_mem_size);
+      munmap(ptr, sizeof(shared_mem_layout));
   };
-  std::unique_ptr<void, decltype(mmap_cleanup)> shared_mem_ptr(mmap(nullptr, shared_mem_size, PROT_READ | PROT_WRITE, MAP_SHARED, *shared_mem_fd_ptr.get(), 0), mmap_cleanup);
+  std::unique_ptr<void, decltype(mmap_cleanup)> shared_mem_ptr(mmap(nullptr, sizeof(shared_mem_layout), PROT_READ | PROT_WRITE, MAP_SHARED, *shared_mem_fd_ptr.get(), 0), mmap_cleanup);
   if (shared_mem_ptr.get() == MAP_FAILED) {
     const char* err = "Failed to map shared memory";
     p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
-  p_ctx.shared_mem = shared_mem_ptr.get();
 
-  /*****************************/
-  /* Initialize the semaphores */
-  /*****************************/
+  /**********************************************/
+  /* Initialize the semaphores and running flag */
+  /**********************************************/
 
-  sem_t* child_process_ready = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), 0);
-  if (sem_init(child_process_ready, 1, 0) < 0) {
+  shared_mem_layout& shared_mem = *static_cast<shared_mem_layout*>(shared_mem_ptr.get());
+  p_ctx.shared_mem = &shared_mem;
+
+  volatile sig_atomic_t& running = shared_mem.running;
+  running = 0;
+
+  sem_t& parent_process_ready = shared_mem.parent_process_ready_sem;
+  if (sem_init(&parent_process_ready, 1, 0) < 0) {
+    const char* err = "Failed to initialize parent process ready semaphore";
+    p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
+
+  sem_t& child_process_ready = shared_mem.child_process_ready_sem;
+  if (sem_init(&child_process_ready, 1, 0) < 0) {
     const char* err = "Failed to initialize child process ready semaphore";
     p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  sem_t* img_write_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t));
-  if (sem_init(img_write_sem, 1, 1) < 0) {
+  sem_t& img_write_sem = shared_mem.img_write_sem;
+  if (sem_init(&img_write_sem, 1, 1) < 0) {
     const char* err = "Failed to initialize image write semaphore";
     p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }
 
-  sem_t* img_read_sem = PTR_MATH_CAST(sem_t, shared_mem_ptr.get(), sizeof(sem_t) * 2);
-  if (sem_init(img_read_sem, 1, 0) < 0) {
+  sem_t& img_read_sem = shared_mem.img_read_sem;
+  if (sem_init(&img_read_sem, 1, 0) < 0) {
     const char* err = "Failed to initialize image read semaphore";
     p_ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     return -errno;
@@ -203,9 +214,10 @@ int main() {
   /* Wait for the child process, then begin and wait for signals */
   /***************************************************************/
 
-  sem_wait(child_process_ready);
-  p_ctx.running = 1;
-  while (p_ctx.running) {
+  sem_wait(&child_process_ready);
+  running = 1;
+  sem_post(&parent_process_ready);
+  while (running) {
     pause();
   }
 
