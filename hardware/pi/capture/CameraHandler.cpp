@@ -202,7 +202,8 @@ void CameraHandler::requestComplete(Request *request) {
    *
    * The shared memory is structured as follows:
    * - sem_t sem (not used here)
-   * - sem_t sem (synchronizes access to shared memory with child process)
+   * - sem_t imgWriteSem
+   * - sem_t imgReadSem
    * - unsigned char imageBuffer[IMAGE_BYTES]
    *
    * Parameters:
@@ -214,13 +215,14 @@ void CameraHandler::requestComplete(Request *request) {
   const char* info = "Request completed";
   pctx_.logger->log(Logger::Level::INFO, __FILE__, __LINE__, info);
 
-  static sem_t* sem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, sizeof(sem_t));
-  static unsigned char* sharedBuffer = PTR_MATH_CAST(unsigned char, pctx_.sharedMem, 2 * sizeof(sem_t));
+  static sem_t* imgWriteSem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, sizeof(sem_t));
+  static sem_t* imgReadSem = PTR_MATH_CAST(sem_t, pctx_.sharedMem, 2 * sizeof(sem_t));
+  static unsigned char* sharedBuffer = PTR_MATH_CAST(unsigned char, pctx_.sharedMem, 3 * sizeof(sem_t));
 
   unsigned char* data = mmapBuffers_[request->cookie()];
-  sem_wait(sem);
+  sem_wait(imgWriteSem);
   memcpy(sharedBuffer, data, IMAGE_BYTES);
-  sem_post(sem);
+  sem_post(imgReadSem);
 
   request->reuse(Request::ReuseBuffers);
 }

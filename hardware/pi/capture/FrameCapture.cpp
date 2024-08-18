@@ -61,7 +61,7 @@ int main() {
   /************************************************************************/
 
   const char* shmName = "/video_frames";
-  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
+  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 3;
   auto shmDeleter = [shmName](int* fd) {
     if (fd && *fd >= 0) {
       close(*fd);
@@ -110,9 +110,16 @@ int main() {
     return -errno;
   }
 
-  sem_t* captureSync = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
-  if (sem_init(captureSync, 1, 1) < 0) {
-    const char* err = "Failed to initialize capture sync semaphore";
+  sem_t* imgWriteSem = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
+  if (sem_init(imgWriteSem, 1, 1) < 0) {
+    const char* err = "Failed to initialize image write semaphore";
+    pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
+    return -errno;
+  }
+
+  sem_t* imgReadSem = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t) * 2);
+  if (sem_init(imgReadSem, 1, 0) < 0) {
+    const char* err = "Failed to initialize image read semaphore";
     pctx.logger->log(Logger::Level::ERROR, __FILE__, __LINE__, err);
     return -errno;
   }

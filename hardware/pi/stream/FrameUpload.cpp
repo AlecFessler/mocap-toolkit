@@ -60,12 +60,13 @@ int main() {
   /*                                                        */
   /* shared memory structure:                               */
   /*  - processReady semaphore                              */
-  /*  - captureSync semaphore                               */
+  /*  - imgWriteSem semaphore                               */
+  /*  - imgReadSem semaphore                                */
   /*  - image frame                                         */
   /**********************************************************/
 
   const char* shmName = "/video_frames";
-  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 2;
+  size_t shmSize = IMAGE_BYTES + sizeof(sem_t) * 3;
   int shmFd = shm_open(shmName, O_RDWR, 0666);
   if (shmFd < 0) {
     const char* err = "Failed to open shared memory";
@@ -103,8 +104,9 @@ int main() {
   /************************************/
 
   sem_t* processReady = PTR_MATH_CAST(sem_t, shmPtr.get(), 0);
-  sem_t* captureSync = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
-  unsigned char* frame = PTR_MATH_CAST(unsigned char, shmPtr.get(), 2 * sizeof(sem_t));
+  sem_t* imgWriteSem = PTR_MATH_CAST(sem_t, shmPtr.get(), sizeof(sem_t));
+  sem_t* imgReadSem = PTR_MATH_CAST(sem_t, shmPtr.get(), 2 * sizeof(sem_t));
+  unsigned char* frame = PTR_MATH_CAST(unsigned char, shmPtr.get(), 3 * sizeof(sem_t));
 
   /*******************************************************/
   /* Signal ready to parent process then wait for frames */
@@ -112,12 +114,10 @@ int main() {
 
   sem_post(processReady);
   while (true) {
-    sem_wait(captureSync);
+    sem_wait(imgReadSem);
     logger->log(Logger::Level::INFO, __FILE__, __LINE__, "Frame received");
     // Process frame
-    sem_post(captureSync);
-    // prevent tight loop from locking up semaphore indefinitely
-    usleep(100);
+    sem_post(imgWriteSem);
   }
 
   return 0;
