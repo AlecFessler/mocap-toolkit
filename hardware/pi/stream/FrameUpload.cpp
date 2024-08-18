@@ -8,9 +8,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "ImageConstants.h"
 #include "Logger.h"
 
-constexpr size_t IMAGE_BYTES = 1920 * 1080 * 3;
 
 int main() {
   /*******************************************/

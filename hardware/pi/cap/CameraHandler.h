@@ -33,6 +33,7 @@ private:
   std::unique_ptr<ControlList> controls_;
   Stream *stream_;
   std::vector<std::unique_ptr<Request>> requests_;
+  std::vector<unsigned char*> mmapBuffers_;
   std::atomic<size_t> nextRequestIndex_;
   void requestComplete(Request *request);
 };

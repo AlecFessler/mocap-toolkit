@@ -11,12 +11,10 @@
 #include <unistd.h>
 
 #include "CameraHandler.h"
+#include "ImageConstants.h"
 #include "Logger.h"
 #include "PCtx.h"
 
-constexpr unsigned int IMAGE_WIDTH = 1920;
-constexpr unsigned int IMAGE_HEIGHT = 1080;
-constexpr size_t IMAGE_BYTES = IMAGE_WIDTH * IMAGE_HEIGHT * 3;
 extern char **environ;
 
 void sig_handler(int signo, siginfo_t *info, void *context) {
