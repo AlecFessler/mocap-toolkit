@@ -101,22 +101,22 @@ static void timestamp(char* buffer, int& offset) {
   time_t seconds = ts.tv_sec;
   int nanos = ts.tv_nsec;
 
-  int years = 1970;
+  int year = 1970;
   while (true) {
-    int secondsInYear = SECONDS_PER_YEAR;
-    if (LEAP_YEAR(years))
-      secondsInYear = SECONDS_PER_LEAP_YEAR;
+    int secondsInYear = LEAP_YEAR(year) ?
+                        SECONDS_PER_LEAP_YEAR :
+                        SECONDS_PER_YEAR;
     if (seconds < secondsInYear)
       break;
     seconds -= secondsInYear;
-    years++;
+    year++;
   }
 
   int month = 1;
   while (true) {
-    int secondsInMonth = SECONDS_PER_MONTH[month];
-    if (month == 2 && LEAP_YEAR(years))
-      secondsInMonth = SECONDS_PER_MONTH[0];
+    int secondsInMonth = LEAP_YEAR(year) && month == 2 ?
+                         SECONDS_PER_MONTH[0] :
+                         SECONDS_PER_MONTH[month];
     if (seconds < secondsInMonth)
       break;
     seconds -= secondsInMonth;
@@ -133,7 +133,7 @@ static void timestamp(char* buffer, int& offset) {
   nanos %= NANOS_PER_MILLISECOND;
   int micros = nanos / NANOS_PER_MICROSECOND;
 
-  intToStr(years, buffer, offset);
+  intToStr(year, buffer, offset);
   buffer[offset++] = '-';
   if (month < 10)
     buffer[offset++] = '0';
