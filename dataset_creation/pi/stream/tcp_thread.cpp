@@ -35,7 +35,8 @@ void* tcp_thread(void* shared_data_ptr) {
 
   shared_data* s_data = static_cast<shared_data*>(shared_data_ptr);
   volatile sig_atomic_t& running = s_data->running;
-  std::queue<std::unique_ptr<unsigned char[]>>& queue = s_data->queue;
+  // replace with lock-free implementation
+  lock_free_queue_t& queue = s_data->queue;
   pthread_mutex_t& mutex = s_data->mutex;
   pthread_cond_t& cond = s_data->cond;
 
@@ -46,14 +47,12 @@ void* tcp_thread(void* shared_data_ptr) {
   while (running) {
     pthread_mutex_lock(&mutex);
     pthread_cond_wait(&cond, &mutex);
-
-    unsigned char* image = queue.front().get();
-    queue.pop();
-
-    static const char* info = "Received image from queue";
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
-
-    pthread_mutex_unlock(&mutex);
+    while (!queue.empty()) {
+      std::unique_ptr<unsigned char[]> image = queue.pop();
+      // send image over tcp
+      static const char* info = "Received image from queue";
+      logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
+    }
   }
 
   return nullptr;

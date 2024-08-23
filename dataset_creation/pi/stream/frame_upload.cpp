@@ -107,7 +107,7 @@ int main() {
 
   shared_data child_thread_data(running);
   child_thread_data.running = running;
-  std::queue<std::unique_ptr<unsigned char[]>>& queue = child_thread_data.queue;
+  lock_free_queue_t& queue = child_thread_data.queue;
 
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
@@ -137,10 +137,8 @@ int main() {
     }
     memcpy(img_buffer.get(), img_data, IMAGE_BYTES);
 
-    pthread_mutex_lock(&mutex);
-    queue.push(std::move(img_buffer));
+    queue.push(img_buffer.release());
     pthread_cond_signal(&child_thread_data.cond);
-    pthread_mutex_unlock(&mutex);
 
     sem_post(&img_write_sem);
   }
