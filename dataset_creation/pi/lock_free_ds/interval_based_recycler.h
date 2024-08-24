@@ -62,6 +62,7 @@ interval_based_recycler_t<T>::interval_based_recycler_t(int num_threads,
                                                         int recycle_freq,
                                                         int recycle_batch_size) {
     epoch.store(0);
+    thread_idx_counter.store(0);
 
     num_threads_ = num_threads;
     reservations = new reservation_t[num_threads];
@@ -72,24 +73,30 @@ interval_based_recycler_t<T>::interval_based_recycler_t(int num_threads,
     recycle_freq_ = recycle_freq;
     recycle_batch_size_ = recycle_batch_size;
 
-    mem_block = new alignas(std::max({alignof(stack_node_t),
-                                      alignof(memory_block_t<T>),
-                                      alignof(T)}))
-                char[prealloc_size * sizeof(stack_node_t) +
-                     prealloc_size * sizeof(memory_block_t<T>) +
-                     prealloc_size * sizeof(T)];
+    size_t stack_node_size = sizeof(stack_node_t);
+    size_t memory_block_size = sizeof(memory_block_t<T>);
+    size_t container_node_size = sizeof(T);
+    size_t total_block_size = stack_node_size + memory_block_size + container_node_size;
+    size_t max_alignment = std::max({alignof(stack_node_t),
+                                     alignof(memory_block_t<T>),
+                                     alignof(T)});
+
+    if (total_block_size % max_alignment != 0)
+        total_block_size += max_alignment - (total_block_size % max_alignment);
+
+    mem_block = static_cast<char*>(aligned_alloc(max_alignment, prealloc_size * total_block_size));
+    if (!mem_block)
+        throw std::bad_alloc();
 
     for (int i = 0; i < prealloc_size; i++) {
-        int stack_node_offset = i * sizeof(stack_node_t);
-        int memory_block_offset = stack_node_offset + sizeof(stack_node_t);
-        int container_node_offset = memory_block_offset + sizeof(memory_block_t<T>);
+        char* block_start = mem_block + i * total_block_size;
 
-        stack_node_t* stack_node = (stack_node_t*)(mem_block + stack_node_offset);
-        memory_block_t<T>* memory_block = (memory_block_t<T>*)(mem_block + memory_block_offset);
-        T* container_node = (T*)(mem_block + container_node_offset);
+        stack_node_t* stack_node = reinterpret_cast<stack_node_t*>(block_start);
+        memory_block_t<T>* memory_block = reinterpret_cast<memory_block_t<T>*>(block_start + stack_node_size);
+        T* container_node = reinterpret_cast<T*>(block_start + stack_node_size + memory_block_size);
 
-        stack_node->ptr = (void*)memory_block;
-        memory_block->data = (T*)container_node;
+        stack_node->ptr = static_cast<void*>(memory_block);
+        memory_block->data = container_node;
 
         available_blocks.push(stack_node);
     }
@@ -98,7 +105,7 @@ interval_based_recycler_t<T>::interval_based_recycler_t(int num_threads,
 template <typename T>
 interval_based_recycler_t<T>::~interval_based_recycler_t() {
     delete[] reservations;
-    delete[] mem_block;
+    free(mem_block);
 }
 
 template <typename T>
