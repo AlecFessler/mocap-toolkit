@@ -44,6 +44,7 @@ private:
   reservation_t* reservations;
 
   int prealloc_count;
+  lock_free_node_t* prealloc_nodes;
   lock_free_stack_t available_nodes;
   lock_free_stack_t retired_nodes;
 

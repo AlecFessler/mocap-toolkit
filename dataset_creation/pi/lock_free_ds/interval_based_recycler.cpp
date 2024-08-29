@@ -16,18 +16,16 @@ interval_based_recycler_t::interval_based_recycler_t(
   num_threads(num_threads),
   reservation_enumerator(0),
   reservations(new reservation_t[num_threads]),
-  prealloc_count(prealloc_count) {
+  prealloc_count(prealloc_count),
+  prealloc_nodes(new lock_free_node_t[prealloc_count]) {
   for (int i = 0; i < num_threads; i++)
     reservations[i].lower = reservations[i].upper = std::numeric_limits<uint64_t>::max();
   for (int i = 0; i < prealloc_count; i++)
-    available_nodes.push(new lock_free_node_t());
+    available_nodes.push(&prealloc_nodes[i]);
 }
 
 interval_based_recycler_t::~interval_based_recycler_t() {
-  while (!available_nodes.empty())
-    delete available_nodes.pop();
-  while (!retired_nodes.empty())
-    delete retired_nodes.pop();
+  if (prealloc_nodes) delete[] prealloc_nodes;
   if (reservations) delete[] reservations;
 }
 
