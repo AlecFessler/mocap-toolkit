@@ -2,25 +2,19 @@
 #define LOCK_FREE_STACK_H
 
 #include <atomic>
-
-struct stack_node_t {
-  std::atomic<stack_node_t*> next;
-  void* ptr;
-};
+#include "lock_free_node.h"
 
 class lock_free_stack_t {
 public:
-  lock_free_stack_t();
-  // Stack is not responsible for allocating or freeing memory.
-  // It only stores pointers to preallocated memory because it
-  // is lock-free and allocating heap memory is not lock-free
+  lock_free_stack_t() noexcept;
+  // memory is managed by the allocator so no special destructor is needed
 
-  void push(stack_node_t* node);
-  stack_node_t* pop();
-  bool empty();
+  void push(lock_free_node_t* node) noexcept;
+  lock_free_node_t* pop() noexcept;
+  bool empty() const noexcept;
 
 private:
-  std::atomic<stack_node_t*> head;
+  std::atomic<lock_free_node_t*> head;
 };
 
 #endif // LOCK_FREE_STACK_H

@@ -3,26 +3,24 @@
 
 #include <atomic>
 #include "interval_based_recycler.h"
-
-struct queue_node_t {
-  std::atomic<memory_block_t<queue_node_t>*> next;
-  void* data;
-};
+#include "lock_free_node.h"
 
 class lock_free_queue_t {
 public:
-  lock_free_queue_t(int num_threads, int prealloc_size);
-  // no destructor because recycler cleans up
+  lock_free_queue_t(
+    int num_threads,
+    int prealloc_count
+  );
+  // recycler manages memory so no destructor needed
 
-  bool enqueue(void* data);
-  void* dequeue();
-  bool empty();
+  bool enqueue(void* data) noexcept;
+  void* dequeue() noexcept;
+  bool empty() const noexcept;
 
 private:
-  std::atomic<memory_block_t<queue_node_t>*> head;
-  std::atomic<memory_block_t<queue_node_t>*> tail;
-
-  interval_based_recycler_t<queue_node_t> recycler;
+  std::atomic<lock_free_node_t*> head;
+  std::atomic<lock_free_node_t*> tail;
+  interval_based_recycler_t recycler;
 };
 
 #endif // LOCK_FREE_QUEUE_H
