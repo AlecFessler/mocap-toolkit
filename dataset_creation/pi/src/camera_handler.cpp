@@ -2,7 +2,6 @@
 #include <semaphore.h>
 #include <sys/mman.h>
 #include "camera_handler.h"
-#include "shared_defs.h"
 #include "logger.h"
 
 camera_handler_t::camera_handler_t(
@@ -182,13 +181,12 @@ void camera_handler_t::queue_request() {
    * Throws:
    *  - std::runtime_error: Failed to queue request
    */
-  size_t index = next_req_idx_.load();
-  if (camera_->queueRequest(requests_[index].get()) < 0) {
+  if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-  next_req_idx_.store((index + 1) % requests_.size());
+  next_req_idx_ = ++next_req_idx_ % requests_.size();
 }
 
 void camera_handler_t::request_complete(libcamera::Request* request) {
@@ -207,14 +205,19 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   const char* info = "Request completed";
   p_ctx_.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
-  sem_t& img_write_sem = p_ctx_.shared_mem->img_write_sem;
-  sem_t& img_read_sem = p_ctx_.shared_mem->img_read_sem;
-  void* shared_img_buffer = p_ctx_.shared_mem->img_data;
+  void* buffer = nullptr;
+  do {
+    buffer = p_ctx_.available_buffers->pop();
+  } while(buffer == nullptr);
 
   void* data = mmap_buffers_[request->cookie()];
-  sem_wait(&img_write_sem);
-  memcpy(shared_img_buffer, data, IMAGE_BYTES);
-  sem_post(&img_read_sem);
+  std::memcpy(buffer, data, IMAGE_BYTES);
 
+  bool enqueued = false;
+  do {
+    enqueued = p_ctx_.frame_queue->enqueue(buffer);
+  } while(!enqueued);
+
+  sem_post(p_ctx_.queue_counter);
   request->reuse(libcamera::Request::ReuseBuffers);
 }

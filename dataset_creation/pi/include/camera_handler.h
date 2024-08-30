@@ -1,7 +1,7 @@
 #ifndef CAMERAHANDLER_H
 #define CAMERAHANDLER_H
 
-#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <vector>
 #include <libcamera/libcamera.h>
@@ -32,7 +32,7 @@ private:
   libcamera::Stream* stream_;
   std::vector<std::unique_ptr<libcamera::Request>> requests_;
   std::vector<void*> mmap_buffers_;
-  std::atomic<size_t> next_req_idx_;
+  uint64_t next_req_idx_;
   void request_complete(libcamera::Request* request);
 };
 
