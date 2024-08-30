@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdint>
 #include <semaphore.h>
+#include <signal.h>
 #include "camera_handler.h"
 #include "lock_free_queue.h"
 #include "logger.h"
@@ -20,7 +21,7 @@ public:
   logger_t* logger;
   camera_handler_t* cam;
   lock_free_queue_t* frame_queue;
-  std::atomic<bool> running;
+  volatile sig_atomic_t running;
   sem_t* thread1_ready;
   sem_t* thread2_ready;
   sem_t* queue_counter;
