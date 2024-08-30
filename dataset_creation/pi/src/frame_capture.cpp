@@ -17,12 +17,12 @@ extern char** environ;
 
 void sig_handler(int signo, siginfo_t* info, void* context) {
   static p_ctx_t& p_ctx = p_ctx_t::get_instance();
-  if (signo == SIGUSR1 && p_ctx.running.load(std::memory_order_acquire)) {
+  if (signo == SIGUSR1 && p_ctx.running) {
     p_ctx.cam->queue_request();
     const char* info = "Capture request queued";
     p_ctx.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
   } else if (signo == SIGINT || signo == SIGTERM) {
-    p_ctx.running.store(false, std::memory_order_release);
+    p_ctx.running = 0;
   }
 }
 
@@ -108,9 +108,9 @@ int main() {
     close(fd);
 
     sem_wait(p_ctx.thread2_ready);
-    p_ctx.running.store(true, std::memory_order_release);
+    p_ctx.running = 1;
     sem_post(p_ctx.thread1_ready);
-    while (p_ctx.running.load(std::memory_order_acquire)) {
+    while (p_ctx.running) {
       pause();
     }
 

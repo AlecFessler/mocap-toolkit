@@ -5,7 +5,7 @@ p_ctx_t::p_ctx_t() noexcept
   logger(),
   cam(),
   frame_queue(),
-  running(false),
+  running(0),
   thread1_ready(),
   thread2_ready(),
   queue_counter() {}

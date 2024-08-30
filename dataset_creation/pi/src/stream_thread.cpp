@@ -18,7 +18,7 @@ void* stream_thread(void* p_ctx) {
   sem_post(ctx.thread2_ready);
   sem_wait(ctx.thread1_ready);
   while (
-    ctx.running.load(std::memory_order_acquire) ||
+    ctx.running ||
     enqueued_frames > 0
   ) {
     sem_wait(ctx.queue_counter);
