@@ -4,7 +4,6 @@ p_ctx_t::p_ctx_t() noexcept
   :
   logger(),
   cam(),
-  available_buffers(),
   frame_queue(),
   running(false),
   thread1_ready(),

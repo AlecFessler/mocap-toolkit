@@ -23,22 +23,19 @@ void* stream_thread(void* p_ctx) {
   ) {
     sem_wait(ctx.queue_counter);
 
+    void* frame = ctx.frame_queue->dequeue();
+    // frame will only be nullptr here during shutdown
+    // because the parent thread only ever posts to the
+    // semaphore if it has enqueued a frame, or if it is
+    // shutting down, which allows us to break out of
+    // this loop and return from the thread
+    if (frame == nullptr)
+      return nullptr;
+
     const char* info = "Dequeued frame";
     ctx.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
-    void* frame = ctx.frame_queue->dequeue();
-    if (frame == nullptr) {
-      const char* err = "Failed to dequeue frame";
-      ctx.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      return nullptr;
-    }
-
     // send frame to tcp server
-
-    bool pushed = false;
-    do {
-      pushed = ctx.available_buffers->push(frame);
-    } while (!pushed);
 
     sem_getvalue(ctx.queue_counter, &enqueued_frames);
   }

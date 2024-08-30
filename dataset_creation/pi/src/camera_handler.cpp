@@ -8,12 +8,9 @@ camera_handler_t::camera_handler_t(
   std::pair<unsigned int, unsigned int> resolution,
   int buffer_count,
   std::pair<std::int64_t, std::int64_t> frame_duration_limits
-) : p_ctx_(p_ctx_t::get_instance()), next_req_idx_(0) {
-
-  /*********************************/
-  /* Initialize the Camera Manager */
-  /*********************************/
-
+) :
+  p_ctx_(p_ctx_t::get_instance()),
+  next_req_idx_(0) {
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
@@ -21,20 +18,12 @@ camera_handler_t::camera_handler_t(
     throw std::runtime_error(err);
   }
 
-  /*****************************/
-  /* Get the cameras available */
-  /*****************************/
-
   auto cameras = cm_->cameras();
   if (cameras.empty()) {
     const char* err = "No cameras available";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-
-  /***************************************/
-  /* Select and acquire the first camera */
-  /***************************************/
 
   camera_ = cm_->get(cameras[0]->id());
   if (!camera_) {
@@ -48,10 +37,6 @@ camera_handler_t::camera_handler_t(
     throw std::runtime_error(err);
   }
 
-  /*************************************/
-  /* Generate the camera configuration */
-  /*************************************/
-
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
@@ -59,40 +44,25 @@ camera_handler_t::camera_handler_t(
     throw std::runtime_error(err);
   }
 
-  /*********************************************************/
-  /* Adjust the configuration to based on input parameters */
-  /*********************************************************/
-
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.size = { resolution.first, resolution.second };
   cfg.bufferCount = buffer_count;
-
-  /**************************************************/
-  /* Validate and possibly adjust the configuration */
-  /**************************************************/
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   } else if (config_->validate() == libcamera::CameraConfiguration::Adjusted) {
-    const char* err = "Adjusted invalid camera configuration";
-    p_ctx_.logger->log(logger_t::level_t::WARNING, __FILE__, __LINE__, err);
+    const char* err = "Invalid camera configuration, adjusted";
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
   }
-
-  /***************************/
-  /* Apply the configuration */
-  /***************************/
 
   if (camera_->configure(config_.get()) < 0) {
     const char* err = "Failed to configure camera";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-
-  /********************/
-  /* Allocate buffers */
-  /********************/
 
   allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
   stream_ = cfg.stream();
@@ -101,10 +71,6 @@ camera_handler_t::camera_handler_t(
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-
-  /********************************************************************/
-  /* Create requests, add buffers, and map buffers into shared memory */
-  /********************************************************************/
 
   uint64_t req_cookie = 0; // maps request to index in mmap_buffers_
   for (const std::unique_ptr<libcamera::FrameBuffer>& buffer : allocator_->buffers(stream_)) {
@@ -145,10 +111,6 @@ camera_handler_t::camera_handler_t(
     mmap_buffers_.push_back(data);
   }
 
-  /**************************************************************************/
-  /* Set request complete callback and start camera with specified controls */
-  /**************************************************************************/
-
   camera_->requestCompleted.connect(this,& camera_handler_t::request_complete);
   controls_ = std::make_unique<libcamera::ControlList>();
   controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_limits.first, frame_duration_limits.second }));
@@ -160,9 +122,9 @@ camera_handler_t::camera_handler_t(
 }
 
 camera_handler_t::~camera_handler_t() {
+  camera_->stop();
   for (void* data : mmap_buffers_)
     munmap(data, IMAGE_BYTES);
-  camera_->stop();
   allocator_->free(stream_);
   camera_->release();
   camera_.reset();
@@ -173,14 +135,30 @@ void camera_handler_t::queue_request() {
   /**
    * Queue the next request in the sequence.
    *
+   * Before queuing the request, ensure that the number of enqueued
+   * buffers is no more than PREALLOCATED_BUFFERS - 2. This is because
+   * the queue counter may fall behind by, but no more than, 1. This
+   * occurs when the child thread calls sem_wait, decrementing the
+   * semaphore, but before it dequeues the buffer. Thus, we check
+   * for 2 less than max to ensure at least one is available even
+   * if the counter is behind by 1.
+   *
    * If requests are not returned at the same rate as they are queued,
    * this method will throw to signal that the camera is not keeping up,
    * and this should be handled by adjusting the configuration.
    * ie. framerate, exposure, gain, etc.
    *
    * Throws:
+   *  - std::runtime_error: Buffer is not ready for requeuing
    *  - std::runtime_error: Failed to queue request
    */
+  int enqueued_buffers = 0;
+  sem_getvalue(p_ctx_.queue_counter, &enqueued_buffers);
+  if (enqueued_buffers > PREALLOCATED_BUFFERS - 2) {
+    const char* err = "Buffer is not ready for requeuing";
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
   if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
@@ -194,7 +172,8 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
    * Signal handler for when a request is completed.
    *
    * This method is called by the camera manager when a request is completed.
-   * The request is then reused and the image is written to shared memory.
+   * The request is then reused and the buffer is enqueued for transmission.
+   * The queue counter is incremented to signal that a buffer is available.
    *
    * Parameters:
    *  - request: The completed request
@@ -205,17 +184,10 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   const char* info = "Request completed";
   p_ctx_.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
-  void* buffer = nullptr;
-  do {
-    buffer = p_ctx_.available_buffers->pop();
-  } while(buffer == nullptr);
-
   void* data = mmap_buffers_[request->cookie()];
-  std::memcpy(buffer, data, IMAGE_BYTES);
-
   bool enqueued = false;
   do {
-    enqueued = p_ctx_.frame_queue->enqueue(buffer);
+    enqueued = p_ctx_.frame_queue->enqueue(data);
   } while(!enqueued);
 
   sem_post(p_ctx_.queue_counter);

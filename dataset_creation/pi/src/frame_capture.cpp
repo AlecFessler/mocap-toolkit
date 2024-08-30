@@ -22,7 +22,7 @@ void sig_handler(int signo, siginfo_t* info, void* context) {
     const char* info = "Capture request queued";
     p_ctx.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
   } else if (signo == SIGINT || signo == SIGTERM) {
-    p_ctx.running.store(false, std::memory_order_relaxed);
+    p_ctx.running.store(false, std::memory_order_release);
   }
 }
 
@@ -33,24 +33,13 @@ int main() {
     p_ctx.logger = &logger;
 
     std::pair<unsigned int, unsigned int> resolution = std::make_pair(IMAGE_WIDTH, IMAGE_HEIGHT);
-    int buffers_count = 4;
     std::pair<std::int64_t, std::int64_t> frame_duration_limits = std::make_pair(16667, 16667);
-    camera_handler_t cam(resolution, buffers_count, frame_duration_limits);
+    camera_handler_t cam(resolution, PREALLOCATED_BUFFERS, frame_duration_limits);
     p_ctx.cam = &cam;
 
     int num_threads = 2;
-    mm_lock_free_stack_t available_buffers(num_threads, PREALLOCATED_BUFFERS);
-    p_ctx.available_buffers = &available_buffers;
-
     lock_free_queue_t frame_queue(num_threads, PREALLOCATED_BUFFERS);
     p_ctx.frame_queue = &frame_queue;
-
-    auto image_buffers = std::make_unique<char[]>(IMAGE_BYTES * PREALLOCATED_BUFFERS);
-    for (int i = 0; i < PREALLOCATED_BUFFERS; i++) {
-      available_buffers.push((void*)&image_buffers[i * IMAGE_BYTES]);
-    }
-
-    p_ctx.running.store(false, std::memory_order_relaxed);
 
     #define initialize_semaphore(sem) \
       sem_t sem; \
@@ -119,12 +108,14 @@ int main() {
     close(fd);
 
     sem_wait(p_ctx.thread2_ready);
-    p_ctx.running.store(true, std::memory_order_relaxed);
+    p_ctx.running.store(true, std::memory_order_release);
     sem_post(p_ctx.thread1_ready);
     while (p_ctx.running.load(std::memory_order_acquire)) {
       pause();
     }
 
+    // post to allow child thread to proceed to exit
+    sem_post(p_ctx.queue_counter);
     pthread_join(thread_id, nullptr);
 
   } catch (const std::exception& e) {
