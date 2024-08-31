@@ -16,6 +16,8 @@
 extern char** environ;
 
 void sig_handler(int signo, siginfo_t* info, void* context) {
+  (void)info;
+  (void)context;
   static p_ctx_t& p_ctx = p_ctx_t::get_instance();
   if (signo == SIGUSR1 && p_ctx.running) {
     p_ctx.cam->queue_request();

@@ -165,7 +165,8 @@ void camera_handler_t::queue_request() {
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-  next_req_idx_ = ++next_req_idx_ % requests_.size();
+  ++next_req_idx_;
+  next_req_idx_ %= requests_.size();
 }
 
 void camera_handler_t::request_complete(libcamera::Request* request) {
