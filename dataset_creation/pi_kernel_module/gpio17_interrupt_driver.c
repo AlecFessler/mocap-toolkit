@@ -76,14 +76,12 @@ static int __init gpio_isr_init(void) {
         return PTR_ERR(gpiod);
     }
 
-    // Explicitly configure GPIO as input
     result = gpiod_direction_input(gpiod);
     if (result < 0) {
         printk(KERN_ERR "Failed to set GPIO %d as input, error: %d\n", GPIO_PIN, result);
         goto error_direction;
     }
 
-    // Try to get IRQ number
     irq_num = gpiod_to_irq(gpiod);
     if (irq_num < 0) {
         printk(KERN_ERR "gpiod_to_irq failed for GPIO %d, error: %d\n", GPIO_PIN, irq_num);
@@ -91,18 +89,16 @@ static int __init gpio_isr_init(void) {
         goto error_irq;
     }
 
-    // Request IRQ
     result = request_irq(irq_num,
                          (irq_handler_t) gpio_isr,
                          IRQF_TRIGGER_RISING | IRQF_SHARED,
                          "gpio_interrupt",
-                         gpiod);  // Use gpiod as the device ID
+                         gpiod);
     if (result < 0) {
         printk(KERN_ERR "GPIO IRQ request failed for GPIO %d, IRQ %d, error: %d\n", GPIO_PIN, irq_num, result);
         goto error_request_irq;
     }
 
-    // Create proc file
     proc_file = proc_create(PROC_NAME, 0222, NULL, &proc_fops);
     if (!proc_file) {
         printk(KERN_ERR "Failed to create proc file\n");
