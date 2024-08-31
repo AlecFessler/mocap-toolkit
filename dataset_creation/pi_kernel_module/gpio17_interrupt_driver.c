@@ -1,14 +1,14 @@
-#include <linux/module.h>
-#include <linux/kernel.h>
+#include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/sched.h>
-#include <linux/pid.h>
-#include <linux/signal.h>
-#include <linux/gpio/consumer.h>
-#include <linux/proc_fs.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/of_gpio.h>
-#include <linux/delay.h>
+#include <linux/pid.h>
+#include <linux/proc_fs.h>
+#include <linux/sched.h>
+#include <linux/signal.h>
 
 #define PROC_NAME "gpio_interrupt_pid"
 #define GPIO_PIN 588
@@ -22,7 +22,7 @@ static irqreturn_t gpio_isr(int irq, void *dev_id) {
     struct kernel_siginfo info;
     int ret;
 
-    if (user_task == NULL) {
+    if (user_task == NULL || !pid_alive(user_task)) {
         printk(KERN_ERR "User-space process not registered\n");
         return IRQ_HANDLED;
     }
@@ -49,6 +49,11 @@ static ssize_t register_user_pid(struct file *file, const char __user *buffer, s
     if (kstrtoint_from_user(buffer, count, 10, &pid) != 0) {
         printk(KERN_ERR "Failed to convert user-space PID\n");
         return -EFAULT;
+    }
+
+    if (user_task != NULL && pid_alive(user_task)) {
+        printk(KERN_ERR "User-space process already registered\n");
+        return -EEXIST;
     }
 
     pid_struct = find_get_pid(pid);
@@ -91,7 +96,7 @@ static int __init gpio_isr_init(void) {
 
     result = request_irq(irq_num,
                          (irq_handler_t) gpio_isr,
-                         IRQF_TRIGGER_RISING | IRQF_SHARED,
+                         IRQF_TRIGGER_RISING,
                          "gpio_interrupt",
                          gpiod);
     if (result < 0) {
@@ -118,7 +123,15 @@ error_direction:
     return result;
 }
 
+static void cleanup_user_task(void) {
+    if (user_task) {
+        put_task_struct(user_task);
+        user_task = NULL;
+    }
+}
+
 static void __exit gpio_isr_exit(void) {
+    cleanup_user_task();
     if (irq_num > 0) {
         free_irq(irq_num, gpiod);
     }
