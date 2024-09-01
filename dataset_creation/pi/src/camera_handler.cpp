@@ -87,25 +87,29 @@ camera_handler_t::camera_handler_t(
     }
     requests_.push_back(std::move(request));
 
-    const libcamera::FrameBuffer::Plane& plane = buffer->planes()[0];
-    if (IMAGE_BYTES != plane.length) {
-      const char* err = "Image size does not match expected size";
+    const libcamera::FrameBuffer::Plane& y_plane = buffer->planes()[0];
+    const libcamera::FrameBuffer::Plane& u_plane = buffer->planes()[1];
+    const libcamera::FrameBuffer::Plane& v_plane = buffer->planes()[2];
+
+    if (y_plane.length != Y_PLANE || u_plane.length != UV_PLANE || v_plane.length != UV_PLANE) {
+      const char* err = "Plane size does not match expected size";
       p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
     void* data = mmap(
       nullptr,
-      plane.length,
+      IMAGE_BYTES,
       PROT_READ | PROT_WRITE,
       MAP_SHARED,
-      plane.fd.get(),
-      plane.offset
+      y_plane.fd.get(), // planes are contiguous in memory
+      y_plane.offset
     );
 
     if (data == MAP_FAILED) {
-      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "mmap failed");
-      throw std::runtime_error("Failed to mmap plane data");
+      std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
+      throw std::runtime_error(err);
     }
 
     mmap_buffers_.push_back(data);
@@ -155,7 +159,7 @@ void camera_handler_t::queue_request() {
    */
   int enqueued_buffers = 0;
   sem_getvalue(p_ctx_.queue_counter, &enqueued_buffers);
-  if (enqueued_buffers > PREALLOCATED_BUFFERS - 2) {
+  if ((unsigned int)enqueued_buffers > PREALLOCATED_BUFFERS - 2) {
     const char* err = "Buffer is not ready for requeuing";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);

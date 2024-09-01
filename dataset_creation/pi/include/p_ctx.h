@@ -11,10 +11,12 @@
 
 class camera_handler_t;
 
-constexpr uint64_t IMAGE_WIDTH = 1920;
-constexpr uint64_t IMAGE_HEIGHT = 1080;
-constexpr uint64_t IMAGE_BYTES = IMAGE_WIDTH * IMAGE_HEIGHT;
-constexpr int PREALLOCATED_BUFFERS = 8;
+constexpr unsigned int IMAGE_WIDTH = 1920;
+constexpr unsigned int IMAGE_HEIGHT = 1080;
+constexpr unsigned int Y_PLANE = IMAGE_WIDTH * IMAGE_HEIGHT;
+constexpr unsigned int UV_PLANE = Y_PLANE / 4;
+constexpr unsigned int IMAGE_BYTES = Y_PLANE + UV_PLANE * 2;
+constexpr unsigned int PREALLOCATED_BUFFERS = 8;
 
 class p_ctx_t {
 public:
