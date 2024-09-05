@@ -4,6 +4,8 @@
 #include "camera_handler.h"
 #include "logger.h"
 
+#include <iostream>
+
 camera_handler_t::camera_handler_t(
   std::pair<unsigned int, unsigned int> resolution,
   int buffer_count,
@@ -102,7 +104,7 @@ camera_handler_t::camera_handler_t(
       IMAGE_BYTES,
       PROT_READ | PROT_WRITE,
       MAP_SHARED,
-      y_plane.fd.get(), // planes are contiguous in memory
+      y_plane.fd.get(),
       y_plane.offset
     );
 
@@ -116,8 +118,30 @@ camera_handler_t::camera_handler_t(
   }
 
   camera_->requestCompleted.connect(this,& camera_handler_t::request_complete);
+
+  // Configure some settings for more deterministic capture times
+  // May need to be adjusted based on lighting conditions
+  // and on a per device basis, but for development purposes, this is acceptable
   controls_ = std::make_unique<libcamera::ControlList>();
+
+  // Fix exposure time to half the time between frames
+  // May be able to remove frame duration limit control since we are setting exposure
   controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_limits.first, frame_duration_limits.second }));
+  controls_->set(libcamera::controls::AeEnable, false);
+  controls_->set(libcamera::controls::ExposureTime, frame_duration_limits.first);
+
+  // Fix focus to ~12 inches
+  // Focus value should be reciprocal of distance in meters
+  controls_->set(libcamera::controls::AfMode, libcamera::controls::AfModeManual);
+  controls_->set(libcamera::controls::LensPosition, 3.33);
+
+  // Fix white balance, gain, and disable HDR
+  controls_->set(libcamera::controls::AwbEnable, false);
+  controls_->set(libcamera::controls::AnalogueGain, 1.0);
+  controls_->set(libcamera::controls::HdrMode, libcamera::controls::HdrModeOff);
+
+  controls_->set(libcamera::controls::rpi::StatsOutputEnable, false);
+
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
     p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
