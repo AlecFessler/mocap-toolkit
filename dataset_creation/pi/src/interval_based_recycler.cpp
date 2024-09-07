@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #include "interval_based_recycler.h"
 
 thread_local uint64_t interval_based_recycler_t::counter = 0;

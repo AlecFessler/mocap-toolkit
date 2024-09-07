@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #ifndef LOGGER_H
 #define LOGGER_H
 

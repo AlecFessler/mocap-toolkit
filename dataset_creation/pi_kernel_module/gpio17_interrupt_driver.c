@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>

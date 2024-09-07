@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #include <sched.h>
 #include <semaphore.h>
 #include "stream_thread.h"

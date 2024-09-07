@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #ifndef LOCK_FREE_STACK_H
 #define LOCK_FREE_STACK_H
 

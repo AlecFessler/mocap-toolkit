@@ -1,3 +1,7 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #include "lock_free_stack.h"
 
 lock_free_stack_t::lock_free_stack_t() noexcept : head(nullptr) {}
