@@ -5,6 +5,7 @@
 #include <atomic>
 #include <arpa/inet.h>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <fcntl.h>
 #include <iostream>
@@ -77,33 +78,6 @@ int main() {
       return -errno;
     }
 
-    struct sigaction action;
-    action.sa_sigaction = sig_handler;
-    action.sa_flags = SA_SIGINFO;
-    sigemptyset(&action.sa_mask);
-    if (
-      sigaction(SIGUSR1, &action, NULL) < 0 ||
-      sigaction(SIGINT, &action, NULL) < 0 ||
-      sigaction(SIGTERM, &action, NULL) < 0
-    ) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set signal handler");
-      return -errno;
-    }
-
-    int fd;
-    fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
-    if (fd < 0) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to open /proc/gpio_interrupt_pid");
-      return -errno;
-    }
-    pid_t pid = getpid();
-    if (dprintf(fd, "%d", pid) < 0) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to write to /proc/gpio_interrupt_pid");
-      close(fd);
-      return -errno;
-    }
-    close(fd);
-
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
@@ -121,26 +95,55 @@ int main() {
       return -errno;
     }
 
+    int fd;
+    fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
+    if (fd < 0) {
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to open /proc/gpio_interrupt_pid");
+      close(sock);
+      return -errno;
+    }
+    pid_t pid = getpid();
+    if (dprintf(fd, "%d", pid) < 0) {
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to write to /proc/gpio_interrupt_pid");
+      close(fd);
+      close(sock);
+      return -errno;
+    }
+    close(fd);
+
+    struct sigaction action;
+    action.sa_sigaction = sig_handler;
+    action.sa_flags = SA_SIGINFO;
+    sigemptyset(&action.sa_mask);
+    if (
+      sigaction(SIGUSR1, &action, NULL) < 0 ||
+      sigaction(SIGINT, &action, NULL) < 0 ||
+      sigaction(SIGTERM, &action, NULL) < 0
+    ) {
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set signal handler");
+      close(sock);
+      return -errno;
+    }
+
     running = 1;
     while (running) {
       sem_wait(&queue_counter);
-
       void* frame = frame_queue.dequeue();
+      if (!frame) continue;
 
       size_t total_bytes_written = 0;
       while (total_bytes_written < frame_bytes) {
-        ssize_t result = write(sock, static_cast<const char*>(frame) + total_bytes_written, frame_bytes - total_bytes_written);
+        char test_buf[frame_bytes];
+        memcpy(test_buf, frame, frame_bytes);
+        ssize_t result = write(sock, test_buf + total_bytes_written, frame_bytes - total_bytes_written);
         if (result < 0) {
-          if (errno == EINTR) {
-            continue;
-          }
+          if (errno == EINTR) continue;
           logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
-
+          std::cout << "err: " << errno << std::endl;
         }
         total_bytes_written += result;
       }
       logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
-      std::cout << "err: " << errno << std::endl;
     }
 
     close(sock);

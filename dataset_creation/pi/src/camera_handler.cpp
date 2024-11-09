@@ -208,12 +208,14 @@ void camera_handler_t::queue_request() {
   if (enqueued_buffers > frame_buffers_ - 2) {
     const char* err = "Buffer is not ready for requeuing";
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
+    //throw std::runtime_error(err);
+    return;
   }
   if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
+    //throw std::runtime_error(err);
+    return;
   }
   ++next_req_idx_;
   next_req_idx_ %= requests_.size();
