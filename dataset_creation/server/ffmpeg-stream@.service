@@ -8,6 +8,6 @@ After=network.target
 [Service]
 # Start ffmpeg to receive stream via TCP, interpret frames as 24fps, and re-encode to H.265
 EnvironmentFile=/etc/default/ffmpeg-stream
-ExecStart=/usr/bin/ffmpeg -framerate 24 -i tcp://0.0.0.0:%i?listen=1 -c:v hevc_nvenc -preset slow -crf 20 -f segment "${FILENAME}"
+ExecStart=/usr/bin/ffmpeg -f rawvideo -pix_fmt yuv420p -s 1920x1080 -r 30 -i tcp://0.0.0.0:%i?listen=1 -c:v hevc_nvenc -preset slow -crf 20 -f segment "${FILENAME}"
 Restart=always
 RestartSec=0

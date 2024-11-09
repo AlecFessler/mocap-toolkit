@@ -6,19 +6,21 @@
 #define CAMERAHANDLER_H
 
 #include <cstdint>
+#include <semaphore>
 #include <memory>
 #include <vector>
 #include <libcamera/libcamera.h>
-#include "p_ctx.h"
-
-class p_ctx_t;
+#include "config_parser.h"
+#include "logger.h"
+#include "lock_free_queue.h"
 
 class camera_handler_t {
 public:
   camera_handler_t(
-    std::pair<unsigned int, unsigned int> resolution,
-    int buffer_count,
-    std::pair<std::int64_t, std::int64_t> frame_duration_limits
+    config_parser& config,
+    logger_t& logger,
+    lock_free_queue_t& frame_queue,
+    sem_t& queue_counter
   );
   ~camera_handler_t();
   camera_handler_t(const camera_handler_t&) = delete;
@@ -27,7 +29,9 @@ public:
   camera_handler_t& operator=(camera_handler_t&&) = delete;
   void queue_request();
 private:
-  p_ctx_t& p_ctx_;
+  logger_t& logger;
+  lock_free_queue_t& frame_queue;
+  sem_t& queue_counter;
   std::unique_ptr<libcamera::CameraManager> cm_;
   std::shared_ptr<libcamera::Camera> camera_;
   std::unique_ptr<libcamera::CameraConfiguration> config_;
@@ -36,7 +40,9 @@ private:
   libcamera::Stream* stream_;
   std::vector<std::unique_ptr<libcamera::Request>> requests_;
   std::vector<void*> mmap_buffers_;
-  uint64_t next_req_idx_;
+  int next_req_idx_;
+  int frame_bytes_;
+  int frame_buffers_;
   void request_complete(libcamera::Request* request);
 };
 
