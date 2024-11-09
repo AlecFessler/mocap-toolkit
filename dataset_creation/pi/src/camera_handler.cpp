@@ -3,7 +3,7 @@
 // See LICENSE file in the project root for full license information.
 
 #include <cstring>
-#include <sstream>
+#include <semaphore.h>
 #include <sys/mman.h>
 #include "camera_handler.h"
 #include "logger.h"
@@ -11,78 +11,62 @@
 #include <iostream>
 
 camera_handler_t::camera_handler_t(
-  config_parser& config,
-  logger_t& logger
+  std::pair<unsigned int, unsigned int> resolution,
+  int buffer_count,
+  std::pair<std::int64_t, std::int64_t> frame_duration_limits
 ) :
-  config(config),
-  logger(logger),
+  p_ctx_(p_ctx_t::get_instance()),
   next_req_idx_(0) {
-  unsigned int frame_width = config.get_int("FRAME_WIDTH");
-  unsigned int frame_height = config.get_int("FRAME_HEIGHT");
-  unsigned int fps = config.get_int("FPS");
-  unsigned int frame_buffers = config.get_int("FRAME_BUFFERS");
-  unsigned int frame_duration_min = config.get_int("FRAME_DURATION_MIN");
-  unsigned int frame_duration_max = config.get_int("FRAME_DURATION_MAX");
-  unsigned int streaming_cpu = config.get_int("STREAMING_CPU");
-  std::string server_ip = config.get_string("SERVER_IP");
-  std::string port = config.get_string("PORT");
-
-  y_plane_bytes_ = frame_width * frame_height;
-  u_plane_bytes_ = y_plane_bytes_ / 4;
-  v_plane_bytes_ = u_plane_bytes_;
-  frame_bytes_ = y_plane_bytes_ + u_plane_bytes_ + v_plane_bytes_;
-
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   auto cameras = cm_->cameras();
   if (cameras.empty()) {
     const char* err = "No cameras available";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   camera_ = cm_->get(cameras[0]->id());
   if (!camera_) {
     const char* err = "Failed to retrieve camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
   if (camera_->acquire() < 0) {
     const char* err = "Failed to acquire camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   libcamera::StreamConfiguration& cfg = config_->at(0);
-  cfg.pixelFormat = libcamera::formats::YUV420;
-  cfg.size = { frame_width, frame_height };
-  cfg.bufferCount = frame_buffers;
+  cfg.size = { resolution.first, resolution.second };
+  cfg.bufferCount = buffer_count;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   } else if (config_->validate() == libcamera::CameraConfiguration::Adjusted) {
     const char* err = "Invalid camera configuration, adjusted";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   if (camera_->configure(config_.get()) < 0) {
     const char* err = "Failed to configure camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -90,7 +74,7 @@ camera_handler_t::camera_handler_t(
   stream_ = cfg.stream();
   if (allocator_->allocate(stream_) < 0) {
     const char* err = "Failed to allocate buffers";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -99,12 +83,12 @@ camera_handler_t::camera_handler_t(
     std::unique_ptr<libcamera::Request> request = camera_->createRequest(req_cookie++);
     if (!request) {
       const char* err = "Failed to create request";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
     if (request->addBuffer(stream_, buffer.get()) < 0) {
       const char* err = "Failed to add buffer to request";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
     requests_.push_back(std::move(request));
@@ -113,15 +97,15 @@ camera_handler_t::camera_handler_t(
     const libcamera::FrameBuffer::Plane& u_plane = buffer->planes()[1];
     const libcamera::FrameBuffer::Plane& v_plane = buffer->planes()[2];
 
-    if (y_plane.length != y_plane_bytes_ || u_plane.length != u_plane_bytes_ || v_plane.length != v_plane_bytes_) {
+    if (y_plane.length != Y_PLANE || u_plane.length != UV_PLANE || v_plane.length != UV_PLANE) {
       const char* err = "Plane size does not match expected size";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
     void* data = mmap(
       nullptr,
-      frame_bytes_,
+      IMAGE_BYTES,
       PROT_READ | PROT_WRITE,
       MAP_SHARED,
       y_plane.fd.get(),
@@ -130,7 +114,7 @@ camera_handler_t::camera_handler_t(
 
     if (data == MAP_FAILED) {
       std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
+      p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
       throw std::runtime_error(err);
     }
 
@@ -146,9 +130,9 @@ camera_handler_t::camera_handler_t(
 
   // Fix exposure time to half the time between frames
   // May be able to remove frame duration limit control since we are setting exposure
-  controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_min, frame_duration_max }));
+  controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_limits.first, frame_duration_limits.second }));
   controls_->set(libcamera::controls::AeEnable, false);
-  controls_->set(libcamera::controls::ExposureTime, frame_duration_min);
+  controls_->set(libcamera::controls::ExposureTime, frame_duration_limits.first);
 
   // Fix focus to ~12 inches
   // Focus value should be reciprocal of distance in meters
@@ -164,22 +148,7 @@ camera_handler_t::camera_handler_t(
 
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
-  }
-
-  std::stringstream ffmpeg_cmd;
-  ffmpeg_cmd << "taskset -c " << streaming_cpu
-             << " ffmpeg -f rawvideo -pix_fmt yuv420p -video_size "
-             << frame_width << "x" << frame_height
-             << " -framerate " << fps
-             << " -i - -c:v libx264 -f mpegts "
-             << "tcp://" << server_ip << ":" << port;
-  std::string cmd_str = ffmpeg_cmd.str();
-  ffmpeg_ = popen(cmd_str.c_str(), "w");
-  if (!ffmpeg_) {
-    const char* err = "Failed to start ffmpeg";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 }
@@ -187,19 +156,25 @@ camera_handler_t::camera_handler_t(
 camera_handler_t::~camera_handler_t() {
   camera_->stop();
   for (void* data : mmap_buffers_)
-    munmap(data, frame_bytes_);
+    munmap(data, IMAGE_BYTES);
   allocator_->free(stream_);
   allocator_.reset();
   camera_->release();
   camera_.reset();
   cm_->stop();
-  if (ffmpeg_)
-    pclose(ffmpeg_);
 }
 
 void camera_handler_t::queue_request() {
   /**
    * Queue the next request in the sequence.
+   *
+   * Before queuing the request, ensure that the number of enqueued
+   * buffers is no more than PREALLOCATED_BUFFERS - 2. This is because
+   * the queue counter may fall behind by, but no more than, 1. This
+   * occurs when the child thread calls sem_wait, decrementing the
+   * semaphore, but before it dequeues the buffer. Thus, we check
+   * for 2 less than max to ensure at least one is available even
+   * if the counter is behind by 1.
    *
    * If requests are not returned at the same rate as they are queued,
    * this method will throw to signal that the camera is not keeping up,
@@ -210,9 +185,16 @@ void camera_handler_t::queue_request() {
    *  - std::runtime_error: Buffer is not ready for requeuing
    *  - std::runtime_error: Failed to queue request
    */
+  int enqueued_buffers = 0;
+  sem_getvalue(p_ctx_.queue_counter, &enqueued_buffers);
+  if ((unsigned int)enqueued_buffers > PREALLOCATED_BUFFERS - 2) {
+    const char* err = "Buffer is not ready for requeuing";
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
   if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    p_ctx_.logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
   ++next_req_idx_;
@@ -224,8 +206,8 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
    * Signal handler for when a request is completed.
    *
    * This method is called by the camera manager when a request is completed.
-   * The frame buffer is piped to ffmpeg for streaming back to the server.
    * The request is then reused and the buffer is enqueued for transmission.
+   * The queue counter is incremented to signal that a buffer is available.
    *
    * Parameters:
    *  - request: The completed request
@@ -234,9 +216,14 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
     return;
 
   const char* info = "Request completed";
-  logger.log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
+  p_ctx_.logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
   void* data = mmap_buffers_[request->cookie()];
-  fwrite(data, 1, frame_bytes_, ffmpeg_);
+  bool enqueued = false;
+  do {
+    enqueued = p_ctx_.frame_queue->enqueue(data);
+  } while(!enqueued);
+
+  sem_post(p_ctx_.queue_counter);
   request->reuse(libcamera::Request::ReuseBuffers);
 }
