@@ -170,11 +170,15 @@ camera_handler_t::camera_handler_t(
 
   std::stringstream ffmpeg_cmd;
   ffmpeg_cmd << "taskset -c " << streaming_cpu
-             << " ffmpeg -f rawvideo -pix_fmt yuv420p -video_size "
-             << frame_width << "x" << frame_height
-             << " -framerate " << fps
-             << " -i - -c:v libx264 -f mpegts "
-             << "tcp://" << server_ip << ":" << port;
+             << " ffmpeg"
+             << " -f rawvideo"
+             << " -pix_fmt yuv420p"
+             << " -s " << frame_width << "x" << frame_height
+             << " -r " << fps
+             << " -i -"
+             << " -fflags nobuffer"
+             << " -f mpegts"
+             << " tcp://" << server_ip << ":" << port;
   std::string cmd_str = ffmpeg_cmd.str();
   ffmpeg_ = popen(cmd_str.c_str(), "w");
   if (!ffmpeg_) {
@@ -193,8 +197,10 @@ camera_handler_t::~camera_handler_t() {
   camera_->release();
   camera_.reset();
   cm_->stop();
-  if (ffmpeg_)
+  if (ffmpeg_) {
+    fflush(ffmpeg_);
     pclose(ffmpeg_);
+  }
 }
 
 void camera_handler_t::queue_request() {
@@ -237,6 +243,12 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   logger.log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
   void* data = mmap_buffers_[request->cookie()];
-  fwrite(data, 1, frame_bytes_, ffmpeg_);
+  size_t written = fwrite(data, 1, frame_bytes_, ffmpeg_);
+  if (written < frame_bytes_) {
+    const char* err = "Failed to write complete frame to ffmpeg";
+    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
+
   request->reuse(libcamera::Request::ReuseBuffers);
 }
