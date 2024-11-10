@@ -133,9 +133,7 @@ int main() {
 
       size_t total_bytes_written = 0;
       while (total_bytes_written < frame_bytes) {
-        char test_buf[frame_bytes];
-        memcpy(test_buf, frame, frame_bytes);
-        ssize_t result = write(sock, test_buf + total_bytes_written, frame_bytes - total_bytes_written);
+        ssize_t result = write(sock, (char*)frame + total_bytes_written, frame_bytes - total_bytes_written);
         if (result < 0) {
           if (errno == EINTR) continue;
           logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");

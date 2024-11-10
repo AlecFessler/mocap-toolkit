@@ -42,7 +42,10 @@ private:
   std::vector<void*> mmap_buffers_;
   int next_req_idx_;
   int frame_bytes_;
+  int dma_frame_buffers_;
   int frame_buffers_;
+  void* frame_bytes_buffer_;
+  unsigned int frame_bytes_offset_;
   void request_complete(libcamera::Request* request);
 };
 

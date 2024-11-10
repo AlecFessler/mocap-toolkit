@@ -21,13 +21,15 @@ camera_handler_t::camera_handler_t(
   logger(logger),
   frame_queue(frame_queue),
   queue_counter(queue_counter),
-  next_req_idx_(0) {
+  next_req_idx_(0),
+  frame_bytes_offset_(0) {
 
   unsigned int frame_width = config.get_int("FRAME_WIDTH");
   unsigned int frame_height = config.get_int("FRAME_HEIGHT");
   unsigned int frame_duration_min = config.get_int("FRAME_DURATION_MIN");
   unsigned int frame_duration_max = config.get_int("FRAME_DURATION_MAX");
   frame_buffers_ = config.get_int("FRAME_BUFFERS");
+  dma_frame_buffers_ = config.get_int("DMA_BUFFERS");
 
   unsigned int y_plane_bytes = frame_width * frame_height;
   unsigned int u_plane_bytes = y_plane_bytes / 4;
@@ -70,7 +72,7 @@ camera_handler_t::camera_handler_t(
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.pixelFormat = libcamera::formats::YUV420;
   cfg.size = { frame_width, frame_height };
-  cfg.bufferCount = frame_buffers_;
+  cfg.bufferCount = dma_frame_buffers_;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
@@ -139,7 +141,7 @@ camera_handler_t::camera_handler_t(
     mmap_buffers_.push_back(data);
   }
 
-  camera_->requestCompleted.connect(this,& camera_handler_t::request_complete);
+  camera_->requestCompleted.connect(this, &camera_handler_t::request_complete);
 
   // Configure some settings for more deterministic capture times
   // May need to be adjusted based on lighting conditions
@@ -169,12 +171,20 @@ camera_handler_t::camera_handler_t(
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
+
+  frame_bytes_buffer_ = malloc(frame_bytes_ * frame_buffers_);
+  if (!frame_bytes_buffer_) {
+    const char* err = "Failed to allocate frame bytes buffer";
+    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
 }
 
 camera_handler_t::~camera_handler_t() {
   camera_->stop();
   for (void* data : mmap_buffers_)
     munmap(data, frame_bytes_);
+  free(frame_bytes_buffer_);
   allocator_->free(stream_);
   allocator_.reset();
   camera_->release();
@@ -187,7 +197,7 @@ void camera_handler_t::queue_request() {
    * Queue the next request in the sequence.
    *
    * Before queuing the request, ensure that the number of enqueued
-   * buffers is no more than frame_buffers_ - 2. This is because
+   * buffers is no more than dma_frame_buffers_ - 2. This is because
    * the queue counter may fall behind by, but no more than, 1. This
    * occurs when the child thread calls sem_wait, decrementing the
    * semaphore, but before it dequeues the buffer. Thus, we check
@@ -205,18 +215,21 @@ void camera_handler_t::queue_request() {
    */
   int enqueued_buffers = 0;
   sem_getvalue(&queue_counter, &enqueued_buffers);
+
   if (enqueued_buffers > frame_buffers_ - 2) {
     const char* err = "Buffer is not ready for requeuing";
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    //throw std::runtime_error(err);
+    throw std::runtime_error(err);
     return;
   }
+
   if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    //throw std::runtime_error(err);
+    throw std::runtime_error(err);
     return;
   }
+
   ++next_req_idx_;
   next_req_idx_ %= requests_.size();
 }
@@ -239,9 +252,14 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   logger.log(logger_t::level_t::INFO, __FILE__, __LINE__, info);
 
   void* data = mmap_buffers_[request->cookie()];
+  void* frame_offset = (char*)frame_bytes_buffer_ + frame_bytes_ * frame_bytes_offset_;
+
+  memcpy(frame_offset, data, frame_bytes_);
+  frame_bytes_offset_ = (frame_bytes_offset_ + 1) % frame_buffers_;
+
   bool enqueued = false;
   do {
-    enqueued = frame_queue.enqueue(data);
+    enqueued = frame_queue.enqueue(frame_offset);
   } while(!enqueued);
 
   sem_post(&queue_counter);

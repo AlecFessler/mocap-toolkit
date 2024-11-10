@@ -18,3 +18,9 @@ install: all
 uninstall:
 	sudo rm -f /lib/modules/$(shell uname -r)/extra/gpio17_interrupt_driver.ko
 	sudo depmod -a
+
+load: install
+	sudo modprobe gpio17_interrupt_driver
+
+unload:
+	sudo modprobe -r gpio17_interrupt_driver
