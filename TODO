@@ -1,0 +1,5 @@
+1.) Write a patch for the bcm2835 camera driver to implement splice_read to enable zero copy transfer of the frame buffers from the camera file descriptor to the socket file descriptor
+
+2.) Remove the user space allocated frame buffers and increase the number of DMA frame buffers to compensate, and then remove the memcpy which copies data from the DMA frame buffer to the user space frame buffer
+
+3.) Replace the write syscall to the socket fd with two splice syscalls, the first with fd_in being the camera fd and the pipe fd being fd_out, and the second with the pipe fd being fd_in and the socket fd being fd_out. Ensure the SPLICE_F_MORE flag is passed to the second splice call to hint that more data will be coming in subsequent splices (see splice man page for more details).
