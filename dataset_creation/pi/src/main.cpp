@@ -52,8 +52,7 @@ int main() {
 
     logger = std::make_unique<logger_t>("logs.txt");
 
-    int num_threads = 1;
-    lock_free_queue_t frame_queue(num_threads, frame_buffers);
+    lock_free_queue_t frame_queue(frame_buffers);
 
     sem_t queue_counter;
     if (sem_init(&queue_counter, 0, 0) < 0) {
@@ -137,7 +136,6 @@ int main() {
         if (result < 0) {
           if (errno == EINTR) continue;
           logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
-          std::cout << "err: " << errno << std::endl;
         }
         total_bytes_written += result;
       }

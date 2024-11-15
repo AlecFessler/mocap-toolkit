@@ -6,16 +6,15 @@
 #define LOCK_FREE_QUEUE_H
 
 #include <atomic>
-#include "interval_based_recycler.h"
 #include "lock_free_node.h"
+#include "lock_free_stack.h"
 
 class lock_free_queue_t {
 public:
   lock_free_queue_t(
-    int num_threads,
     int prealloc_count
   );
-  // recycler manages memory so no destructor needed
+  ~lock_free_queue_t();
 
   bool enqueue(void* data) noexcept;
   void* dequeue() noexcept;
@@ -24,7 +23,8 @@ public:
 private:
   std::atomic<lock_free_node_t*> head;
   std::atomic<lock_free_node_t*> tail;
-  interval_based_recycler_t recycler;
+  lock_free_node_t* prealloc_nodes;
+  lock_free_stack_t available_nodes;
 };
 
 #endif // LOCK_FREE_QUEUE_H
