@@ -197,9 +197,9 @@ void camera_handler_t::queue_request() {
    * Queue the next request in the sequence.
    *
    * Before queuing the request, ensure that the number of enqueued
-   * buffers is no more than dma_frame_buffers_ - 2. This is because
+   * buffers is no more than frame_buffers_ - 2. This is because
    * the queue counter may fall behind by, but no more than, 1. This
-   * occurs when the child thread calls sem_wait, decrementing the
+   * occurs when the main loop calls sem_wait, decrementing the
    * semaphore, but before it dequeues the buffer. Thus, we check
    * for 2 less than max to ensure at least one is available even
    * if the counter is behind by 1.

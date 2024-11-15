@@ -1,5 +1,48 @@
-1.) Write a patch for the bcm2835 camera driver to implement splice_read to enable zero copy transfer of the frame buffers from the camera file descriptor to the socket file descriptor
+1.) Implement a patch for the bcm2835 camera driver to enable zero copy transfer between the dma-buf and socket file descriptors
 
-2.) Remove the user space allocated frame buffers and increase the number of DMA frame buffers to compensate, and then remove the memcpy which copies data from the DMA frame buffer to the user space frame buffer
+NOTES FOR IMPLEMENTATION
 
-3.) Replace the write syscall to the socket fd with two splice syscalls, the first with fd_in being the camera fd and the pipe fd being fd_out, and the second with the pipe fd being fd_in and the socket fd being fd_out. Ensure the SPLICE_F_MORE flag is passed to the second splice call to hint that more data will be coming in subsequent splices (see splice man page for more details).
+dma-buf subsystem enables sharing buffers for hardware acecss across multiple device drivers and subsystems, and for synchronizing asyncronous hardware access
+
+The components are:
+1.) dma-buf, a scatter-gather table exposed to userspace as a file descriptor
+2.) fences, providing a mechanism to signal when a device has completed access
+3.) reservation, a struct managing the state of fences and the read-write semaphore
+
+The read-write semaphore (sometimes called readers-writer lock) uses two counters to allow for multiple readers but only a single writer, here is a conceptual example:
+
+struct rw_semaphore {
+  int nreaders;                    // number of active readers
+  bool writer_active;              // whether writer has the lock
+  spinlock_t lock;                 // protects the counters themselves
+  wait_queue_head_t readers_queue; // waiting queue for blocked readers
+  wait_queue_head_t writers_queue; // waiting queue for blocked writers
+};
+
+Multiple readers can increment nreaders, but a writer can only get access if nreaders == 0 and writer_active == false. New readers must wait if writer_active == false.
+
+A reservation struct can hold one exclusive fence for writers, or multiple shared fences for readers.
+
+When a device wants to WRITE to the reservation it must:
+1.) Wait for any existing fences (shared or exclusive) to be signaled
+2.) Create a new exclusive fence
+3.) Associate this fence with the reservation
+
+When a device wants to READ from the reservation it must:
+1.) Wait for any exclusive fences to be signaled
+2.) Create a new shared fence
+3.) Add the shared fence to the set of shared fences
+
+DMA buffers operate on pages directly, rather than referencing memory through virtual addressing. Mapping the DMA buffers into a userspace processes virtual address space is done via mmap syscall with the buffer's file descriptor.
+
+Any exporters or users of dma-buf MUST have 'select DMA_SHARED_BUFFER' in their respective Kconfigs.
+
+The exporter of a DMA buffer is responsible for:
+1.) Implementing operations and assigning to dma_buf_ops struct
+2.) Manages details of buffer allocation, wrapped in dma_buf struct
+3.) Decides the physical storage location of the buffer (ram, gpu, etc.)
+4.) Handles migration of data (scatterlist) if necessary for the importing device
+
+The importing device simply uses the dma-buf API for working with the buffer.
+
+The exporting device api MUST implement a mechanism for userspace to set FD_CLOEXEC, not only to prevent a resource leak on calls to exec() (replacing current process with a new one), but also to prevent a potential security hole where the new process may have access to memory it shouldn't. Using a separate fcntl() call is not ideal, as this can create a race condition where another thread may call exec() before fcntl(), therefore the option should be provided as a flag during dma-buf creation.
