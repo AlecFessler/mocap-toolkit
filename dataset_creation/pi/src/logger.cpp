@@ -22,12 +22,13 @@ logger_t::~logger_t() {
 }
 
 static const char* level_to_str(logger_t::level_t level) {
-  constexpr const char* levels[] = {"INFO", "WARNING", "ERROR", "UNKNOWN"};
+  constexpr const char* levels[] = {"INFO", "DEBUG", "WARNING", "ERROR", "UNKNOWN"};
   switch (level) {
     case logger_t::level_t::INFO: return levels[0];
-    case logger_t::level_t::WARNING: return levels[1];
-    case logger_t::level_t::ERROR: return levels[2];
-    default: return levels[3];
+    case logger_t::level_t::DEBUG: return levels[1];
+    case logger_t::level_t::WARNING: return levels[2];
+    case logger_t::level_t::ERROR: return levels[3];
+    default: return levels[4];
   }
 }
 

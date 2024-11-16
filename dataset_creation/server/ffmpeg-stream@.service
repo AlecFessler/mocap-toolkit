@@ -7,7 +7,7 @@ After=network.target
 
 [Service]
 EnvironmentFile=/etc/default/ffmpeg-stream
-ExecStart=/usr/bin/ffmpeg -f rawvideo -pix_fmt yuv420p -s 1280x720 -r 30 -i tcp://0.0.0.0:%i?listen=1 -c:v hevc_nvenc -preset slow -crf 20 -movflags +faststart+frag_keyframe -f segment "${FILENAME}"
+ExecStart=/usr/bin/ffmpeg -f h264 -i tcp://0.0.0.0:%i?listen=1 -c:v hevc_nvenc -preset slow -crf 20 -movflags +faststart+frag_keyframe -f segment "${FILENAME}"
 Restart=always
 RestartSec=0
 KillSignal=SIGINT

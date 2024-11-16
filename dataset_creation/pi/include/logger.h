@@ -16,6 +16,7 @@ private:
 public:
   enum level_t {
     INFO,
+    DEBUG,
     WARNING,
     ERROR
   };

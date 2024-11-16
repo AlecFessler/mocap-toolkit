@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <iostream>
 #include <memory>
-#include <pthread.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -19,8 +18,7 @@
 #include <unistd.h>
 #include "camera_handler.h"
 #include "logger.h"
-
-#include <iostream>
+#include "x264enc.h"
 
 extern char** environ;
 volatile static sig_atomic_t running = 0;
@@ -46,9 +44,6 @@ int main() {
     std::string port = config.get_string("PORT");
     int frame_buffers = config.get_int("FRAME_BUFFERS");
     int recording_cpu = config.get_int("RECORDING_CPU");
-    int frame_width = config.get_int("FRAME_WIDTH");
-    int frame_height = config.get_int("FRAME_HEIGHT");
-    unsigned int frame_bytes = frame_width * frame_height * 3 / 2;
 
     logger = std::make_unique<logger_t>("logs.txt");
 
@@ -61,6 +56,7 @@ int main() {
     }
 
     cam = std::make_unique<camera_handler_t>(config, *logger, frame_queue, queue_counter);
+    x264_encoder encoder(config);
 
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -130,9 +126,15 @@ int main() {
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
 
+      size_t enc_bytes = encoder.encode_frame((uint8_t*)frame);
+
       size_t total_bytes_written = 0;
-      while (total_bytes_written < frame_bytes) {
-        ssize_t result = write(sock, (char*)frame + total_bytes_written, frame_bytes - total_bytes_written);
+      while (total_bytes_written < enc_bytes) {
+        ssize_t result = write(
+          sock,
+          encoder.out_buf.get() + total_bytes_written,
+          enc_bytes - total_bytes_written
+        );
         if (result < 0) {
           if (errno == EINTR) continue;
           logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
