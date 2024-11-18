@@ -125,31 +125,34 @@ int main() {
     running = 1;
     while (running) {
       sem_wait(&queue_counter);
+
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
 
       encoder.encode_frame((uint8_t*)frame);
 
       size_t enc_bytes = encoder.pkt->size;
-      if (enc_bytes > 0) {
-        size_t total_bytes_written = 0;
-        while (total_bytes_written < enc_bytes) {
-          ssize_t result = write(
-            *socket_ptr,
-            encoder.pkt->data + total_bytes_written,
-            enc_bytes - total_bytes_written
-          );
-          if (result < 0) {
-            if (errno == EINTR) continue;
-            logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
-            running = 0;
-            break;
-          }
-          total_bytes_written += result;
-        }
-      } else {
-        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "No frame data");
+      if (enc_bytes == 0) {
+        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "No frame data");
+        continue;
       }
+
+      size_t total_bytes_written = 0;
+      while (total_bytes_written < enc_bytes) {
+        ssize_t result = write(
+          *socket_ptr,
+          encoder.pkt->data + total_bytes_written,
+          enc_bytes - total_bytes_written
+        );
+        if (result < 0) {
+          if (errno == EINTR) continue;
+          logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
+          running = 0;
+          break;
+        }
+        total_bytes_written += result;
+      }
+
       logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
     }
 
@@ -158,7 +161,7 @@ int main() {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, e.what());
     else
       std::cerr << e.what() << std::endl;
-      return 1;
+    return 1;
   }
 
   return 0;

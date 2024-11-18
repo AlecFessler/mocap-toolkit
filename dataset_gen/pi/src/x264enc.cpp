@@ -69,16 +69,14 @@ void x264_encoder::encode_frame(uint8_t* yuv420_data) {
     memcpy(frame->data[1], yuv420_data + y_size, uv_size);
     memcpy(frame->data[2], yuv420_data + y_size + uv_size, uv_size);
 
-    if (avcodec_send_frame(ctx, frame) < 0) {
+    if (avcodec_send_frame(ctx, frame) < 0)
         throw std::runtime_error("Error sending frame for encoding");
-    }
 
     int ret = avcodec_receive_packet(ctx, pkt);
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
         pkt->size = 0;
-    } else if (ret < 0) {
+    else if (ret < 0)
         throw std::runtime_error("Error receiving encoded packet");
-    }
 }
 
 x264_encoder::~x264_encoder() {
