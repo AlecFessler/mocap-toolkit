@@ -18,8 +18,8 @@ public:
     x264_encoder(x264_encoder&&) = delete;
     x264_encoder& operator=(x264_encoder&&) = delete;
 
-    size_t encode_frame(uint8_t* yuv420_data);
-    std::unique_ptr<uint8_t[]> out_buf;
+    void encode_frame(uint8_t* yuv420_data);
+    AVPacket* pkt;
 
 private:
     int width;
@@ -27,6 +27,5 @@ private:
     const AVCodec* codec;
     AVCodecContext* ctx;
     AVFrame* frame;
-    AVPacket* pkt;
 };
 #endif

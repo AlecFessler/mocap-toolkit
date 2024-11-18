@@ -22,7 +22,6 @@ case $1 in
     for port in "${PORTS[@]}"; do
       filename="port${port}_vid${counter}"
       echo "FILENAME=/home/alecfessler/Documents/mimic_dataset/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
-      touch "/tmp/recording_active_${port}"
       sudo systemctl start ffmpeg-stream@"$port".service
       echo "Started ffmpeg-stream@$port.service with filename $filename"
     done

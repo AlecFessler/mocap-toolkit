@@ -73,8 +73,14 @@ int main() {
       return -errno;
     }
 
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
+    auto socket_deleter = [](int* sockfd) {
+        if (sockfd && *sockfd >= 0)
+            close(*sockfd);
+        delete sockfd;
+    };
+
+    std::unique_ptr<int, decltype(socket_deleter)> socket_ptr(new int(socket(AF_INET, SOCK_STREAM, 0)), socket_deleter);
+    if (*socket_ptr < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
       return -errno;
     }
@@ -84,9 +90,8 @@ int main() {
     server_addr.sin_port = htons(std::stoi(port));
     inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    if (connect(*socket_ptr, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
-      close(sock);
       return -errno;
     }
 
@@ -94,14 +99,12 @@ int main() {
     fd = open("/proc/gpio_interrupt_pid", O_WRONLY);
     if (fd < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to open /proc/gpio_interrupt_pid");
-      close(sock);
       return -errno;
     }
     pid_t pid = getpid();
     if (dprintf(fd, "%d", pid) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to write to /proc/gpio_interrupt_pid");
       close(fd);
-      close(sock);
       return -errno;
     }
     close(fd);
@@ -116,7 +119,6 @@ int main() {
       sigaction(SIGTERM, &action, NULL) < 0
     ) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set signal handler");
-      close(sock);
       return -errno;
     }
 
@@ -126,32 +128,37 @@ int main() {
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
 
-      size_t enc_bytes = encoder.encode_frame((uint8_t*)frame);
+      encoder.encode_frame((uint8_t*)frame);
 
-      size_t total_bytes_written = 0;
-      while (total_bytes_written < enc_bytes) {
-        ssize_t result = write(
-          sock,
-          encoder.out_buf.get() + total_bytes_written,
-          enc_bytes - total_bytes_written
-        );
-        if (result < 0) {
-          if (errno == EINTR) continue;
-          logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
+      size_t enc_bytes = encoder.pkt->size;
+      if (enc_bytes > 0) {
+        size_t total_bytes_written = 0;
+        while (total_bytes_written < enc_bytes) {
+          ssize_t result = write(
+            *socket_ptr,
+            encoder.pkt->data + total_bytes_written,
+            enc_bytes - total_bytes_written
+          );
+          if (result < 0) {
+            if (errno == EINTR) continue;
+            logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
+            running = 0;
+            break;
+          }
+          total_bytes_written += result;
         }
-        total_bytes_written += result;
+      } else {
+        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "No frame data");
       }
       logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
     }
-
-    close(sock);
 
   } catch (const std::exception& e) {
     if (logger)
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, e.what());
     else
       std::cerr << e.what() << std::endl;
-    return 1;
+      return 1;
   }
 
   return 0;
