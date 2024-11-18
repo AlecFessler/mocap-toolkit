@@ -21,7 +21,7 @@ case $1 in
     counter=$(next_counter)
     for port in "${PORTS[@]}"; do
       filename="port${port}_vid${counter}"
-      echo "FILENAME=/home/alecfessler/Documents/mimic_dataset/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+      echo "FILENAME=/tmp/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
       sudo systemctl start ffmpeg-stream@"$port".service
       echo "Started ffmpeg-stream@$port.service with filename $filename"
     done
@@ -53,7 +53,7 @@ case $1 in
     counter=$(next_counter)
     for port in "${PORTS[@]}"; do
       filename="port${port}_vid${counter}"
-      echo "FILENAME=/home/alecfessler/Documents/mimic_dataset/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+      echo "FILENAME=/tmp/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
       sudo systemctl restart ffmpeg-stream@"$port".service
       echo "Restarted ffmpeg-stream@$port.service with filename $filename"
     done

@@ -2,12 +2,11 @@
 
 PORTS=(12345 12346 12347)
 TIMEOUT=5  # Seconds to wait before considering stream inactive
-VIDEO_DIR="/home/alecfessler/Documents/mimic_dataset"
 
 wait_for_recording() {
     local port=$1
     local counter=$2
-    local filename="${VIDEO_DIR}/port${port}_vid${counter}_000.mp4"
+    local filename="tmp/port${port}_vid${counter}_000.mp4"
 
     echo "Waiting for recording to start on port ${port}..."
     while true; do
@@ -23,6 +22,30 @@ wait_for_recording() {
         fi
         sleep 1
     done
+}
+
+get_latest_segment() {
+    local port=$1
+    local counter=$2
+    ls -v tmp/port${port}_vid${counter}_*.mp4 2>/dev/null | tail -n 1
+}
+
+wait_for_ffmpeg_completion() {
+    local counter=$1
+    echo "Waiting for FFmpeg to finish writing all segments..."
+
+    for port in "${PORTS[@]}"; do
+        latest_file=$(get_latest_segment "$port" "$counter")
+        if [ -n "$latest_file" ]; then
+            echo "Waiting for $latest_file to complete..."
+            inotifywait -e close_write "$latest_file"
+            echo "File $latest_file completed"
+        else
+            echo "No files found for port $port"
+        fi
+    done
+
+    echo "All segments complete, ready for preprocessing"
 }
 
 check_connection() {
@@ -52,9 +75,15 @@ while true; do
         done
 
         if [ "$all_inactive" = true ]; then
-            echo "All streams inactive, restarting recording..."
+            current_counter=$(cat ".video_counter.txt")
+            echo "All streams inactive, waiting for FFmpeg to finish..."
+            wait_for_ffmpeg_completion "$current_counter"
+
+            echo "Starting preprocessing..."
+            #python3 preprocess.py
+
+            echo "Restarting recording..."
             $(dirname "$0")/control_script.sh restart
-            # Invoke preprocessing here
         fi
     else
         # Wait for initial recordings on all ports
