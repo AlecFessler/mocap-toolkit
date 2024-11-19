@@ -147,14 +147,14 @@ def main():
     x_alignment_err = center[0] - crop_center[0]
     y_alignment_err = center[1] - crop_center[1]
 
-    calibration_params = {
+    alignment_params = {
         'rot_err': rot_err,
         'crop_region': (int(x_min), int(y_min), int(crop_width), int(crop_height)),
         'offset': (int(x_alignment_err), int(y_alignment_err))
     }
 
-    with open(f'{cam_name}_calibration_params.json', 'w') as f:
-        json.dump(calibration_params, f, indent=2)
+    with open(f'{cam_name}_alignment_params.json', 'w') as f:
+        json.dump(alignment_params, f, indent=2)
 
 if __name__ == "__main__":
     main()
