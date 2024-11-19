@@ -150,7 +150,7 @@ def main():
     alignment_params = {
         'rot_err': rot_err,
         'crop_region': (int(x_min), int(y_min), int(crop_width), int(crop_height)),
-        'offset': (int(x_alignment_err), int(y_alignment_err))
+        'alignment_err': (int(x_alignment_err), int(y_alignment_err))
     }
 
     with open(f'{cam_name}_alignment_params.json', 'w') as f:
