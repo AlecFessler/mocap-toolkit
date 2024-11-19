@@ -1,4 +1,7 @@
 #!/bin/bash
+# © 2024 Alec Fessler
+# MIT License
+# See LICENSE file in the project root for full license information.
 
 PORTS=(12345 12346 12347)
 COUNTER_FILE=".video_counter.txt"
