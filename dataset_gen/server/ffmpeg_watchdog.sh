@@ -5,95 +5,138 @@
 
 PORTS=(12345 12346 12347)
 TIMEOUT=5  # Seconds to wait before considering stream inactive
+LOG_FILE="/var/log/ffmpeg_watchdog.log"
 
-wait_for_recording() {
-    local port=$1
-    local counter=$2
-    local filename="tmp/port${port}_vid${counter}_000.mp4"
+log() {
+    local level="$1"
+    local message="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" | tee -a "$LOG_FILE"
+}
 
-    echo "Waiting for recording to start on port ${port}..."
+find_first_segment() {
+    local counter=$(cat ".video_counter.txt")
+    for port in "${PORTS[@]}"; do
+        local pattern="/tmp/port${port}_vid${counter}_*.mp4"
+        local segment=$(ls $pattern 2>/dev/null | head -n 1)
+        if [ -n "$segment" ]; then
+            echo "$segment"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_next_segment() {
+    local current="$1"
+    local base_pattern=$(echo "$current" | sed 's/_[0-9]\+\.mp4$//')
+    local current_num=$(echo "$current" | grep -o '_[0-9]\+\.mp4$' | grep -o '[0-9]\+')
+    local next_num=$((current_num + 1))
+    local next_segment="${base_pattern}_$(printf "%03d" $next_num).mp4"
+
+    if [ -f "$next_segment" ]; then
+        echo "$next_segment"
+        return 0
+    fi
+    return 1
+}
+
+check_port_activity() {
+    local active=false
+    for port in "${PORTS[@]}"; do
+        if timeout 1 bash -c "echo >/dev/tcp/localhost/$port" 2>/dev/null; then
+            active=true
+            break
+        fi
+    done
+    $active
+}
+
+wait_for_initial_segment() {
+    log "INFO" "Waiting for initial recording segment..."
     while true; do
-        if [ -f "$filename" ]; then
-            local size1=$(stat -f%z "$filename" 2>/dev/null || stat -c%s "$filename")
-            sleep 1
-            local size2=$(stat -f%z "$filename" 2>/dev/null || stat -c%s "$filename")
-            if [ "$size2" -gt "$size1" ]; then
-                touch "/tmp/recording_active_${port}"
-                echo "Recording detected on port ${port}"
-                return 0
-            fi
+        if first_segment=$(find_first_segment); then
+            log "INFO" "Found initial segment: $first_segment"
+            echo "$first_segment"
+            return 0
         fi
         sleep 1
     done
 }
 
-get_latest_segment() {
-    local port=$1
-    local counter=$2
-    ls -v tmp/port${port}_vid${counter}_*.mp4 2>/dev/null | tail -n 1
-}
+monitor_recording() {
+    local current_segment="$1"
+    log "INFO" "Beginning to monitor recording starting with: $current_segment"
 
-wait_for_ffmpeg_completion() {
-    local counter=$1
-    echo "Waiting for FFmpeg to finish writing all segments..."
-
-    for port in "${PORTS[@]}"; do
-        latest_file=$(get_latest_segment "$port" "$counter")
-        if [ -n "$latest_file" ]; then
-            echo "Waiting for $latest_file to complete..."
-            inotifywait -e close_write "$latest_file"
-            echo "File $latest_file completed"
-        else
-            echo "No files found for port $port"
+    while true; do
+        # Wait for current segment to finalize
+        log "DEBUG" "Waiting for segment to finalize: $current_segment"
+        if ! inotifywait -e close_write "$current_segment" 2>/dev/null; then
+            log "ERROR" "inotifywait failed on: $current_segment"
+            return 1
         fi
-    done
 
-    echo "All segments complete, ready for preprocessing"
-}
+        # Check for next segment
+        if next_segment=$(find_next_segment "$current_segment"); then
+            log "DEBUG" "Found next segment: $next_segment"
+            current_segment="$next_segment"
+            continue
+        fi
 
-check_connection() {
-    local port=$1
-    timeout 1 bash -c "echo >/dev/tcp/localhost/$port" >/dev/null 2>&1
-    return $?
-}
+        # No new segment, check if truly done
+        log "INFO" "No new segment found after: $current_segment"
+        sleep 1
 
-while true; do
-    if ls /tmp/recording_active_* 1>/dev/null 2>&1; then
-        all_inactive=true
-        for port in "${PORTS[@]}"; do
-            if [ -f "/tmp/recording_active_${port}" ]; then
-                if ! check_connection "$port"; then
-                    # Port not responding, wait TIMEOUT seconds
-                    sleep "$TIMEOUT"
-                    # Check again
-                    if [ -f "/tmp/recording_active_${port}" ] && ! check_connection "$port"; then
-                        echo "Port $port inactive for $TIMEOUT seconds"
-                    else
-                        all_inactive=false
-                    fi
-                else
-                    all_inactive=false
+        if ! next_segment=$(find_next_segment "$current_segment"); then
+            # Double check port activity
+            if ! check_port_activity; then
+                log "INFO" "No port activity detected, waiting $TIMEOUT seconds to confirm..."
+                sleep "$TIMEOUT"
+                # Final check before declaring recording stopped
+                if ! check_port_activity; then
+                    log "INFO" "Recording has stopped"
+                    return 0
                 fi
             fi
-        done
-
-        if [ "$all_inactive" = true ]; then
-            current_counter=$(cat ".video_counter.txt")
-            echo "All streams inactive, waiting for FFmpeg to finish..."
-            wait_for_ffmpeg_completion "$current_counter"
-
-            echo "Starting preprocessing..."
-            #python3 preprocess.py
-
-            echo "Restarting recording..."
-            $(dirname "$0")/control_script.sh restart
+        else
+            log "DEBUG" "Found delayed next segment: $next_segment"
+            current_segment="$next_segment"
+            continue
         fi
-    else
-        # Wait for initial recordings on all ports
-        counter=$(cat ".video_counter.txt")
-        for port in "${PORTS[@]}"; do
-            wait_for_recording "$port" "$counter"
-        done
-    fi
-    sleep 1
-done
+    done
+}
+
+
+main() {
+    log "INFO" "Starting FFmpeg watchdog"
+
+    while true; do
+        initial_segment=$(wait_for_initial_segment)
+        if [ $? -ne 0 ]; then
+            log "ERROR" "Failed to get initial segment"
+            sleep 5
+            continue
+        fi
+
+        if ! monitor_recording "$initial_segment"; then
+            log "ERROR" "Error monitoring recording"
+            sleep 5
+            continue
+        fi
+
+        # Recording stopped, restart ffmpeg and launch preprocessing
+        log "INFO" "Restarting FFmpeg and launching preprocessing..."
+        if ! $(dirname "$0")/ffmpeg_mgr.sh restart; then
+            log "ERROR" "Failed to restart FFmpeg"
+            sleep 5
+            continue
+        fi
+
+        # Background the preprocessing
+        log "INFO" "Starting preprocessing in background"
+        python3 preprocess.py &
+        preprocess_pid=$!
+        log "DEBUG" "Preprocessing started with PID: $preprocess_pid"
+    done
+}
+
+main
