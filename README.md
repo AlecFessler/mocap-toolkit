@@ -5,67 +5,46 @@ This is has been my side project for the past few months. Its purpose is to use 
 ### Architecture Diagram
 
 ```mermaid
-flowchart TB
+flowchart TD
+    classDef lightClass fill:#f5f9ff,color:black,stroke:#d3e3fd
+    classDef medClass fill:#d3e3fd,color:black,stroke:#2b6cb0
+    classDef darkClass fill:#2b6cb0,color:white
+    classDef serverClass fill:#1a4971,color:white
+
     subgraph MCU["Microcontroller Layer"]
         AVR["AVR Timer\n(30Hz Pulse)"]
         GPIO["GPIO Lines"]
         AVR --> GPIO
     end
 
-    subgraph RPi["Raspberry Pi Layer"]
-        direction TB
-        subgraph Processing1["Processing Pipeline 1"]
-            KM1["Kernel Module"]
-            Cap1["Camera Handler"]
-            Enc1["H.264 Encoder"]
-            KM1 --> Cap1
-            Cap1 --> Enc1
-        end
+    GPIO --> |"Hardware Interrupt"| KM1 & KM2 & KM3
 
-        subgraph Processing2["Processing Pipeline 2"]
-            KM2["Kernel Module"]
-            Cap2["Camera Handler"]
-            Enc2["H.264 Encoder"]
-            KM2 --> Cap2
-            Cap2 --> Enc2
-        end
-
-        subgraph Processing3["Processing Pipeline 3"]
-            KM3["Kernel Module"]
-            Cap3["Camera Handler"]
-            Enc3["H.264 Encoder"]
-            KM3 --> Cap3
-            Cap3 --> Enc3
-        end
+    subgraph RPi1["Raspberry Pi 1"]
+        KM1["Kernel Module"] --> Cap1["Camera Handler"] --> Enc1["H.264 Encoder"]
     end
 
-    subgraph Server["Server Layer"]
-        FF1["FFmpeg Service 1"]
-        FF2["FFmpeg Service 2"]
-        FF3["FFmpeg Service 3"]
-        Segments["Video Segments"]
-        Mgr["Manager Script"]
-        WD["Watchdog"]
-        Pre["Preprocessing Pipeline"]
+    subgraph RPi2["Raspberry Pi 2"]
+        KM2["Kernel Module"] --> Cap2["Camera Handler"] --> Enc2["H.264 Encoder"]
+    end
 
-        Mgr --> WD
-        WD --> |"Monitor/Control"| FF1
-        WD --> |"Monitor/Control"| FF2
-        WD --> |"Monitor/Control"| FF3
-        FF1 --> Segments
-        FF2 --> Segments
-        FF3 --> Segments
-        WD --> |"Streaming Done"| Pre
+    subgraph RPi3["Raspberry Pi 3"]
+        KM3["Kernel Module"] --> Cap3["Camera Handler"] --> Enc3["H.264 Encoder"]
+    end
+
+    Enc1 & Enc2 & Enc3 --> |"TCP Stream"| FF
+
+    subgraph Server["Server Layer"]
+        FF["FFmpeg Services"] --> Segments["Video Segments"]
+        Mgr["Manager Script"] --> WD["Watchdog"]
+        WD --> |"Monitor/Control"| FF
+        WD --> |"Streaming Done"| Pre["Preprocessing"]
         Segments --> Pre
     end
 
-    GPIO --> |"Hardware Interrupt"| KM1
-    GPIO --> |"Hardware Interrupt"| KM2
-    GPIO --> |"Hardware Interrupt"| KM3
-
-    Enc1 --> |"TCP Stream"| FF1
-    Enc2 --> |"TCP Stream"| FF2
-    Enc3 --> |"TCP Stream"| FF3
+    class AVR,GPIO lightClass
+    class KM1,KM2,KM3,Cap1,Cap2,Cap3 medClass
+    class Enc1,Enc2,Enc3,FF darkClass
+    class Mgr,WD,Pre,Segments serverClass
 ```
 
 ### Physical Setup
