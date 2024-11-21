@@ -104,7 +104,7 @@ A manager script provides commands to start, stop, restart, and monitor all serv
 [Visual examples of system output, calibration results, etc.]
 
 ## License
-License information
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 Any credits or acknowledgments
