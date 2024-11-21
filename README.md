@@ -57,10 +57,8 @@ flowchart TD
 The system achieves sub-millisecond frame capture synchronization across multiple cameras using a precise hardware and software stack. An AVR microcontroller generates GPIO interrupts at 30 FPS using its onboard clock, which are processed by a custom Linux kernel module on each Raspberry Pi. The kernel module signals a registered userspace process, which handles the camera control. Precise timing is ensured through FIFO scheduling at maximum priority, running on a fully preemptable kernel (PREEMPT_RT patch). Camera timing determinism is further enhanced by disabling automatic adjustment algorithms and using fixed parameters for exposure, focus, and gain, made possible by the consistent lighting and known capture volume of the recording environment.
 
 ### Video Pipeline
-- Camera capture system
-- Real-time encoding
-- Network streaming
-- File management
+
+The video pipeline is a single-threaded recording application driven by two signal handlers - a design that evolved from multi-threaded versions after finding that cross-core data sharing and additional synchronization complexity reduced performance. When triggered by the kernel module's GPIO interrupt, one handler queues a capture request to the camera. Upon DMA buffer completion, a second handler enqueues the buffer pointer into a lock-free queue for processing. The main loop dequeues these buffers, performs H.264 encoding, and streams the result via TCP to the server's FFmpeg instance. A semaphore tracking queue size prevents busy waiting in the main loop. The lock-free queue design is crucial, allowing the capture completion handler to safely preempt the main loop while preventing data races between components. Once the pipeline is running, timing between capture signal, capture completion, and frame transmission shows sub-millisecond variation, with approximately 8.3ms of idle time between frame transmission and the next capture signal, validating the simplified single-threaded approach. To enable precise timing analysis, a custom async-signal-safe logger captures events directly within signal handlers. Sub-millisecond synchronization is verified through comparing timestamps from these logs across cameras, made possible by NTP synchronization of all Raspberry Pis to the central server.
 
 ### System Management
 - Service orchestration
