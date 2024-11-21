@@ -7,6 +7,20 @@ import json
 import sys
 import math
 
+def load_calibration(cam_name):
+    """
+    Loads and returns the camera matrix and distortion coefficients
+
+    Parameters:
+    - cam_name: the name of the camera to load
+
+    Returns:
+    - tuple (np.array, np.array): the camera matrix and distortion coefficients
+    """
+    with open(f'{cam_name}_calibration.json', 'r') as f:
+        data = json.load(f)
+    return np.array(data['camera_matrix']), np.array(data['dist_coeffs'])
+
 def find_aruco_corners(img):
     """
     Returns the full list of corners of the aruco markers in the img.
@@ -111,9 +125,9 @@ def main():
         print("Usage: python script.py <img_path> <cam_name>")
         sys.exit(1)
 
+    img_path = sys.argv[1]
     cam_name = sys.argv[2]
 
-    img_path = sys.argv[1]
     img = cv2.imread(img_path)
     if img is None:
         print(f"Error: Could not load img at {img_path}")
@@ -122,6 +136,7 @@ def main():
     height, width = img.shape[:2]
 
     # get lens distortion matrix from the other calibration script and apply it here for accuracy
+    cam_matrix, cam_dist = load_calibration(cam_name)
 
     corners_list = find_aruco_corners(img)
     outer_corners = [find_outer_corner(height, width, corners) for corners in corners_list]
@@ -134,7 +149,6 @@ def main():
     corners_list = find_aruco_corners(rot_img)
     outer_corners = [find_outer_corner(height, width, corners) for corners in corners_list]
 
-
     x_min = min([p[0] for p in outer_corners])
     y_min = min([p[1] for p in outer_corners])
     x_max = max([p[0] for p in outer_corners])
@@ -144,13 +158,9 @@ def main():
     crop_height = y_max - y_min
     crop_center = (x_min + crop_width // 2, y_min + crop_height // 2)
 
-    x_alignment_err = center[0] - crop_center[0]
-    y_alignment_err = center[1] - crop_center[1]
-
     alignment_params = {
         'rot_err': rot_err,
         'crop_region': (int(x_min), int(y_min), int(crop_width), int(crop_height)),
-        'alignment_err': (int(x_alignment_err), int(y_alignment_err))
     }
 
     with open(f'{cam_name}_alignment_params.json', 'w') as f:
