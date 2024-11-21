@@ -12,7 +12,7 @@ flowchart TD
     classDef serverClass fill:#1a4971,color:white
 
     subgraph MCU["Microcontroller Layer"]
-        AVR["AVR Timer\n(30Hz Pulse)"]
+        AVR["AVR Timer (30Hz Pulse)"]
         GPIO["GPIO Lines"]
         AVR --> GPIO
     end
@@ -53,10 +53,8 @@ flowchart TD
 ## Technical Components
 
 ### Camera Synchronization
-- GPIO-based hardware sync
-- Kernel module
-- Real-time scheduling
-- Performance characteristics
+
+The system achieves sub-millisecond frame capture synchronization across multiple cameras using a precise hardware and software stack. An AVR microcontroller generates GPIO interrupts at 30 FPS using its onboard clock, which are processed by a custom Linux kernel module on each Raspberry Pi. The kernel module signals a registered userspace process, which handles the camera control. Precise timing is ensured through FIFO scheduling at maximum priority, running on a fully preemptable kernel (PREEMPT_RT patch). Camera timing determinism is further enhanced by disabling automatic adjustment algorithms and using fixed parameters for exposure, focus, and gain, made possible by the consistent lighting and known capture volume of the recording environment.
 
 ### Video Pipeline
 - Camera capture system
