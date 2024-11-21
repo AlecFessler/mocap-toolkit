@@ -1,7 +1,7 @@
-#include "x264enc.h"
+#include "videnc.h"
 #include <stdexcept>
 
-x264_encoder::x264_encoder(const config_parser& config)
+videnc::videnc(const config_parser& config)
     : width(config.get_int("FRAME_WIDTH")),
       height(config.get_int("FRAME_HEIGHT")) {
 
@@ -57,7 +57,7 @@ x264_encoder::x264_encoder(const config_parser& config)
     }
 }
 
-void x264_encoder::encode_frame(uint8_t* yuv420_data) {
+void videnc::encode_frame(uint8_t* yuv420_data) {
     if (pkt) av_packet_unref(pkt);
 
     const int y_size = width * height;
@@ -79,7 +79,7 @@ void x264_encoder::encode_frame(uint8_t* yuv420_data) {
         throw std::runtime_error("Error receiving encoded packet");
 }
 
-x264_encoder::~x264_encoder() {
+videnc::~videnc() {
     if (pkt) av_packet_free(&pkt);
     if (frame) av_frame_free(&frame);
     if (ctx) avcodec_free_context(&ctx);

@@ -104,11 +104,13 @@ camera_handler_t::camera_handler_t(
       logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
+
     if (request->addBuffer(stream_, buffer.get()) < 0) {
       const char* err = "Failed to add buffer to request";
       logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
+
     requests_.push_back(std::move(request));
 
     const libcamera::FrameBuffer::Plane& y_plane = buffer->planes()[0];

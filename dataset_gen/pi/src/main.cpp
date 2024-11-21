@@ -18,10 +18,12 @@
 #include <unistd.h>
 #include "camera_handler.h"
 #include "logger.h"
-#include "x264enc.h"
+#include "videnc.h"
 
 extern char** environ;
 volatile static sig_atomic_t running = 0;
+static timer_t timerid;
+static int sockfd = -1;
 std::unique_ptr<logger_t> logger;
 std::unique_ptr<camera_handler_t> cam;
 
@@ -56,7 +58,7 @@ int main() {
     }
 
     cam = std::make_unique<camera_handler_t>(config, *logger, frame_queue, queue_counter);
-    x264_encoder encoder(config);
+    videnc encoder(config);
 
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -73,14 +75,8 @@ int main() {
       return -errno;
     }
 
-    auto socket_deleter = [](int* sockfd) {
-        if (sockfd && *sockfd >= 0)
-            close(*sockfd);
-        delete sockfd;
-    };
-
-    std::unique_ptr<int, decltype(socket_deleter)> socket_ptr(new int(socket(AF_INET, SOCK_STREAM, 0)), socket_deleter);
-    if (*socket_ptr < 0) {
+    sockfd = socket(AF_INET, SOCK_STREAM, 0)
+    if (sockfd < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
       return -errno;
     }
@@ -90,8 +86,18 @@ int main() {
     server_addr.sin_port = htons(std::stoi(port));
     inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr);
 
-    if (connect(*socket_ptr, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    if (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
+      return -errno;
+    }
+
+    struct sigevent sev;
+    sev.sigev_notify = SIGEV_SIGNAL;
+    sev.sigev_signo = SIGUSR2;
+    sev.sigev_value.sival_ptr = &timerid;
+
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) {
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket disconnect timer");
       return -errno;
     }
 
@@ -144,12 +150,14 @@ int main() {
           encoder.pkt->data + total_bytes_written,
           enc_bytes - total_bytes_written
         );
+
         if (result < 0) {
           if (errno == EINTR) continue;
           logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
           running = 0;
           break;
         }
+
         total_bytes_written += result;
       }
 

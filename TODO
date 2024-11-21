@@ -6,6 +6,8 @@ Update README's video pipeline section to explain the timer/socket mechanism
 
 Create systemd service for auto-starting recording software on Pis
 
+Look at trying to reduce a level of indentation or two in the lock free queue operations
+
 Test complete system integration
 
 Perform camera calibration

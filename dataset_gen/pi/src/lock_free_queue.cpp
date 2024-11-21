@@ -34,16 +34,17 @@ bool lock_free_queue_t::enqueue(void* data) noexcept {
     lock_free_node_t* current_tail = tail.load(std::memory_order_acquire);
     lock_free_node_t* next = current_tail->next.load(std::memory_order_acquire);
 
-    if (current_tail == tail.load(std::memory_order_acquire)) {
-      if (next == nullptr) {
-        if (current_tail->next.compare_exchange_weak(next, new_node, std::memory_order_release)) {
-          tail.compare_exchange_strong(current_tail, new_node, std::memory_order_release);
-          break;
-        }
-      } else {
-        tail.compare_exchange_weak(current_tail, next, std::memory_order_release);
-      }
+    if (current_tail != tail.load(std::memory_order_acquire))
+      continue; // tail has changed, try again
+
+    if (next == nullptr && current_tail->next.compare_exchange_weak(next, new_node, std::memory_order_release)) {
+      // tail was up to date and we succeeded in linking in a new tail to next, try to update the tail ptr
+      tail.compare_exchange_strong(current_tail, new_node, std::memory_order_release);
+      break;
     }
+
+    // tail is falling behind, try to update the ptr and try again
+    tail.compare_exchange_weak(current_tail, next, std::memory_order_release);
   }
 
   return true;
@@ -57,19 +58,22 @@ void* lock_free_queue_t::dequeue() noexcept {
     lock_free_node_t* tail_node = tail.load(std::memory_order_acquire);
     lock_free_node_t* next = head_node->next.load(std::memory_order_acquire);
 
-    if (head_node == head.load(std::memory_order_acquire)) {
-      if (head_node == tail_node) {
-        if (next == nullptr) {
-          return nullptr;
-        }
-        tail.compare_exchange_weak(tail_node, next, std::memory_order_release);
-      } else {
-        data = next->data;
-        if (head.compare_exchange_weak(head_node, next, std::memory_order_release)) {
-          available_nodes.push(head_node);
-          break;
-        }
-      }
+    if (head_node != head.load(std::memory_order_acquire))
+      continue; // head has changed, try again
+
+    if (head_node == tail_node) {
+      if (next == nullptr)
+        return nullptr; // the queue is empty if head == tail and next is nullptr
+      // tail is falling behind, try to update the ptr and try again
+      tail.compare_exchange_weak(tail_node, next, std::memory_order_release);
+      continue;
+    }
+
+    data = next->data;
+    if (head.compare_exchange_weak(head_node, next, std::memory_order_release)) {
+      // we succeeded in unlinking the head, push the node to the pool and return the data
+      available_nodes.push(head_node);
+      break;
     }
   }
 
