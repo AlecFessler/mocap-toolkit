@@ -11,14 +11,12 @@
 #include <vector>
 #include <libcamera/libcamera.h>
 #include "config_parser.h"
-#include "logger.h"
 #include "lock_free_queue.h"
 
 class camera_handler_t {
 public:
   camera_handler_t(
     config_parser& config,
-    logger_t& logger,
     lock_free_queue_t& frame_queue,
     sem_t& queue_counter
   );
@@ -37,7 +35,6 @@ private:
   void init_camera_controls(config_parser& config);
   void request_complete(libcamera::Request* request);
 
-  logger_t& logger;
   lock_free_queue_t& frame_queue;
   sem_t& queue_counter;
   std::unique_ptr<libcamera::CameraManager> cm_;

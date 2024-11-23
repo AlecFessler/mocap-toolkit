@@ -8,13 +8,13 @@
 #include "logger.h"
 #include "lock_free_queue.h"
 
+extern std::unique_ptr<logger_t> logger;
+
 camera_handler_t::camera_handler_t(
   config_parser& config,
-  logger_t& logger,
   lock_free_queue_t& frame_queue,
   sem_t& queue_counter
 ) :
-  logger(logger),
   frame_queue(frame_queue),
   queue_counter(queue_counter),
   next_req_idx_(0) {
@@ -41,26 +41,26 @@ void camera_handler_t::init_camera_manager() {
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   auto cameras = cm_->cameras();
   if (cameras.empty()) {
     const char* err = "No cameras available";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   camera_ = cm_->get(cameras[0]->id());
   if (!camera_) {
     const char* err = "Failed to retrieve camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
   if (camera_->acquire() < 0) {
     const char* err = "Failed to acquire camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 }
@@ -69,7 +69,7 @@ void camera_handler_t::init_camera_config(config_parser& config) {
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -80,17 +80,17 @@ void camera_handler_t::init_camera_config(config_parser& config) {
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   } else if (config_->validate() == libcamera::CameraConfiguration::Adjusted) {
     const char* err = "Invalid camera configuration, adjusted";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
   if (camera_->configure(config_.get()) < 0) {
     const char* err = "Failed to configure camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 }
@@ -100,7 +100,7 @@ void camera_handler_t::init_dma_buffers() {
   stream_ = config_->at(0).stream();
   if (allocator_->allocate(stream_) < 0) {
     const char* err = "Failed to allocate buffers";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 
@@ -109,13 +109,13 @@ void camera_handler_t::init_dma_buffers() {
     std::unique_ptr<libcamera::Request> request = camera_->createRequest(req_cookie++);
     if (!request) {
       const char* err = "Failed to create request";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
     if (request->addBuffer(stream_, buffer.get()) < 0) {
       const char* err = "Failed to add buffer to request";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
@@ -131,7 +131,7 @@ void camera_handler_t::init_dma_buffers() {
 
     if (y_plane.length != y_plane_bytes || u_plane.length != u_plane_bytes || v_plane.length != v_plane_bytes) {
       const char* err = "Plane size does not match expected size";
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
     }
 
@@ -146,7 +146,7 @@ void camera_handler_t::init_dma_buffers() {
 
     if (data == MAP_FAILED) {
       std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
-      logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
       throw std::runtime_error(err);
     }
 
@@ -182,7 +182,7 @@ void camera_handler_t::init_camera_controls(config_parser& config) {
 
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
 }
@@ -224,14 +224,14 @@ void camera_handler_t::queue_request() {
 
   if (enqueued_buffers > dma_frame_buffers_ - 2) {
     const char* err = "Buffer is not ready for requeuing";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
     return;
   }
 
   if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
     const char* err = "Failed to queue request";
-    logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
     return;
   }
@@ -254,7 +254,7 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   if (request->status() == libcamera::Request::RequestCancelled)
     return;
 
-  logger.log(logger_t::level_t::INFO, __FILE__, __LINE__, "Request completed");
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Request completed");
 
   void* data = mmap_buffers_[request->cookie()];
 
