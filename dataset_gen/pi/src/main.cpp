@@ -22,9 +22,11 @@
 #include "logger.h"
 #include "videnc.h"
 
+typedef sem_deleter;
 extern char** environ;
 volatile static sig_atomic_t running = 0;
 static timer_t timerid;
+static std::unique_ptr<sem_t, sem_deleter> queue_counter;
 static std::unique_ptr<camera_handler_t> cam;
 static connection conn;
 std::unique_ptr<logger_t> logger;
@@ -50,13 +52,19 @@ int main() {
 
     lock_free_queue_t frame_queue(dma_frame_buffers);
 
-    sem_t queue_counter;
-    if (sem_init(&queue_counter, 0, 0) < 0) {
+    struct sem_deleter {
+      void operator()(sem_t* sem) const {
+        if (sem) sem_destroy(sem);
+      }
+    };
+
+    queue_counter = std::unique_ptr<sem_t, sem_deleter>(new sem_t());
+    if (sem_init(queue_counter.get(), 0, 0) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to initialize semaphore");
       return -errno;
     }
 
-    cam = std::make_unique<camera_handler_t>(config, *logger, frame_queue, queue_counter);
+    cam = std::make_unique<camera_handler_t>(config, frame_queue, *queue_counter.get());
     videnc encoder(config);
     conn = connection(server_ip, port);
 
@@ -70,7 +78,7 @@ int main() {
     running = 1;
     while (running) {
       arm_timer();
-      sem_wait(&queue_counter);
+      sem_wait(queue_counter.get());
 
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
@@ -106,7 +114,7 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context) {
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
   } else if (signo == SIGINT || signo == SIGTERM) {
     running = 0;
-    sem_post(&queue_counter); // unblock the main loop without a frame so it can exit
+    sem_post(queue_counter.get()); // unblock the main loop without a frame so it can exit
   }
 }
 
