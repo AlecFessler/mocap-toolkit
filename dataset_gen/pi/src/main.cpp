@@ -83,6 +83,11 @@ int main() {
 
       size_t total_bytes_written = 0;
       while (total_bytes_written < enc_bytes) {
+        if (sockfd < 0) {
+          ret = init_network(server_ip, port);
+          if (ret < 0) return ret;
+        }
+
         ssize_t result = write(
           sockfd,
           encoder.pkt->data + total_bytes_written,
