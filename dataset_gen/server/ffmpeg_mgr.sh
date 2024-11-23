@@ -34,7 +34,7 @@ case $1 in
         for port in "${PORTS[@]}"; do
             filename="port${port}_vid${counter}"
             log "DEBUG" "Setting up FFmpeg instance for port $port with filename $filename"
-            echo "FILENAME=/tmp/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+            echo "FILENAME=/home/alecfessler/Documents/mimic/data/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
             if ! sudo systemctl start ffmpeg-stream@"$port".service; then
                 log "ERROR" "Failed to start ffmpeg-stream@$port.service"
                 continue
@@ -81,7 +81,7 @@ case $1 in
         for port in "${PORTS[@]}"; do
             filename="port${port}_vid${counter}"
             log "DEBUG" "Setting up FFmpeg instance for port $port with filename $filename"
-            echo "FILENAME=/tmp/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+            echo "FILENAME=/home/alecfessler/Documents/mimic/data/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
             if ! sudo systemctl restart ffmpeg-stream@"$port".service; then
                 log "ERROR" "Failed to restart ffmpeg-stream@$port.service"
                 continue

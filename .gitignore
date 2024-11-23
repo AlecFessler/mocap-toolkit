@@ -1,4 +1,2 @@
-/original_videos
-/hand_motions_videos
-/hand_motions_labels.h5
 */__pycache__
+/data/

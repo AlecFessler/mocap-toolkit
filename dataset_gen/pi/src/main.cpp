@@ -18,6 +18,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "camera_handler.h"
+#include "connection.h"
 #include "logger.h"
 #include "videnc.h"
 
@@ -35,6 +36,7 @@ inline int init_timer();
 inline int init_signals();
 inline int register_with_kernel();
 inline void arm_timer();
+inline int stream_pkt(conn_info_t& conn, const uint8_t* data, size_t size);
 void socket_disconnect_handler(int signo, siginfo_t* info, void* context);
 void capture_signal_handler(int signo, siginfo_t* info, void* context);
 
@@ -45,6 +47,8 @@ int main() {
     std::string port = config.get_string("PORT");
     int recording_cpu = config.get_int("RECORDING_CPU");
     int dma_frame_buffers = config.get_int("DMA_BUFFERS");
+
+    conn_info_t conn{sockfd, server_ip, port};
 
     logger = std::make_unique<logger_t>("logs.txt");
 
@@ -73,38 +77,7 @@ int main() {
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
 
-      encoder.encode_frame((uint8_t*)frame);
-
-      size_t enc_bytes = encoder.pkt->size;
-      if (enc_bytes == 0) {
-        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "No frame data");
-        continue;
-      }
-
-      size_t total_bytes_written = 0;
-      while (total_bytes_written < enc_bytes) {
-        if (sockfd < 0) {
-          ret = init_network(server_ip, port);
-          if (ret < 0) return ret;
-        }
-
-        ssize_t result = write(
-          sockfd,
-          encoder.pkt->data + total_bytes_written,
-          enc_bytes - total_bytes_written
-        );
-
-        if (result < 0) {
-          if (errno == EINTR) continue;
-          logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
-          running = 0;
-          break;
-        }
-
-        total_bytes_written += result;
-      }
-
-      logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
+      encoder.encode_frame((uint8_t*)frame, stream_pkt, conn);
     }
 
   } catch (const std::exception& e) {
@@ -240,5 +213,32 @@ inline int register_with_kernel() {
   }
 
   close(fd);
+  return 0;
+}
+
+inline int stream_pkt(conn_info_t& conn, const uint8_t* data, size_t size) {
+  size_t total_bytes_written = 0;
+  while (total_bytes_written < size) {
+    if (conn.sockfd < 0) {
+      int ret = init_network(conn.server_ip, conn.port);
+      if (ret < 0) return ret;
+    }
+
+    ssize_t result = write(
+      conn.sockfd,
+      data + total_bytes_written,
+      size - total_bytes_written
+    );
+
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
+      return -1;
+    }
+
+    total_bytes_written += result;
+  }
+
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
   return 0;
 }

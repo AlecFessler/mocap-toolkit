@@ -1,9 +1,16 @@
+// © 2024 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #include "videnc.h"
+#include <functional>
 #include <stdexcept>
+#include <string>
 
 videnc::videnc(const config_parser& config)
   : width(config.get_int("FRAME_WIDTH")),
-    height(config.get_int("FRAME_HEIGHT")) {
+    height(config.get_int("FRAME_HEIGHT")),
+    pts_counter(0) {
 
   codec = avcodec_find_encoder_by_name("libx264");
   if (!codec) {
@@ -57,7 +64,7 @@ videnc::videnc(const config_parser& config)
   }
 }
 
-void videnc::encode_frame(uint8_t* yuv420_data) {
+void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, conn_info_t& conn) {
   if (pkt) av_packet_unref(pkt);
 
   const int y_size = width * height;
@@ -69,14 +76,23 @@ void videnc::encode_frame(uint8_t* yuv420_data) {
   memcpy(frame->data[1], yuv420_data + y_size, uv_size);
   memcpy(frame->data[2], yuv420_data + y_size + uv_size, uv_size);
 
+  frame->pts = pts_counter++;
+
   if (avcodec_send_frame(ctx, frame) < 0)
     throw std::runtime_error("Error sending frame for encoding");
 
-  int ret = avcodec_receive_packet(ctx, pkt);
-  if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-    pkt->size = 0;
-  else if (ret < 0)
-    throw std::runtime_error("Error receiving encoded packet");
+  while (true) {
+    int ret = avcodec_receive_packet(ctx, pkt);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+      break;
+    if (ret < 0)
+      throw std::runtime_error("Error receiving encoded packet");
+
+    if (cb(conn, pkt->data, pkt->size) < 0)
+      throw std::runtime_error("Error in stream callback");
+
+    av_packet_unref(pkt);
+  }
 }
 
 videnc::~videnc() {

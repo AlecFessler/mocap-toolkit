@@ -1,0 +1,155 @@
+2024-11-19 14:27:15.246752Z [ERROR] src/main.cpp:237: Failed to write to /proc/gpio_interrupt_pid
+2024-11-19 14:28:19.857084Z [INFO] src/main.cpp:127: Socket disconnected by timer
+2024-11-19 14:29:16.278026Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.281448Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.284984Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.311363Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.313923Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.317323Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.344687Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.347743Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.351134Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.378015Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.380222Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.383595Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.411351Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.414025Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.417466Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.444681Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.447439Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.450924Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.478001Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.480674Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.484205Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.511323Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.514076Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.517442Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.544663Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.547407Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.550858Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.578006Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.580915Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.584368Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.611315Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.614026Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.617510Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.644652Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.647506Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.650968Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.677967Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.680625Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.683833Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.711314Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.714059Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.717474Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.744640Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.747420Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.750863Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.777974Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.780725Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.784143Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.811297Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.814078Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.817467Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.844626Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.847326Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.850784Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.877959Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.880708Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.884140Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.911286Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.913986Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.917390Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.944612Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.947363Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.950809Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:16.977940Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:16.980653Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:16.984081Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.011269Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.013995Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.017424Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.044606Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.047427Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.050856Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.077931Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.080702Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.084134Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.111263Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.113954Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.117385Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.144585Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.147323Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.150769Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.177910Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.180623Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.184072Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.211247Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.213962Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.217408Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.244576Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.247269Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.250751Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.277903Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.280660Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.284073Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.311230Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.313914Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.317336Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.344564Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.347305Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.350740Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.377895Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.380595Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.384025Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.411220Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.413945Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.417381Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.444548Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.447371Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.450823Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.477879Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.480641Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.484099Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.511203Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.513894Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.517315Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.544535Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.547273Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.550724Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.577864Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.580587Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.584024Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.611183Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.613885Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.617298Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.644522Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.647222Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.650669Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.677837Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.680508Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.683282Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.711155Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.713416Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.716131Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.744485Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.746801Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.749417Z [DEBUG] src/main.cpp:80: No frame data
+2024-11-19 14:29:17.777814Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.780089Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.811142Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.813038Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.844464Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.846330Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.877797Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.879689Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.911118Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.912928Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.944444Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.946287Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:17.977773Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:17.979599Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:18.011104Z [INFO] src/main.cpp:136: Capture request queued
+2024-11-19 14:29:18.012900Z [INFO] src/camera_handler.cpp:257: Request completed
+2024-11-19 14:29:18.044433Z [ERROR] src/camera_handler.cpp:227: Buffer is not ready for requeuing
+2024-11-19 14:29:18.105927Z [ERROR] src/main.cpp:112: Buffer is not ready for requeuing
