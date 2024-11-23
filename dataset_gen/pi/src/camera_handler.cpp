@@ -191,7 +191,6 @@ camera_handler_t::~camera_handler_t() {
   camera_->stop();
   for (void* data : mmap_buffers_)
     munmap(data, frame_bytes_);
-  free(frame_bytes_buffer_);
   allocator_->free(stream_);
   allocator_.reset();
   camera_->release();

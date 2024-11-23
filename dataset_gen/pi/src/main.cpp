@@ -43,12 +43,12 @@ int main() {
     config_parser config("config.txt");
     std::string server_ip = config.get_string("SERVER_IP");
     std::string port = config.get_string("PORT");
-    int frame_buffers = config.get_int("FRAME_BUFFERS");
     int recording_cpu = config.get_int("RECORDING_CPU");
+    int dma_frame_buffers = config.get_int("DMA_BUFFERS");
 
     logger = std::make_unique<logger_t>("logs.txt");
 
-    lock_free_queue_t frame_queue(frame_buffers);
+    lock_free_queue_t frame_queue(dma_frame_buffers);
 
     if (sem_init(&queue_counter, 0, 0) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to initialize semaphore");
