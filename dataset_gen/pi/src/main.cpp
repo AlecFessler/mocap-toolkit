@@ -4,7 +4,9 @@
 
 #include <atomic>
 #include <arpa/inet.h>
+#include <chrono>
 #include <cstdint>
+#include <cstlib>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
@@ -25,6 +27,8 @@
 typedef sem_deleter;
 extern char** environ;
 volatile static sig_atomic_t running = 0;
+// if this is ever set > 1s, refactor arm_timer() to decompose it into s and ns
+constexpr std::chrono::nanoseconds TIMER_INTERVAL(300'000'000); // 0.3s
 static timer_t timerid;
 static std::unique_ptr<sem_t, sem_deleter> queue_counter;
 static std::unique_ptr<camera_handler_t> cam;
@@ -50,8 +54,6 @@ int main() {
 
     logger = std::make_unique<logger_t>("logs.txt");
 
-    lock_free_queue_t frame_queue(dma_frame_buffers);
-
     struct sem_deleter {
       void operator()(sem_t* sem) const {
         if (sem) sem_destroy(sem);
@@ -64,6 +66,7 @@ int main() {
       return -errno;
     }
 
+    lock_free_queue_t frame_queue(dma_frame_buffers);
     cam = std::make_unique<camera_handler_t>(config, frame_queue, *queue_counter.get());
     videnc encoder(config);
     conn = connection(server_ip, port);
@@ -75,23 +78,21 @@ int main() {
     if ((ret = init_signals()) < 0) return ret;
     if ((ret = register_with_kernel()) < 0) return ret;
 
-    running = 1;
+    running = 1; // start handling capture signal now
     while (running) {
       arm_timer();
       sem_wait(queue_counter.get());
 
       void* frame = frame_queue.dequeue();
       if (!frame) continue;
-
       encoder.encode_frame((uint8_t*)frame, stream_pkt, conn);
     }
-
   } catch (const std::exception& e) {
     if (logger)
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, e.what());
     else
       std::cerr << e.what() << std::endl;
-    return 1;
+    return EXIT_FAILURE;
   }
 
   return 0;
@@ -149,11 +150,10 @@ inline int init_timer() {
   return 0;
 }
 
-inline void arm_timer() {
+void arm_timer() {
   struct itimerspec its;
   its.it_value.tv_sec = 0;
-  // find a better way to assign this
-  its.it_value.tv_nsec = 300000000;  // 0.3 seconds
+  its.it_value.tv_nsec = TIMER_INTERVAL.count();
   its.it_interval.tv_sec = 0;
   its.it_interval.tv_nsec = 0;
 
