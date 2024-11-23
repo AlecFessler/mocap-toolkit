@@ -1,7 +1,3 @@
-// © 2024 Alec Fessler
-// MIT License
-// See LICENSE file in the project root for full license information.
-
 #include <cstring>
 #include <iostream>
 #include <semaphore.h>
@@ -23,17 +19,25 @@ camera_handler_t::camera_handler_t(
   queue_counter(queue_counter),
   next_req_idx_(0) {
 
+  init_frame_config(config);
+  init_camera_manager();
+  init_camera_config(config);
+  init_dma_buffers();
+  init_camera_controls(config);
+}
+
+void camera_handler_t::init_frame_config(config_parser& config) {
   unsigned int frame_width = config.get_int("FRAME_WIDTH");
   unsigned int frame_height = config.get_int("FRAME_HEIGHT");
-  unsigned int frame_duration_min = config.get_int("FRAME_DURATION_MIN");
-  unsigned int frame_duration_max = config.get_int("FRAME_DURATION_MAX");
   dma_frame_buffers_ = config.get_int("DMA_BUFFERS");
 
   unsigned int y_plane_bytes = frame_width * frame_height;
   unsigned int u_plane_bytes = y_plane_bytes / 4;
   unsigned int v_plane_bytes = u_plane_bytes;
   frame_bytes_ = y_plane_bytes + u_plane_bytes + v_plane_bytes;
+}
 
+void camera_handler_t::init_camera_manager() {
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
@@ -59,7 +63,9 @@ camera_handler_t::camera_handler_t(
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
+}
 
+void camera_handler_t::init_camera_config(config_parser& config) {
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
@@ -69,7 +75,7 @@ camera_handler_t::camera_handler_t(
 
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.pixelFormat = libcamera::formats::YUV420;
-  cfg.size = { frame_width, frame_height };
+  cfg.size = { config.get_int("FRAME_WIDTH"), config.get_int("FRAME_HEIGHT") };
   cfg.bufferCount = dma_frame_buffers_;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
@@ -87,9 +93,11 @@ camera_handler_t::camera_handler_t(
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
+}
 
+void camera_handler_t::init_dma_buffers() {
   allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
-  stream_ = cfg.stream();
+  stream_ = config_->at(0).stream();
   if (allocator_->allocate(stream_) < 0) {
     const char* err = "Failed to allocate buffers";
     logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
@@ -117,6 +125,10 @@ camera_handler_t::camera_handler_t(
     const libcamera::FrameBuffer::Plane& u_plane = buffer->planes()[1];
     const libcamera::FrameBuffer::Plane& v_plane = buffer->planes()[2];
 
+    unsigned int y_plane_bytes = frame_bytes_ * 2/3;  // Based on YUV420
+    unsigned int u_plane_bytes = y_plane_bytes / 4;
+    unsigned int v_plane_bytes = u_plane_bytes;
+
     if (y_plane.length != y_plane_bytes || u_plane.length != u_plane_bytes || v_plane.length != v_plane_bytes) {
       const char* err = "Plane size does not match expected size";
       logger.log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
@@ -142,10 +154,12 @@ camera_handler_t::camera_handler_t(
   }
 
   camera_->requestCompleted.connect(this, &camera_handler_t::request_complete);
+}
 
-  // Configure some settings for more deterministic capture times
-  // May need to be adjusted based on lighting conditions
-  // and on a per device basis, but for development purposes, this is acceptable
+void camera_handler_t::init_camera_controls(config_parser& config) {
+  unsigned int frame_duration_min = config.get_int("FRAME_DURATION_MIN");
+  unsigned int frame_duration_max = config.get_int("FRAME_DURATION_MAX");
+
   controls_ = std::make_unique<libcamera::ControlList>();
 
   // Fix exposure time to half the time between frames

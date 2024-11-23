@@ -1,7 +1,6 @@
 // © 2024 Alec Fessler
 // MIT License
 // See LICENSE file in the project root for full license information.
-
 #ifndef CAMERAHANDLER_H
 #define CAMERAHANDLER_H
 
@@ -28,7 +27,15 @@ public:
   camera_handler_t(camera_handler_t&&) = delete;
   camera_handler_t& operator=(camera_handler_t&&) = delete;
   void queue_request();
+
 private:
+  void init_frame_config(config_parser& config);
+  void init_camera_manager();
+  void init_camera_config(config_parser& config);
+  void init_dma_buffers();
+  void init_camera_controls(config_parser& config);
+  void request_complete(libcamera::Request* request);
+
   logger_t& logger;
   lock_free_queue_t& frame_queue;
   sem_t& queue_counter;
@@ -43,7 +50,6 @@ private:
   int next_req_idx_;
   int frame_bytes_;
   int dma_frame_buffers_;
-  void request_complete(libcamera::Request* request);
 };
 
 #endif // CAMERAHANDLER_H
