@@ -9,8 +9,6 @@
 #include <cstdint>
 
 struct lock_free_node_t {
-  uint64_t created_epoch;
-  uint64_t retired_epoch;
   std::atomic<lock_free_node_t*> next;
   void* data;
 };

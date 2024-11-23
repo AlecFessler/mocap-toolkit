@@ -11,21 +11,22 @@ extern "C" {
 
 class videnc {
 public:
-    videnc(const config_parser& config);
-    ~videnc();
-    videnc(const videnc&) = delete;
-    videnc& operator=(const videnc&) = delete;
-    videnc(videnc&&) = delete;
-    videnc& operator=(videnc&&) = delete;
+  videnc(const config_parser& config);
+  ~videnc();
+  videnc(const videnc&) = delete;
+  videnc& operator=(const videnc&) = delete;
+  videnc(videnc&&) = delete;
+  videnc& operator=(videnc&&) = delete;
 
-    void encode_frame(uint8_t* yuv420_data);
-    AVPacket* pkt;
+  void encode_frame(uint8_t* yuv420_data);
+  AVPacket* pkt;
 
 private:
-    int width;
-    int height;
-    const AVCodec* codec;
-    AVCodecContext* ctx;
-    AVFrame* frame;
+  int width;
+  int height;
+  const AVCodec* codec;
+  AVCodecContext* ctx;
+  AVFrame* frame;
 };
+
 #endif
