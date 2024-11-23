@@ -4,12 +4,25 @@
 
 #ifndef CONNECTION_H
 #define CONNECTION_H
+
 #include <string>
 
-typedef struct {
-    int& sockfd;
-    const std::string& server_ip;
-    const std::string& port;
-} conn_info_t;
+
+class connection {
+public:
+  connection(
+    const std::string& server_ip,
+    const std::string& port
+  ) noexcept;
+  ~connection() noexcept;
+
+  int conn_sock();
+  void disconn_sock() noexcept;
+  int sockfd;
+
+private:
+  const std::string server_ip;
+  const std::string port;
+};
 
 #endif
