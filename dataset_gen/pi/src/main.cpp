@@ -25,13 +25,11 @@
 extern char** environ;
 volatile static sig_atomic_t running = 0;
 static timer_t timerid;
-static int sockfd = -1;
-static sem_t queue_counter;
+static std::unique_ptr<camera_handler_t> cam;
+static connection conn;
 std::unique_ptr<logger_t> logger;
-std::unique_ptr<camera_handler_t> cam;
 
 inline int init_realtime_scheduling(int recording_cpu);
-inline int init_network(const std::string& server_ip, const std::string& port);
 inline int init_timer();
 inline int init_signals();
 inline int register_with_kernel();
@@ -48,12 +46,11 @@ int main() {
     int recording_cpu = config.get_int("RECORDING_CPU");
     int dma_frame_buffers = config.get_int("DMA_BUFFERS");
 
-    conn_info_t conn{sockfd, server_ip, port};
-
     logger = std::make_unique<logger_t>("logs.txt");
 
     lock_free_queue_t frame_queue(dma_frame_buffers);
 
+    sem_t queue_counter;
     if (sem_init(&queue_counter, 0, 0) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to initialize semaphore");
       return -errno;
@@ -61,6 +58,7 @@ int main() {
 
     cam = std::make_unique<camera_handler_t>(config, *logger, frame_queue, queue_counter);
     videnc encoder(config);
+    conn = connection(server_ip, port);
 
     int ret;
     if ((ret = init_realtime_scheduling(recording_cpu)) < 0) return ret;
@@ -94,9 +92,8 @@ int main() {
 void socket_disconnect_handler(int signo, siginfo_t* info, void* context) {
   (void)info;
   (void)context;
-  if (signo == SIGUSR2 && sockfd >= 0) {
-    close(sockfd);
-    sockfd = -1;
+  if (signo == SIGUSR2) {
+    conn.disconn_sock();
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Socket disconnected by timer");
   }
 }
@@ -109,11 +106,7 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context) {
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
   } else if (signo == SIGINT || signo == SIGTERM) {
     running = 0;
-    if (sockfd >= 0) {
-      close(sockfd);
-      sockfd = -1;
-    }
-    sem_destroy(&queue_counter);
+    sem_post(&queue_counter); // unblock the main loop without a frame so it can exit
   }
 }
 
@@ -135,25 +128,6 @@ inline int init_realtime_scheduling(int recording_cpu) {
   return 0;
 }
 
-inline int init_network(const std::string& server_ip, const std::string& port) {
-  sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
-    return -errno;
-  }
-
-  struct sockaddr_in server_addr;
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(std::stoi(port));
-  inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr);
-
-  if (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
-    return -errno;
-  }
-  return 0;
-}
-
 inline int init_timer() {
   struct sigevent sev;
   sev.sigev_notify = SIGEV_SIGNAL;
@@ -170,6 +144,7 @@ inline int init_timer() {
 inline void arm_timer() {
   struct itimerspec its;
   its.it_value.tv_sec = 0;
+  // find a better way to assign this
   its.it_value.tv_nsec = 300000000;  // 0.3 seconds
   its.it_interval.tv_sec = 0;
   its.it_interval.tv_nsec = 0;
@@ -216,11 +191,11 @@ inline int register_with_kernel() {
   return 0;
 }
 
-inline int stream_pkt(conn_info_t& conn, const uint8_t* data, size_t size) {
+inline int stream_pkt(connection& conn, const uint8_t* data, size_t size) {
   size_t total_bytes_written = 0;
   while (total_bytes_written < size) {
     if (conn.sockfd < 0) {
-      int ret = init_network(conn.server_ip, conn.port);
+      int ret = conn.conn_sock();
       if (ret < 0) return ret;
     }
 
