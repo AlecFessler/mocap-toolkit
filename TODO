@@ -1,4 +1,4 @@
-Test with new cameras and verify/update the 8.3ms timing figure in README
+Debug why video files aren't showing up server side anymore
 
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 
