@@ -1,7 +1,3 @@
-Make config parser a struct
-
-Integrate logger with video encoder
-
 Test with new cameras and verify/update the 8.3ms timing figure in README
 
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
