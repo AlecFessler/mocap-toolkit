@@ -95,7 +95,7 @@ int main() {
 void socket_disconnect_handler(int signo, siginfo_t* info, void* context) {
   (void)info;
   (void)context;
-  if (signo == SIGUSR2) {
+  if (signo == SIGUSR2 && conn.sockfd >= 0) {
     conn.disconn_sock();
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Socket disconnected by timer");
   }
