@@ -2,7 +2,6 @@
 // MIT License
 // See LICENSE file in the project root for full license information.
 
-
 #include <arpa/inet.h>
 #include <stdexcept>
 #include <string>
@@ -80,11 +79,13 @@ int connection::conn_sock() {
     }
   }
 
-  if (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+  while (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    if (errno == EINTR) continue;
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
     return -errno;
   }
 
+  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Connected to server");
   return 0;
 }
 
