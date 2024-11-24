@@ -7,9 +7,9 @@
 #include <stdexcept>
 #include <string>
 
-videnc::videnc(const config_parser& config)
-  : width(config.get_int("FRAME_WIDTH")),
-    height(config.get_int("FRAME_HEIGHT")),
+videnc::videnc(const config& config)
+  : width(config.frame_width),
+    height(config.frame_height),
     pts_counter(0) {
 
   codec = avcodec_find_encoder_by_name("libx264");
@@ -24,14 +24,14 @@ videnc::videnc(const config_parser& config)
 
   ctx->width = width;
   ctx->height = height;
-  ctx->time_base = AVRational{1, config.get_int("FPS")};
-  ctx->framerate = AVRational{config.get_int("FPS"), 1};
+  ctx->time_base = AVRational{1, config.fps};
+  ctx->framerate = AVRational{config.fps, 1};
   ctx->pix_fmt = AV_PIX_FMT_YUV420P;
   ctx->codec_type = AVMEDIA_TYPE_VIDEO;
 
   AVDictionary *opts = NULL;
-  av_dict_set(&opts, "preset", config.get_string("ENC_SPEED").c_str(), 0);
-  av_dict_set(&opts, "crf", std::to_string(config.get_int("ENC_QUALITY")).c_str(), 0);
+  av_dict_set(&opts, "preset", config.enc_speed.c_str(), 0);
+  av_dict_set(&opts, "crf", std::to_string(config.enc_quality.c_str(), 0);
 
   if (avcodec_open2(ctx, codec, &opts) < 0) {
     av_dict_free(&opts);

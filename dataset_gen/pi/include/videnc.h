@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include "config_parser.h"
+#include "config.h"
 #include "connection.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -16,7 +16,7 @@ extern "C" {
 
 class videnc {
 public:
-  videnc(const config_parser& config);
+  videnc(const config& config);
   ~videnc();
   videnc(const videnc&) = delete;
   videnc& operator=(const videnc&) = delete;

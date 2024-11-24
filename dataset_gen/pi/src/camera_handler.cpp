@@ -4,14 +4,14 @@
 #include <stdexcept>
 #include <sys/mman.h>
 #include "camera_handler.h"
-#include "config_parser.h"
+#include "config.h"
 #include "logger.h"
 #include "lock_free_queue.h"
 
 extern std::unique_ptr<logger_t> logger;
 
 camera_handler_t::camera_handler_t(
-  config_parser& config,
+  config& config,
   lock_free_queue_t& frame_queue,
   sem_t& queue_counter
 ) :
@@ -26,12 +26,10 @@ camera_handler_t::camera_handler_t(
   init_camera_controls(config);
 }
 
-void camera_handler_t::init_frame_config(config_parser& config) {
-  unsigned int frame_width = config.get_int("FRAME_WIDTH");
-  unsigned int frame_height = config.get_int("FRAME_HEIGHT");
-  dma_frame_buffers_ = config.get_int("DMA_BUFFERS");
+void camera_handler_t::init_frame_config(config& config) {
+  dma_frame_buffers_ = config.dma_buffers;
 
-  unsigned int y_plane_bytes = frame_width * frame_height;
+  unsigned int y_plane_bytes = config.frame_width * config.frame_height;
   unsigned int u_plane_bytes = y_plane_bytes / 4;
   unsigned int v_plane_bytes = u_plane_bytes;
   frame_bytes_ = y_plane_bytes + u_plane_bytes + v_plane_bytes;
@@ -65,7 +63,7 @@ void camera_handler_t::init_camera_manager() {
   }
 }
 
-void camera_handler_t::init_camera_config(config_parser& config) {
+void camera_handler_t::init_camera_config(config& config) {
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
@@ -75,7 +73,7 @@ void camera_handler_t::init_camera_config(config_parser& config) {
 
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.pixelFormat = libcamera::formats::YUV420;
-  cfg.size = { config.get_int("FRAME_WIDTH"), config.get_int("FRAME_HEIGHT") };
+  cfg.size = { config.frame_width, config.frame_height };
   cfg.bufferCount = dma_frame_buffers_;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
@@ -156,9 +154,9 @@ void camera_handler_t::init_dma_buffers() {
   camera_->requestCompleted.connect(this, &camera_handler_t::request_complete);
 }
 
-void camera_handler_t::init_camera_controls(config_parser& config) {
-  unsigned int frame_duration_min = config.get_int("FRAME_DURATION_MIN");
-  unsigned int frame_duration_max = config.get_int("FRAME_DURATION_MAX");
+void camera_handler_t::init_camera_controls(config& config) {
+  unsigned int frame_duration_min = config.frame_duration_min;
+  unsigned int frame_duration_max = config.frame_duration_max;
 
   controls_ = std::make_unique<libcamera::ControlList>();
 

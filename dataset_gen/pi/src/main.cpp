@@ -46,12 +46,7 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context);
 
 int main() {
   try {
-    config_parser config("config.txt");
-    std::string server_ip = config.get_string("SERVER_IP");
-    std::string port = config.get_string("PORT");
-    int recording_cpu = config.get_int("RECORDING_CPU");
-    int dma_frame_buffers = config.get_int("DMA_BUFFERS");
-
+    config config = parse_config("config.txt");
     logger = std::make_unique<logger_t>("logs.txt");
 
     struct sem_deleter {
@@ -66,14 +61,14 @@ int main() {
       return -errno;
     }
 
-    lock_free_queue_t frame_queue(dma_frame_buffers);
+    lock_free_queue_t frame_queue(config.dma_buffers);
     cam = std::make_unique<camera_handler_t>(config, frame_queue, *queue_counter.get());
     videnc encoder(config);
-    conn = connection(server_ip, port);
+    conn = connection(config.server_ip, config.port);
 
     int ret;
-    if ((ret = init_realtime_scheduling(recording_cpu)) < 0) return ret;
-    if ((ret = init_network(server_ip, port)) < 0) return ret;
+    if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
+    if ((ret = init_network(config.server_ip, config.port)) < 0) return ret;
     if ((ret = init_timer()) < 0) return ret;
     if ((ret = init_signals()) < 0) return ret;
     if ((ret = register_with_kernel()) < 0) return ret;

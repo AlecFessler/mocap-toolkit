@@ -10,13 +10,13 @@
 #include <memory>
 #include <vector>
 #include <libcamera/libcamera.h>
-#include "config_parser.h"
+#include "config.h"
 #include "lock_free_queue.h"
 
 class camera_handler_t {
 public:
   camera_handler_t(
-    config_parser& config,
+    config& config,
     lock_free_queue_t& frame_queue,
     sem_t& queue_counter
   );
@@ -28,11 +28,11 @@ public:
   void queue_request();
 
 private:
-  void init_frame_config(config_parser& config);
+  void init_frame_config(config& config);
   void init_camera_manager();
-  void init_camera_config(config_parser& config);
+  void init_camera_config(config& config);
   void init_dma_buffers();
-  void init_camera_controls(config_parser& config);
+  void init_camera_controls(config& config);
   void request_complete(libcamera::Request* request);
 
   lock_free_queue_t& frame_queue;
