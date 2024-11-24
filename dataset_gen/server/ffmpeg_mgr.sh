@@ -23,7 +23,6 @@ next_counter() {
     counter=$(cat "$COUNTER_FILE")
     next_counter=$((counter + 1))
     echo "$next_counter" > "$COUNTER_FILE"
-    log "INFO" "Incremented counter to $next_counter"
     echo "$next_counter"
 }
 

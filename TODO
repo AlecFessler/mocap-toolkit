@@ -1,5 +1,3 @@
-Debug why video files aren't showing up server side anymore
-
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 
 Create systemd service for auto-starting recording software on Pis
