@@ -73,7 +73,7 @@ void camera_handler_t::init_camera_config(config& config) {
 
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.pixelFormat = libcamera::formats::YUV420;
-  cfg.size = { config.frame_width, config.frame_height };
+  cfg.size = { (unsigned int)config.frame_width, (unsigned int)config.frame_height };
   cfg.bufferCount = dma_frame_buffers_;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {

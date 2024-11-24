@@ -10,10 +10,15 @@
 
 class connection {
 public:
+  connection() noexcept;
   connection(
-    const std::string& server_ip,
-    const std::string& port
+    std::string& server_ip,
+    std::string& port
   ) noexcept;
+  connection(connection&& other) noexcept;
+  connection& operator=(connection&& other) noexcept;
+  connection(const connection&) = delete;
+  connection& operator=(const connection&) = delete;
   ~connection() noexcept;
 
   int conn_sock();
@@ -21,8 +26,8 @@ public:
   int sockfd;
 
 private:
-  const std::string server_ip;
-  const std::string port;
+  std::string server_ip;
+  std::string port;
 };
 
 #endif

@@ -6,7 +6,7 @@
 #include <arpa/inet.h>
 #include <chrono>
 #include <cstdint>
-#include <cstlib>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
@@ -24,7 +24,12 @@
 #include "logger.h"
 #include "videnc.h"
 
-typedef sem_deleter;
+struct sem_deleter {
+  void operator()(sem_t* sem) const {
+    if (sem) sem_destroy(sem);
+  }
+};
+
 extern char** environ;
 volatile static sig_atomic_t running = 0;
 // if this is ever set > 1s, refactor arm_timer() to decompose it into s and ns
@@ -40,7 +45,7 @@ inline int init_timer();
 inline int init_signals();
 inline int register_with_kernel();
 inline void arm_timer();
-inline int stream_pkt(conn_info_t& conn, const uint8_t* data, size_t size);
+inline int stream_pkt(connection& conn, const uint8_t* data, size_t size);
 void socket_disconnect_handler(int signo, siginfo_t* info, void* context);
 void capture_signal_handler(int signo, siginfo_t* info, void* context);
 
@@ -49,13 +54,8 @@ int main() {
     config config = parse_config("config.txt");
     logger = std::make_unique<logger_t>("logs.txt");
 
-    struct sem_deleter {
-      void operator()(sem_t* sem) const {
-        if (sem) sem_destroy(sem);
-      }
-    };
-
-    queue_counter = std::unique_ptr<sem_t, sem_deleter>(new sem_t());
+    sem_t sem;
+    queue_counter = std::unique_ptr<sem_t, sem_deleter>(&sem);
     if (sem_init(queue_counter.get(), 0, 0) < 0) {
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to initialize semaphore");
       return -errno;
@@ -68,7 +68,6 @@ int main() {
 
     int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
-    if ((ret = init_network(config.server_ip, config.port)) < 0) return ret;
     if ((ret = init_timer()) < 0) return ret;
     if ((ret = init_signals()) < 0) return ret;
     if ((ret = register_with_kernel()) < 0) return ret;

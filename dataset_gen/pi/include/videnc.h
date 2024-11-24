@@ -23,7 +23,7 @@ public:
   videnc(videnc&&) = delete;
   videnc& operator=(videnc&&) = delete;
 
-  using pkt_callback = std::function<int(connection& conn, const uint8_t*, size_t)>;
+  using pkt_callback = std::function<int(connection&, const uint8_t*, size_t)>;
   void encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& conn);
 
 private:

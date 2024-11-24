@@ -13,13 +13,38 @@
 
 extern std::unique_ptr<logger_t> logger;
 
+connection::connection()
+  noexcept :
+  sockfd(-1),
+  server_ip("UNSET_SERVER"),
+  port("UNSET_PORT") {}
+
+
 connection::connection(
-  const std::string& server_ip,
-  const std::string& port
+  std::string& server_ip,
+  std::string& port
 ) noexcept :
+  sockfd(-1),
   server_ip(server_ip),
-  port(port),
-  sockfd(-1) {}
+  port(port) {}
+
+connection::connection(connection&& other) noexcept
+    : sockfd(other.sockfd), server_ip(std::move(other.server_ip)), port(std::move(other.port)) {
+    other.sockfd = -1;
+}
+
+connection& connection::operator=(connection&& other) noexcept {
+  if (this != &other) {
+    if (sockfd >= 0) close(sockfd);
+
+    server_ip = std::move(other.server_ip);
+    port = std::move(other.port);
+    sockfd = other.sockfd;
+
+    other.sockfd = -1;
+  }
+  return *this;
+}
 
 connection::~connection() noexcept {
   disconn_sock();
