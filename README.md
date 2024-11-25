@@ -31,20 +31,40 @@ flowchart TD
         KM3["Kernel Module"] --> Cap3["Camera Handler"] --> Enc3["H.264 Encoder"]
     end
 
-    Enc1 & Enc2 & Enc3 --> |"TCP Stream"| FF
-
     subgraph Server["Server Layer"]
-        FF["FFmpeg Services"] --> Segments["Video Segments"]
-        Mgr["Manager Script"] --> WD["Watchdog"]
-        WD --> |"Monitor/Control"| FF
-        WD --> |"Streaming Done"| Pre["Preprocessing"]
-        Segments --> Pre
+        Mgr["Manager Script"]
+        Mgr --> FF1["FFmpeg Service 1"] & FF2["FFmpeg Service 2"] & FF3["FFmpeg Service 3"]
+        Mgr --> WD1["Watchdog 1"] & WD2["Watchdog 2"] & WD3["Watchdog 3"]
+
+        Enc1 --> |"TCP"| TCP1["TCP Port 12345"]
+        Enc2 --> |"TCP"| TCP2["TCP Port 12346"]
+        Enc3 --> |"TCP"| TCP3["TCP Port 12347"]
+
+        TCP1 --> FF1
+        TCP2 --> FF2
+        TCP3 --> FF3
+
+        FF1 --> |"Segments"| Seg1["Video Segments 1"]
+        FF2 --> |"Segments"| Seg2["Video Segments 2"]
+        FF3 --> |"Segments"| Seg3["Video Segments 3"]
+
+        WD1 --> |"Monitor"| TCP1
+        WD2 --> |"Monitor"| TCP2
+        WD3 --> |"Monitor"| TCP3
+
+        WD1 --> |"Done"| Pre1["Preprocessing 1"]
+        WD2 --> |"Done"| Pre2["Preprocessing 2"]
+        WD3 --> |"Done"| Pre3["Preprocessing 3"]
+
+        Seg1 --> Pre1
+        Seg2 --> Pre2
+        Seg3 --> Pre3
     end
 
     class AVR,GPIO lightClass
     class KM1,KM2,KM3,Cap1,Cap2,Cap3 medClass
-    class Enc1,Enc2,Enc3,FF darkClass
-    class Mgr,WD,Pre,Segments serverClass
+    class Enc1,Enc2,Enc3,FF1,FF2,FF3,TCP1,TCP2,TCP3 darkClass
+    class Mgr,WD1,WD2,WD3,Pre1,Pre2,Pre3,Seg1,Seg2,Seg3 serverClass
 ```
 
 ### Physical Setup

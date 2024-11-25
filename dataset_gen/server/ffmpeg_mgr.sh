@@ -5,8 +5,8 @@
 
 PORTS=(12345 12346 12347)
 COUNTER_FILE=".video_counter.txt"
-WATCHDOG_PID_FILE="/tmp/ffmpeg_watchdog.pid"
 LOG_FILE="/var/log/ffmpeg_mgr.log"
+VIDEO_BASE_PATH="/home/alecfessler/Documents/mimic/data"
 
 log() {
     local level="$1"
@@ -26,27 +26,36 @@ next_counter() {
     echo "$next_counter"
 }
 
+write_config() {
+    local port="$1"
+    local counter="$2"
+    local filename="port${port}_vid${counter}"
+    {
+        echo "VIDEO_BASE_PATH=${VIDEO_BASE_PATH}"
+        echo "FILENAME=${VIDEO_BASE_PATH}/${filename}_%03d.mp4"
+    } > /etc/default/ffmpeg-stream
+}
+
 case $1 in
     start)
         log "INFO" "Starting FFmpeg instances..."
         counter=$(next_counter)
         for port in "${PORTS[@]}"; do
             filename="port${port}_vid${counter}"
-            log "DEBUG" "Setting up FFmpeg instance for port $port with filename $filename"
-            echo "FILENAME=/home/alecfessler/Documents/mimic/data/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+            write_config "$port" "$counter"
             if ! sudo systemctl start ffmpeg-stream@"$port".service; then
                 log "ERROR" "Failed to start ffmpeg-stream@$port.service"
                 continue
             fi
             log "INFO" "Started ffmpeg-stream@$port.service with filename $filename"
         done
-
-        log "INFO" "Starting watchdog..."
-        ./ffmpeg_watchdog.sh &
-        echo $! > "$WATCHDOG_PID_FILE"
-        log "INFO" "Started watchdog with PID $(cat $WATCHDOG_PID_FILE)"
+        log "INFO" "Starting watchdogs..."
+        for port in "${PORTS[@]}"; do
+            ./ffmpeg_watchdog.sh "$port" &
+            echo $! > "/tmp/ffmpeg_watchdog_${port}.pid"
+            log "INFO" "Started watchdog for port $port with PID $(cat /tmp/ffmpeg_watchdog_${port}.pid)"
+        done
         ;;
-
     stop)
         log "INFO" "Stopping FFmpeg instances..."
         for port in "${PORTS[@]}"; do
@@ -57,15 +66,15 @@ case $1 in
             rm -f "/tmp/recording_active_${port}"
             log "INFO" "Stopped ffmpeg-stream@$port.service"
         done
-
-        if [ -f "$WATCHDOG_PID_FILE" ]; then
-            log "INFO" "Stopping watchdog..."
-            kill $(cat "$WATCHDOG_PID_FILE")
-            rm "$WATCHDOG_PID_FILE"
-            log "INFO" "Stopped watchdog"
-        fi
+        log "INFO" "Stopping watchdogs..."
+        for port in "${PORTS[@]}"; do
+            if [ -f "/tmp/ffmpeg_watchdog_${port}.pid" ]; then
+                kill $(cat "/tmp/ffmpeg_watchdog_${port}.pid")
+                rm "/tmp/ffmpeg_watchdog_${port}.pid"
+                log "INFO" "Stopped watchdog for port $port"
+            fi
+        done
         ;;
-
     status)
         log "INFO" "Checking status of FFmpeg instances..."
         for port in "${PORTS[@]}"; do
@@ -73,14 +82,12 @@ case $1 in
             sudo systemctl status ffmpeg-stream@"$port".service
         done
         ;;
-
     restart)
         log "INFO" "Restarting FFmpeg instances..."
         counter=$(next_counter)
         for port in "${PORTS[@]}"; do
             filename="port${port}_vid${counter}"
-            log "DEBUG" "Setting up FFmpeg instance for port $port with filename $filename"
-            echo "FILENAME=/home/alecfessler/Documents/mimic/data/port${port}_vid${counter}_%03d.mp4" > /etc/default/ffmpeg-stream
+            write_config "$port" "$counter"
             if ! sudo systemctl restart ffmpeg-stream@"$port".service; then
                 log "ERROR" "Failed to restart ffmpeg-stream@$port.service"
                 continue
@@ -88,7 +95,6 @@ case $1 in
             log "INFO" "Restarted ffmpeg-stream@$port.service with filename $filename"
         done
         ;;
-
     *)
         log "ERROR" "Invalid command: $1"
         echo "Usage: $0 {start|stop|status|restart}"
