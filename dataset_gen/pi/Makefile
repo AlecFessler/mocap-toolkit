@@ -6,7 +6,7 @@ CFLAGS=-Wall -Wextra -g $(INCLUDES)
 
 PKG_LIBS_CAMERA=$(shell pkg-config --libs libcamera)
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
-LDFLAGS=-pthread $(PKG_LIBS_CAMERA) $(PKG_LIBS_AVCODEC) -lrt
+LDFLAGS=-pthread $(PKG_LIBS_CAMERA) $(PKG_LIBS_AVCODEC) -lrt -latomic
 
 CPPFILES=$(wildcard src/*.cpp)
 OBJFILES=$(CPPFILES:src/%.cpp=obj/%.o)

@@ -71,7 +71,6 @@ int main() {
     if ((ret = init_timer()) < 0) return ret;
     if ((ret = init_signals()) < 0) return ret;
     if ((ret = register_with_kernel()) < 0) return ret;
-    if ((ret = conn.conn_sock()) < 0) return ret;
 
     running = 1; // start handling capture signal now
     while (running) {

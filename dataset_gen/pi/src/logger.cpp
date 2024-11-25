@@ -209,7 +209,7 @@ void logger_t::log(logger_t::level_t level, const char* file, int line, const ch
   buffer[offset++] = '\n';
 
   size_t total_bytes_written = 0;
-  while (total_bytes_written < offset) {
+  while (total_bytes_written < (size_t)offset) {
     ssize_t result = write(
       fd_,
       buffer + total_bytes_written,
@@ -220,5 +220,7 @@ void logger_t::log(logger_t::level_t level, const char* file, int line, const ch
       if (errno == EINTR) continue;
       return;
     }
+
+    total_bytes_written += result;
   }
 }

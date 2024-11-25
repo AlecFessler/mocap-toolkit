@@ -9,7 +9,19 @@
 #include <cstdint>
 
 struct lock_free_node_t {
-  std::atomic<lock_free_node_t*> next;
+  struct alignas(8) next_ptr_t {
+    lock_free_node_t* ptr;
+    int32_t count;
+
+    bool operator==(const next_ptr_t& other) const {
+      return ptr == other.ptr && count == other.count;
+    }
+
+    bool operator!=(const next_ptr_t& other) const {
+      return ptr != other.ptr || count != other.count;
+    }
+  };
+  std::atomic<next_ptr_t> next;
   void* data;
 };
 

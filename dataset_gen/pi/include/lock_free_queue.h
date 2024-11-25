@@ -21,8 +21,8 @@ public:
   bool empty() const noexcept;
 
 private:
-  std::atomic<lock_free_node_t*> head;
-  std::atomic<lock_free_node_t*> tail;
+  std::atomic<lock_free_node_t::next_ptr_t> head;
+  std::atomic<lock_free_node_t::next_ptr_t> tail;
   lock_free_node_t* prealloc_nodes;
   lock_free_stack_t available_nodes;
 };

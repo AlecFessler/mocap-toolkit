@@ -1,13 +1,3 @@
-Make logger use the syscall loop pattern for handling eintr
-
-Fix aba problem in lock free queue
-
-Remove the unnecessary initial network connection in main initialization
-
-Remove unnecessary returns in queue request (camera handler) after throws
-
-Remove unnecessary unref packet in encoder
-
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 
 Create systemd service for auto-starting recording software on Pis

@@ -80,8 +80,6 @@ videnc::videnc(const config& config)
 }
 
 void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& conn) {
-  if (pkt) av_packet_unref(pkt);
-
   const int y_size = width * height;
   const int uv_size = y_size / 4;
 
