@@ -36,13 +36,12 @@ flowchart TD
         Mgr --> FF1["FFmpeg Service 1"] & FF2["FFmpeg Service 2"] & FF3["FFmpeg Service 3"]
         Mgr --> WD1["Watchdog 1"] & WD2["Watchdog 2"] & WD3["Watchdog 3"]
 
-        Enc1 --> |"TCP"| TCP1["TCP Port 12345"]
-        Enc2 --> |"TCP"| TCP2["TCP Port 12346"]
-        Enc3 --> |"TCP"| TCP3["TCP Port 12347"]
+        FF1 --> |"Listen"| TCP1["TCP Port 12345"]
+        FF2 --> |"Listen"| TCP2["TCP Port 12346"]
 
-        TCP1 --> FF1
-        TCP2 --> FF2
-        TCP3 --> FF3
+        Enc1 --> TCP1
+        Enc2 --> TCP2
+        Enc3 --> TCP3
 
         FF1 --> |"Segments"| Seg1["Video Segments 1"]
         FF2 --> |"Segments"| Seg2["Video Segments 2"]
@@ -82,9 +81,9 @@ The video pipeline is a single-threaded recording application driven by two sign
 
 ### Server-Side Pipeline
 
-The server-side pipeline takes advantage of FFmpeg's native support for handling incoming streams, eliminating the need for a conventional server application. The system uses systemd services to handle FFmpeg instances, with a separate service instance for each incoming camera stream. Incoming H.264 streams are recorded using FFmpeg's -segment feature, which creates new files for each segment within a session to allow seamless recovery after interruptions. The streams are transcoded server-side to H.265, leveraging GPU acceleration for efficient compression while minimizing computational load on the Raspberry Pis.
+The server-side pipeline takes advantage of FFmpeg's native support for handling incoming streams, eliminating the need for a conventional server application. The system uses systemd services to handle FFmpeg instances, with a separate service instance listening on a dedicated port for each incoming camera stream. Incoming H.264 streams are recorded using FFmpeg's -segment feature, which creates new files for each segment within a session to allow seamless recovery after interruptions. The streams are transcoded server-side to H.265, leveraging GPU acceleration for efficient compression while minimizing computational load on the Raspberry Pis.
 
-A manager script provides commands to start, stop, restart, and monitor all services. It uses a simple counter stored in a dotfile to enumerate recording sessions, ensuring unique filenames across sessions. The watchdog script manages recording states by first waiting for the creation of an initial segment to confirm that recording has started. Once detected, it monitors progress by using inotify on the latest segment, avoiding false triggers caused by FFmpeg restarting and creating a new segment. When recording ends, it executes the preprocessing script as a background task so it can immediately increment the session counter and restart services to prepare the system for the next session.
+A manager script provides commands to start, stop, restart, and monitor all services. For each port, it launches both an FFmpeg service instance and a dedicated watchdog process. The manager uses a simple counter stored in a dotfile to enumerate recording sessions, ensuring unique filenames across sessions. Each watchdog monitors its assigned port, waiting for the creation of an initial segment to confirm that recording has started. Once detected, it monitors progress by using inotify on the latest segment, avoiding false triggers caused by FFmpeg restarting and creating a new segment. When recording ends on a port, its watchdog executes port-specific preprocessing as a background task, allowing the system to immediately prepare for the next recording session.
 
 ### Calibration Pipeline
 - Lens distortion correction
