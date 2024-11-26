@@ -49,12 +49,12 @@ case $1 in
             fi
             log "INFO" "Started ffmpeg-stream@$port.service with filename $filename"
         done
-        log "INFO" "Starting watchdogs..."
-        for port in "${PORTS[@]}"; do
-            ./ffmpeg_watchdog.sh "$port" &
-            echo $! > "/tmp/ffmpeg_watchdog_${port}.pid"
-            log "INFO" "Started watchdog for port $port with PID $(cat /tmp/ffmpeg_watchdog_${port}.pid)"
-        done
+        #log "INFO" "Starting watchdogs..."
+        #for port in "${PORTS[@]}"; do
+        #    ./ffmpeg_watchdog.sh "$port" &
+        #    echo $! > "/tmp/ffmpeg_watchdog_${port}.pid"
+        #    log "INFO" "Started watchdog for port $port with PID $(cat /tmp/ffmpeg_watchdog_${port}.pid)"
+        #done
         ;;
     stop)
         log "INFO" "Stopping FFmpeg instances..."
@@ -66,14 +66,14 @@ case $1 in
             rm -f "/tmp/recording_active_${port}"
             log "INFO" "Stopped ffmpeg-stream@$port.service"
         done
-        log "INFO" "Stopping watchdogs..."
-        for port in "${PORTS[@]}"; do
-            if [ -f "/tmp/ffmpeg_watchdog_${port}.pid" ]; then
-                kill $(cat "/tmp/ffmpeg_watchdog_${port}.pid")
-                rm "/tmp/ffmpeg_watchdog_${port}.pid"
-                log "INFO" "Stopped watchdog for port $port"
-            fi
-        done
+        #log "INFO" "Stopping watchdogs..."
+        #for port in "${PORTS[@]}"; do
+        #    if [ -f "/tmp/ffmpeg_watchdog_${port}.pid" ]; then
+        #        kill $(cat "/tmp/ffmpeg_watchdog_${port}.pid")
+        #        rm "/tmp/ffmpeg_watchdog_${port}.pid"
+        #        log "INFO" "Stopped watchdog for port $port"
+        #    fi
+        #done
         ;;
     status)
         log "INFO" "Checking status of FFmpeg instances..."
