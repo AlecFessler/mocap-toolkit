@@ -1,11 +1,38 @@
-# Multi-Camera Hand Pose Dataset Collection System
+# Multi-Camera Motion Capture Dataset Collection System
 
-This project aims to leverage Google's Mediapipe hand pose predictor, a custom multi-camera enclosure, and triangulation to bootstrap a 3D hand pose dataset at a rate of 108,000 labeled training samples per hour of recording. The ultimate goal is to design a neural net architecture for accurate, real-time, wearable-free hand motion capture.
+This project aims to develop an end-to-end system for training specialized 3D motion capture models using synchronized multi-camera video. The goal is to create a complete pipeline for collecting training data and developing models for wearable-free motion capture of body, hand, and facial movement.
+
+### Completed Components
+- **Multi-Camera Recording System**: Achieved 9μs frame synchronization across cameras using PTP on Raspberry Pis
+- **Event-Driven Video Pipeline**: Signal-based architecture achieves thread-level concurrency with microsecond-precision timing
+- **Network Streaming**: H.264 encoding and TCP streaming with automatic recovery and segmentation
+
+### In Development
+- Stereo camera calibration tools
+- Dataset generation using pretrained 2D pose estimation models
+- Specialized neural networks for real-time 3D motion capture
+
+The system uses standard hardware and network protocols to achieve high-precision synchronization, enabling accurate 3D reconstruction for generating training data.
 
 ### Architecture Diagram
 
 ![System Architecture](assets/architecture_diagram.svg)
 
+The system achieves microsecond-level frame synchronization across multiple cameras through a carefully orchestrated combination of network timing protocols and real-time processing. A central server coordinates multiple Recording & Streaming processes, each responsible for a single camera, while a PTP Grandmaster Clock ensures precise timing synchronization across all devices.
+
+The recording lifecycle consists of three main phases:
+
+1. Initialization: The server broadcasts an initial timestamp to all recording processes via UDP. This timestamp serves as the synchronized starting point for all cameras.
+
+2. Recording: Each camera process operates independently but maintains precise timing through PTP synchronization. The main processing loop follows a consistent pattern:
+   - Timer signals when the next frame should be captured
+   - Camera captures the frame via DMA to minimize latency
+   - Encoder processes the frame and streams it to the server
+   - Loop calculates the next capture timestamp and arms the timer
+
+3. Termination: The server can send a "STOP" message to gracefully end recording across all cameras simultaneously.
+
+A dedicated, isolated network handles PTP synchronization, enabling nanosecond-precision clock synchronization between all recording devices. This precise timing foundation, combined with real-time scheduling and careful signal handling, ensures frame-accurate synchronization across all cameras despite their independent processing pipelines.
 ### Physical Setup
 [Photos/diagrams of recording frame and hardware]
 
