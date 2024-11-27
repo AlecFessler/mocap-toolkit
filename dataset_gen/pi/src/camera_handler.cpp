@@ -18,7 +18,30 @@ camera_handler_t::camera_handler_t(
   frame_queue(frame_queue),
   queue_counter(queue_counter),
   next_req_idx_(0) {
-
+  /**
+   * Manages camera operations using the libcamera API, providing a high-level interface
+   * for frame capture and buffer management. The handler coordinates three key tasks:
+   *
+   * 1. Camera initialization and configuration
+   * 2. DMA buffer management for zero-copy frame capture
+   * 3. Frame completion notification via callback system
+   *
+   * When a frame is captured, libcamera writes directly to a DMA buffer and invokes
+   * our callback. The callback then enqueues the buffer pointer to a lock-free queue
+   * and signals the main loop via semaphore that a new frame is ready for processing.
+   *
+   * Parameters:
+   *   config:        Camera and frame settings including resolution and buffer counts
+   *   frame_queue:   Lock-free queue for sharing frame buffers with main loop
+   *   queue_counter: Semaphore tracking available frames in the queue
+   *
+   * The initialization sequence is:
+   * 1. Configure frame properties (resolution, format)
+   * 2. Initialize camera manager and acquire device
+   * 3. Apply camera configuration
+   * 4. Set up DMA buffers and memory mapping
+   * 5. Configure camera controls (exposure, focus, etc)
+   */
   init_frame_config(config);
   init_camera_manager();
   init_camera_config(config);
@@ -27,6 +50,16 @@ camera_handler_t::camera_handler_t(
 }
 
 void camera_handler_t::init_frame_config(config& config) {
+  /**
+   * Calculates and stores frame buffer parameters based on YUV420 format.
+   *
+   * YUV420 format has three planes:
+   * - Y (luma): Full resolution (width × height)
+   * - U, V (chroma): Quarter resolution (width/2 × height/2 each)
+   *
+   * Parameters:
+   *   config: Contains frame dimensions and buffer count settings
+   */
   dma_frame_buffers_ = config.dma_buffers;
 
   unsigned int y_plane_bytes = config.frame_width * config.frame_height;
@@ -36,6 +69,17 @@ void camera_handler_t::init_frame_config(config& config) {
 }
 
 void camera_handler_t::init_camera_manager() {
+  /**
+   * Initializes and acquires exclusive access to the camera device.
+   *
+   * The initialization sequence is:
+   * 1. Start the camera manager service
+   * 2. Enumerate available cameras
+   * 3. Select and acquire first available camera
+   *
+   * Throws:
+   *   std::runtime_error: On any initialization failure (detailed in error message)
+   */
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
@@ -64,6 +108,23 @@ void camera_handler_t::init_camera_manager() {
 }
 
 void camera_handler_t::init_camera_config(config& config) {
+  /**
+   * Configures the camera stream for video recording.
+   *
+   * Sets core recording parameters:
+   * - YUV420 pixel format for efficient encoding
+   * - Frame resolution from config
+   * - Number of DMA buffers to allocate
+   *
+   * The configuration is validated to ensure the camera supports these settings
+   * without requiring adjustments.
+   *
+   * Parameters:
+   *   config: Contains frame dimensions and buffer settings
+   *
+   * Throws:
+   *   std::runtime_error: If configuration is invalid or fails to apply
+   */
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
@@ -94,6 +155,20 @@ void camera_handler_t::init_camera_config(config& config) {
 }
 
 void camera_handler_t::init_dma_buffers() {
+  /**
+   * Sets up DMA buffer system for zero-copy frame capture.
+   *
+   * For each buffer in the capture pipeline:
+   * 1. Creates a request with unique cookie as buffer identifier
+   * 2. Associates request with a DMA buffer
+   * 3. Maps buffer into process memory space
+   * 4. Stores mapping in mmap_buffers_ indexed by cookie
+   *
+   * Finally connects the request completion callback for frame handling.
+   *
+   * Throws:
+   *   std::runtime_error: If buffer allocation or mapping fails
+   */
   allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
   stream_ = config_->at(0).stream();
   if (allocator_->allocate(stream_) < 0) {
@@ -155,6 +230,33 @@ void camera_handler_t::init_dma_buffers() {
 }
 
 void camera_handler_t::init_camera_controls(config& config) {
+  /**
+   * Configures camera settings for consistent, high-quality video capture.
+   *
+   * Following cinematography best practices, this method:
+   * 1. Sets exposure time to half the frame interval (180° shutter rule)
+   *    This prevents motion blur while maintaining natural motion appearance
+   *
+   * 2. Disables automatic controls that could cause frame timing variation:
+   *    - Auto exposure (AE)
+   *    - Auto white balance (AWB)
+   *    - Auto focus (AF)
+   *    - HDR mode
+   *
+   * 3. Fixes focus at ~12 inches (lens position 3.33)
+   *    The lens position is the reciprocal of the focus distance in meters
+   *
+   * 4. Sets gain to 1.0 (equivalent to ISO 100) for minimal noise
+   *
+   * Parameters:
+   *   config: Contains frame timing constraints (duration_min/max)
+   *
+   * Throws:
+   *   std::runtime_error if camera fails to start with these settings
+   *
+   * Note:
+   *   These parameters will change, but are fine for development
+   */
   unsigned int frame_duration_min = config.frame_duration_min;
   unsigned int frame_duration_max = config.frame_duration_max;
 
@@ -186,6 +288,19 @@ void camera_handler_t::init_camera_controls(config& config) {
 }
 
 camera_handler_t::~camera_handler_t() {
+  /**
+   * Cleanly shuts down camera and releases resources.
+   *
+   * Strict cleanup order is required:
+   * 1. Stop camera capture
+   * 2. Unmap DMA buffers
+   * 3. Free buffer allocator
+   * 4. Release camera device
+   * 5. Stop camera manager
+   *
+   * Warning: Do not modify this sequence as it may cause
+   * undefined behavior or resource leaks
+   */
   camera_->stop();
   for (void* data : mmap_buffers_)
     munmap(data, frame_bytes_);
@@ -239,14 +354,26 @@ void camera_handler_t::queue_request() {
 
 void camera_handler_t::request_complete(libcamera::Request* request) {
   /**
-   * Signal handler for when a request is completed.
+   * Handles frame capture completion from libcamera's callback system.
    *
-   * This method is called by the camera manager when a request is completed.
-   * The request is then reused and the buffer is enqueued for transmission.
-   * The queue counter is incremented to signal that a buffer is available.
+   * This method executes in libcamera's thread context when a DMA buffer
+   * is filled with a new frame. It performs three critical tasks:
+   *
+   * 1. Retrieves the filled buffer using the request's cookie as an index
+   * 2. Enqueues the buffer pointer to the lock-free queue for processing
+   * 3. Signals frame availability by incrementing the semaphore
+   *
+   * The lock-free design ensures this callback can safely preempt the main
+   * loop, even in the midst of a dequeue operation, as the CAS operation
+   * will detect the change and retry upon this functions return. The use
+   * of the semaphore ensures the main loop never does any polling or busy
+   * waiting, only awakening when there are available frames.
    *
    * Parameters:
-   *  - request: The completed request
+   *   request: Contains metadata about the completed capture, including
+   *           the cookie identifying which DMA buffer was used
+   *
+   * Note: Returns immediately if request status is RequestCancelled
    */
   if (request->status() == libcamera::Request::RequestCancelled)
     return;

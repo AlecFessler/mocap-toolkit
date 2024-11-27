@@ -14,7 +14,28 @@ videnc::videnc(const config& config)
   : width(config.frame_width),
     height(config.frame_height),
     pts_counter(0) {
-
+  /**
+   * Initializes an H.264 video encoder using libavcodec.
+   *
+   * Creates a complete encoding pipeline with these steps:
+   * 1. Locates the x264 encoder
+   * 2. Allocates and configures encoding context
+   * 3. Sets up frame format for YUV420 input
+   * 4. Initializes encoder with quality/speed settings
+   *
+   * The encoder is configured for streaming:
+   * - YUV420 pixel format matches camera output
+   * - Time base and framerate from config ensure proper timing
+   * - CRF (Constant Rate Factor) for quality-based bitrate
+   * - Preset controls encoding speed/compression tradeoff
+   *
+   * Parameters:
+   *   config: Contains resolution, framerate, and encoding settings
+   *
+   * Throws:
+   *   std::runtime_error: On any initialization failure, with cleanup
+   *                      of previously allocated resources
+   */
   codec = avcodec_find_encoder_by_name("libx264");
   if (!codec) {
     const char* err = "Could not find libx264 encoder";
@@ -80,6 +101,27 @@ videnc::videnc(const config& config)
 }
 
 void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& conn) {
+  /**
+   * Encodes a single YUV420 frame and streams via callback.
+   *
+   * The encoding process:
+   * 1. Maps DMA buffer YUV planes to encoder frame buffer
+   * 2. Assigns presentation timestamp
+   * 3. Submits frame for encoding
+   * 4. Retrieves and streams any ready packets
+   *
+   * Note: The encoder may not output a packet for every input
+   * frame due to B-frames and rate control. The callback is
+   * only invoked when compressed packets are ready.
+   *
+   * Parameters:
+   *   yuv420_data: Raw frame data in YUV420 format
+   *   cb: Callback for streaming encoded packets
+   *   conn: Connection object passed to callback
+   *
+   * Throws:
+   *   std::runtime_error: If encoding or streaming fails
+   */
   const int y_size = width * height;
   const int uv_size = y_size / 4;
 
@@ -121,6 +163,17 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
 }
 
 videnc::~videnc() {
+  /**
+   * Releases encoder resources in correct order.
+   *
+   * Cleanup sequence:
+   * 1. Free packet buffer
+   * 2. Free frame buffer
+   * 3. Free encoder context
+   *
+   * Note: Each step checks for null before freeing,
+   * allowing partial cleanup if constructor fails
+   */
   if (pkt) av_packet_free(&pkt);
   if (frame) av_frame_free(&frame);
   if (ctx) avcodec_free_context(&ctx);

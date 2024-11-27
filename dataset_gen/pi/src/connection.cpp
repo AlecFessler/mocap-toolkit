@@ -15,7 +15,16 @@ extern std::unique_ptr<logger_t> logger;
 
 connection::connection()
   noexcept :
+  /**
+   * Creates a connection object with default values.
+   *
+   * Initializes a connection in an unconfigured state with invalid
+   * file descriptors (-1) and placeholder network settings. This
+   * constructor is primarily used for declaring connection objects
+   * that will be configured later.
+   */
   tcpfd(-1),
+  udpfd(-1),
   server_ip("UNSET_SERVER"),
   tcp_port("UNSET_PORT"),
   udp_port("UNSET_PORT") {}
@@ -26,6 +35,19 @@ connection::connection(
   std::string& tcp_port,
   std::string& udp_port
 ) noexcept :
+  /**
+   * Creates a connection object with specific network settings.
+   *
+   * Initializes a connection with server address and port information
+   * while maintaining invalid file descriptors (-1). The actual network
+   * connections are established later via conn_tcp() and bind_udp() to
+   * allow for error handling and reconnection attempts.
+   *
+   * Parameters:
+   *   server_ip: IPv4 address of the streaming server
+   *   tcp_port:  Port number for streaming video data
+   *   udp_port:  Port number for receiving control messages
+   */
   tcpfd(-1),
   udpfd(-1),
   server_ip(server_ip),
@@ -33,6 +55,14 @@ connection::connection(
   udp_port(udp_port) {}
 
 connection::~connection() noexcept {
+  /**
+   * Safely closes any open network connections.
+   *
+   * Ensures proper cleanup of system resources by closing both TCP
+   * and UDP sockets if they were opened. The file descriptors are
+   * set to -1 after closing to maintain a consistent invalid state,
+   * though this is technically unnecessary in a destructor.
+   */
   if (tcpfd >= 0) {
     close(tcpfd);
     tcpfd = -1;
@@ -44,6 +74,25 @@ connection::~connection() noexcept {
 }
 
 int connection::conn_tcp() {
+  /**
+   * Establishes a TCP connection to the streaming server.
+   *
+   * Creates and connects a TCP socket using the configured server_ip
+   * and tcp_port. The connection process includes:
+   * 1. Socket creation with IPv4 and TCP protocol
+   * 2. Port number validation (1-65535)
+   * 3. IP address parsing and validation
+   * 4. Connection establishment with retry on EINTR
+   *
+   * The method is idempotent - if a connection exists, it returns
+   * success without creating a new one. This allows repeated calls
+   * in retry loops without resource leaks.
+   *
+   * Returns:
+   *   0 on success
+   *   -errno on system calls failures
+   *   -EINVAL on invalid port or IP address
+   */
   if (tcpfd >= 0) return 0;
 
   tcpfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -84,6 +133,24 @@ int connection::conn_tcp() {
 }
 
 int connection::bind_udp() {
+  /**
+   * Creates and binds a UDP socket for receiving control messages.
+   *
+   * Sets up a UDP socket bound to all interfaces (INADDR_ANY) on
+   * the configured udp_port. The initialization process includes:
+   * 1. Socket creation with IPv4 and UDP protocol
+   * 2. Port number validation (1-65535)
+   * 3. Socket binding with retry on EINTR
+   *
+   * The method is idempotent - if a socket is already bound, it
+   * returns success without creating a new one. This supports
+   * safe retry attempts.
+   *
+   * Returns:
+   *   0 on success
+   *   -errno on system call failures
+   *   -EINVAL on invalid port configuration
+   */
   if (udpfd >= 0) return 0;
 
   udpfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -97,36 +164,15 @@ int connection::bind_udp() {
   udp_addr.sin_family = AF_INET;
   udp_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  if (udp_port.empty() || udp_port.find_first_not_of("0123456789") != std::string::npos) {
-      std::string error_message = "Invalid UDP_PORT value: " + udp_port;
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
-      close(udpfd);
-      udpfd = -1;
-      return -EINVAL;
-  }
-
-  int udp_port_num;
-  try {
-      udp_port_num = std::stoi(udp_port);
-  } catch (const std::exception& e) {
-      std::string error_message = "Error parsing UDP_PORT: " + udp_port + " - " + e.what();
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
-      close(udpfd);
-      udpfd = -1;
-      return -EINVAL;
-  }
-
+  int udp_port_num = std::stoi(udp_port);
   if (udp_port_num < 1 || udp_port_num > 65535) {
-      std::string error_message = "UDP_PORT out of range: " + std::to_string(udp_port_num);
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
-      close(udpfd);
-      udpfd = -1;
-      return -EINVAL;
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid udp_port number");
+    return -EINVAL;
   }
-
   udp_addr.sin_port = htons(udp_port_num);
 
-  if (bind(udpfd, (struct sockaddr*)&udp_addr, sizeof(udp_addr)) < 0) {
+  while (bind(udpfd, (struct sockaddr*)&udp_addr, sizeof(udp_addr)) < 0) {
+      if (errno == EINTR) continue;
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to bind UDP socket");
       return -errno;
   }

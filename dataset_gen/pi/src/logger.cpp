@@ -12,16 +12,51 @@
 #include <unistd.h>
 
 logger_t::logger_t(const char* filename) {
+  /**
+   * Creates an async-signal-safe logger that writes to a specified file.
+   *
+   * Opens a file descriptor with three key flags:
+   * - O_WRONLY: Write-only access is all thats needed
+   * - O_CREAT:  Creates the file if it doesn't exist
+   * - O_APPEND: Atomic append operations prevent log corruption
+   *
+   * The 0644 permissions allow:
+   * - Owner: read/write
+   * - Group: read
+   * - Others: read
+   *
+   * Parameters:
+   *   filename: Path to the log file
+   *
+   * Throws:
+   *   std::runtime_error if file cannot be opened
+   */
   fd_ = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd_ < 0)
     throw std::runtime_error("Failed to open log file");
 }
 
 logger_t::~logger_t() {
+  /**
+   * Cleans up the log file descriptor
+   */
   if (fd_ >= 0) close(fd_);
 }
 
 static const char* level_to_str(logger_t::level_t level) {
+  /**
+   * Converts log level enumeration to human-readable string.
+   *
+   * Uses a constexpr array and switch statement rather than a map
+   * to maintain async-signal-safety. The array is initialized at
+   * compile time and the switch generates constant-time lookups.
+   *
+   * Parameters:
+   *   level: The log level to convert
+   *
+   * Returns:
+   *   Corresponding string representation, or "UNKNOWN" for invalid levels
+   */
   constexpr const char* levels[] = {"INFO", "DEBUG", "WARNING", "ERROR", "UNKNOWN"};
   switch (level) {
     case logger_t::level_t::INFO: return levels[0];
@@ -34,15 +69,29 @@ static const char* level_to_str(logger_t::level_t level) {
 
 static void i_to_str(int value, char* buffer, int& offset) {
   /**
-   * Async-signal-safe integer to string conversion
+   * Converts integers to strings without using any unsafe functions.
    *
-   * This function converts an integer to a string and stores it in the buffer
-   * Caller is responsible for ensuring the buffer is large enough to store the string
+   * This function is crucial for async-signal-safety as standard
+   * string conversion functions like sprintf or std::to_string
+   * are unsafe in signal handlers. The implementation:
    *
-   * args:
-   *  value: the integer to convert
-   *  buffer: the buffer to store the string
-   *  offset: the offset in the buffer to store the string
+   * 1. Handles special case of zero
+   * 2. Manages negative numbers by prepending '-'
+   * 3. Builds digits in reverse order in a temporary buffer
+   * 4. Copies digits to final position in correct order
+   *
+   * The algorithm avoids:
+   * - Dynamic memory allocation
+   * - Function calls that might allocate
+   * - Global state modifications
+   *
+   * Parameters:
+   *   value:  Integer to convert
+   *   buffer: Target character buffer
+   *   offset: Current position in buffer, updated as digits are added
+   *
+   * Note: Caller must ensure buffer has sufficient space for maximum
+   * possible number of digits plus sign (11 chars for 32-bit int)
    */
   if (value == 0) {
     buffer[offset++] = '0';
@@ -92,14 +141,30 @@ constexpr int NANOS_PER_MICROSECOND = 1000;
 
 static void timestamp(char* buffer, int& offset) {
   /**
-   * Async-signal-safe timestamp generator
+   * Generates an ISO 8601 timestamp without using unsafe time functions.
    *
-   * This function generates a timestamp in the format "YYYY-MM-DD HH:MM:SS.mmmuuuZ"
-   * Requires a buffer of at least 28 bytes to store the timestamp, to leave room
-   * for the null terminator, though this function itself does not null terminate the string.
+   * Most time functions (like strftime) are unsafe in signal handlers.
+   * This function performs manual time calculations to decompose a
+   * CLOCK_REALTIME timestamp into its components:
    *
-   * args:
-   *  buffer: a buffer of 28 bytes to store the timestamp
+   * 1. Gets raw seconds and nanoseconds
+   * 2. Accounts for leap years since epoch
+   * 3. Breaks down into calendar components:
+   *    - Years since 1970
+   *    - Months (handling February in leap years)
+   *    - Days
+   *    - Hours, minutes, seconds
+   *    - Milliseconds and microseconds
+   *
+   * Format: "YYYY-MM-DD HH:MM:SS.mmmuuuZ"
+   * Example: "2024-03-27 14:30:15.123456Z"
+   *
+   * Parameters:
+   *   buffer: Character buffer for timestamp (needs 28 bytes)
+   *   offset: Current position in buffer, updated as timestamp is written
+   *
+   * Note: The Z suffix indicates UTC timezone, which is what
+   * CLOCK_REALTIME provides on Linux systems
    */
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -175,16 +240,29 @@ static void timestamp(char* buffer, int& offset) {
 
 void logger_t::log(logger_t::level_t level, const char* file, int line, const char* message) {
   /**
-   * Async-signal-safe logging function
+   * Writes a log entry using only async-signal-safe operations.
    *
-   * This function logs a message to the log file in the format
-   * "YYYY-MM-DD HH:MM:SS.mmmuuuZ [LEVEL] file:line: message\n"
+   * This function can be safely called from signal handlers because it:
+   * 1. Uses only reentrant functions
+   * 2. Makes no dynamic allocations
+   * 3. Modifies no global state
+   * 4. Handles interrupted writes (EINTR)
    *
-   * args:
-   *  level: the log level
-   *  file: the file name where the log message originated
-   *  line: the line number where the log message originated
-   *  message: the log message
+   * The log format is:
+   * "TIMESTAMP [LEVEL] file:line: message\n"
+   * Example:
+   * "2024-03-27 14:30:15.123456Z [INFO] main.cpp:42: Process started\n"
+   *
+   * Parameters:
+   *   level:   Severity level of the message
+   *   file:    Source file generating the log
+   *   line:    Line number in source file
+   *   message: The log message to write
+   *
+   * Note: The entire message is assembled in a fixed buffer before
+   * writing to ensure atomic log entries. The write loop handles
+   * partial writes, continuing until the entire message is written
+   * or an unrecoverable error occurs.
    */
   if (fd_ < 0) return;
 

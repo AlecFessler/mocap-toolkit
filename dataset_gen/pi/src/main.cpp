@@ -47,8 +47,8 @@ inline int stream_pkt(connection& conn, const uint8_t* data, size_t size);
 
 int main() {
   try {
-    config config = parse_config("config.txt");
     logger = std::make_unique<logger_t>("logs.txt");
+    config config = parse_config("config.txt");
     loop_ctl_sem = init_semaphore();
 
     int64_t frame_duration = ns_per_s / config.fps;
