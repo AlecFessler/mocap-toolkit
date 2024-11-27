@@ -37,8 +37,10 @@ config parse_config(const std::string& filename) {
 
       if (key == "SERVER_IP")
         config.server_ip = value;
-      else if (key == "PORT")
-        config.port = value;
+      else if (key == "TCP_PORT")
+        config.tcp_port = value;
+      else if (key == "UDP_PORT")
+         config.udp_port = value;
       else if (key == "ENC_SPEED")
         config.enc_speed = value;
       else if (key == "ENC_QUALITY")

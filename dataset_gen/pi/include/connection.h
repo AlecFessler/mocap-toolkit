@@ -13,21 +13,21 @@ public:
   connection() noexcept;
   connection(
     std::string& server_ip,
-    std::string& port
+    std::string& tcp_port,
+    std::string& udp_port
   ) noexcept;
-  connection(connection&& other) noexcept;
-  connection& operator=(connection&& other) noexcept;
-  connection(const connection&) = delete;
-  connection& operator=(const connection&) = delete;
   ~connection() noexcept;
 
-  int conn_sock();
-  void disconn_sock() noexcept;
-  int sockfd;
+  int conn_tcp();
+  int tcpfd;
+
+  int bind_udp();
+  int udpfd;
 
 private:
   std::string server_ip;
-  std::string port;
+  std::string tcp_port;
+  std::string udp_port;
 };
 
 #endif

@@ -8,7 +8,8 @@
 
 struct config {
   std::string server_ip;
-  std::string port;
+  std::string tcp_port;
+  std::string udp_port;
   std::string enc_speed;
   std::string enc_quality;
   int recording_cpu;

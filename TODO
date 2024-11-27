@@ -1,7 +1,3 @@
-Redesign the watchdog script
-
-Make video encoder flush and stream remaining frames before disconnecting
-
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 
 Create systemd service for auto-starting recording software on Pis

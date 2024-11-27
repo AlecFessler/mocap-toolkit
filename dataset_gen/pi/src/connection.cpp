@@ -3,6 +3,7 @@
 // See LICENSE file in the project root for full license information.
 
 #include <arpa/inet.h>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <memory>
@@ -14,46 +15,39 @@ extern std::unique_ptr<logger_t> logger;
 
 connection::connection()
   noexcept :
-  sockfd(-1),
+  tcpfd(-1),
   server_ip("UNSET_SERVER"),
-  port("UNSET_PORT") {}
+  tcp_port("UNSET_PORT"),
+  udp_port("UNSET_PORT") {}
 
 
 connection::connection(
   std::string& server_ip,
-  std::string& port
+  std::string& tcp_port,
+  std::string& udp_port
 ) noexcept :
-  sockfd(-1),
+  tcpfd(-1),
+  udpfd(-1),
   server_ip(server_ip),
-  port(port) {}
-
-connection::connection(connection&& other) noexcept
-    : sockfd(other.sockfd), server_ip(std::move(other.server_ip)), port(std::move(other.port)) {
-    other.sockfd = -1;
-}
-
-connection& connection::operator=(connection&& other) noexcept {
-  if (this != &other) {
-    if (sockfd >= 0) close(sockfd);
-
-    server_ip = std::move(other.server_ip);
-    port = std::move(other.port);
-    sockfd = other.sockfd;
-
-    other.sockfd = -1;
-  }
-  return *this;
-}
+  tcp_port(tcp_port),
+  udp_port(udp_port) {}
 
 connection::~connection() noexcept {
-  disconn_sock();
+  if (tcpfd >= 0) {
+    close(tcpfd);
+    tcpfd = -1;
+  }
+  if (udpfd >= 0) {
+    close(udpfd);
+    udpfd = -1;
+  }
 }
 
-int connection::conn_sock() {
-  if (sockfd >= 0) return 0;
+int connection::conn_tcp() {
+  if (tcpfd >= 0) return 0;
 
-  sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd < 0) {
+  tcpfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (tcpfd < 0) {
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
     return -errno;
   }
@@ -61,13 +55,13 @@ int connection::conn_sock() {
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
 
-  int port_num = std::stoi(port);
-  if (port_num < 1 || port_num > 65535) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid port number");
+  int tcp_port_num = std::stoi(tcp_port);
+  if (tcp_port_num < 1 || tcp_port_num > 65535) {
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid tcp_port number");
     return -EINVAL;
   }
 
-  server_addr.sin_port = htons(port_num);
+  server_addr.sin_port = htons(tcp_port_num);
 
   if (inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0) {
     if (errno == 0) {
@@ -79,7 +73,7 @@ int connection::conn_sock() {
     }
   }
 
-  while (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+  while (connect(tcpfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
     if (errno == EINTR) continue;
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
     return -errno;
@@ -89,9 +83,54 @@ int connection::conn_sock() {
   return 0;
 }
 
-void connection::disconn_sock() noexcept {
-  if (sockfd >= 0) {
-    close(sockfd);
-    sockfd = -1;
+int connection::bind_udp() {
+  if (udpfd >= 0) return 0;
+
+  udpfd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (udpfd < 0) {
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create UDP socket");
+    return -errno;
   }
+
+  struct sockaddr_in udp_addr;
+  memset(&udp_addr, 0, sizeof(udp_addr));
+  udp_addr.sin_family = AF_INET;
+  udp_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+  if (udp_port.empty() || udp_port.find_first_not_of("0123456789") != std::string::npos) {
+      std::string error_message = "Invalid UDP_PORT value: " + udp_port;
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
+      close(udpfd);
+      udpfd = -1;
+      return -EINVAL;
+  }
+
+  int udp_port_num;
+  try {
+      udp_port_num = std::stoi(udp_port);
+  } catch (const std::exception& e) {
+      std::string error_message = "Error parsing UDP_PORT: " + udp_port + " - " + e.what();
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
+      close(udpfd);
+      udpfd = -1;
+      return -EINVAL;
+  }
+
+  if (udp_port_num < 1 || udp_port_num > 65535) {
+      std::string error_message = "UDP_PORT out of range: " + std::to_string(udp_port_num);
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, error_message.c_str());
+      close(udpfd);
+      udpfd = -1;
+      return -EINVAL;
+  }
+
+  udp_addr.sin_port = htons(udp_port_num);
+
+  if (bind(udpfd, (struct sockaddr*)&udp_addr, sizeof(udp_addr)) < 0) {
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to bind UDP socket");
+      return -errno;
+  }
+
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "UDP socket bound successfully");
+  return 0;
 }
