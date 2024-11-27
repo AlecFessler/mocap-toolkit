@@ -52,15 +52,26 @@ send_udp_message() {
     local index="$2"
     local port="$3"
 
-    # Try ethernet first
-    printf "%s" "$message" | nc -u "${ETH_IPS[index]}" "$port"
+    # If this is a STOP message, send it as-is
+    if [ "$message" = "STOP" ]; then
+        printf "%s" "$message" | nc -u "${ETH_IPS[index]}" "$port"
+    else
+        # For timestamps, use perl to pack the number as a 64-bit big-endian integer
+        perl -e "print pack('Q>', $message)" | nc -u "${ETH_IPS[index]}" "$port"
+    fi
+
     if [ $? -eq 0 ]; then
         log "INFO" "Sent message via ethernet to ${ETH_IPS[index]} on port $port"
         return 0
     fi
 
-    # Fall back to WiFi if ethernet fails
-    printf "%s" "$message" | nc -u "${WIFI_IPS[index]}" "$port"
+    # Fall back to WiFi if ethernet fails, using the same message format
+    if [ "$message" = "STOP" ]; then
+        printf "%s" "$message" | nc -u "${WIFI_IPS[index]}" "$port"
+    else
+        perl -e "print pack('Q>', $message)" | nc -u "${WIFI_IPS[index]}" "$port"
+    fi
+
     if [ $? -eq 0 ]; then
         log "INFO" "Sent message via WiFi to ${WIFI_IPS[index]} on port $port"
         return 0

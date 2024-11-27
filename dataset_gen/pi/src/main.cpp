@@ -136,7 +136,12 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context) {
    */
   (void)info;
   (void)context;
-  if (signo != SIGUSR1 || !running) return;
+  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Capture signal handler entered");
+  
+  if (signo != SIGUSR1 || !running) {
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Invalid signal or not running");
+    return;
+  }
 
   cam->queue_request();
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
@@ -184,8 +189,13 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   }
 
   if (bytes_recvd == 8) {
-    memcpy(&timestamp, buf, sizeof(timestamp));
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received timestamp");
+    uint64_t network_timestamp;
+    memcpy(&network_timestamp, buf, sizeof(network_timestamp));
+    timestamp = be64toh(network_timestamp);  // Convert from big-endian to host byte order
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Received timestamp %ld", timestamp);
+    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, msg);
     sem_post(loop_ctl_sem.get());
     return;
   }
@@ -258,7 +268,7 @@ inline int init_timer() {
   sev.sigev_signo = SIGUSR1;
   sev.sigev_value.sival_ptr = &timerid;
 
-  if (timer_create(CLOCK_REALTIME, &sev, &timerid) == -1) {
+  if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) {
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket disconnect timer");
     return -errno;
   }
@@ -283,15 +293,52 @@ inline void arm_timer() {
    * receiving the same initial timestamp, this enables tight frame capture
    * sync across all cameras in the network.
    */
-  if (!timestamp) return;
+    if (!timestamp) return;
 
-  struct itimerspec its;
-  its.it_value.tv_sec = timestamp / ns_per_s;
-  its.it_value.tv_nsec = timestamp % ns_per_s;
-  its.it_interval.tv_sec = 0;
-  its.it_interval.tv_nsec = 0;
+    struct timespec real_time, mono_time;
+    clock_gettime(CLOCK_REALTIME, &real_time);
+    clock_gettime(CLOCK_MONOTONIC, &mono_time);
 
-  timer_settime(timerid, 0, &its, NULL);
+    int64_t current_real_ns = (int64_t)real_time.tv_sec * ns_per_s + real_time.tv_nsec;
+    int64_t current_mono_ns = (int64_t)mono_time.tv_sec * ns_per_s + mono_time.tv_nsec;
+
+    int64_t ns_until_target = timestamp - current_real_ns;
+    int64_t frame_duration = ns_per_s / 30;
+
+    // Debug log the timing calculations
+    char debug_msg[256];
+    snprintf(debug_msg, sizeof(debug_msg), 
+             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)", 
+             current_real_ns, timestamp, ns_until_target, 
+             ns_until_target / 1000000.0);
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+
+    if (ns_until_target <= 0) {
+        int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
+        ns_until_target += frames_elapsed * frame_duration;
+
+        snprintf(debug_msg, sizeof(debug_msg),
+                "Target in past, adjusted by %ld frames to delta: %ld ns",
+                frames_elapsed, ns_until_target);
+        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    }
+
+    // Convert our realtime delta into a monotonic target
+    int64_t mono_target_ns = current_mono_ns + ns_until_target;
+
+    struct itimerspec its;
+    its.it_value.tv_sec = mono_target_ns / ns_per_s;
+    its.it_value.tv_nsec = mono_target_ns % ns_per_s;
+    its.it_interval.tv_sec = 0;
+    its.it_interval.tv_nsec = 0;
+
+    timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
+
+    // Log the final timer setting
+    snprintf(debug_msg, sizeof(debug_msg),
+             "Timer set for monotonic timestamp %ld (current mono: %ld)",
+             mono_target_ns, current_mono_ns);
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {
@@ -356,8 +403,8 @@ inline int init_signals() {
   sigemptyset(&io_action.sa_mask);
 
   struct sigaction exit_action;
-  io_action.sa_sigaction = exit_signal_handler;
-  io_action.sa_flags = SA_SIGINFO | SA_RESTART;
+  exit_action.sa_sigaction = exit_signal_handler;
+  exit_action.sa_flags = SA_SIGINFO | SA_RESTART;
   sigemptyset(&io_action.sa_mask);
 
   if (sigaction(SIGUSR1, &action, NULL) < 0 ||
