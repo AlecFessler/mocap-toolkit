@@ -254,14 +254,26 @@ inline int init_realtime_scheduling(int recording_cpu) {
 
 inline int init_timer() {
   /**
-   * Initializes a timer reading from the system clock (CLOCK_REALTIME)
+   * Initializes a CLOCK_MONOTONIC timer for precise frame capture timing
    *
-   * This is the timer which arm_timer() makes use of to emit SIGUSR1
-   * to queue a capture request (see capture_signal_handler()). It is
-   * using the system clock instead of the monotonic clock because frame
-   * capture synchronization between multiple cameras in the overall system
-   * is achieved through PTP clock sync across the network, and then each pi
-   * capturing frames every time their clock reaches the next capture timestamp.
+   * This timer is fundamental to our multi-camera synchronization system.
+   * While our capture timing is ultimately based on PTP-synchronized system
+   * clocks (CLOCK_REALTIME), we use CLOCK_MONOTONIC for the actual timer
+   * to ensure stable intervals between captures. This is crucial because:
+   *
+   * 1. CLOCK_MONOTONIC is immune to system time adjustments, preventing
+   *    potential frame timing glitches if NTP/PTP adjusts CLOCK_REALTIME
+   *
+   * 2. When combined with TIMER_ABSTIME in arm_timer(), this provides
+   *    precise scheduling of frame captures at specific points in time,
+   *    rather than relative delays which could accumulate drift
+   *
+   * The timer is configured to emit SIGUSR1 signals which trigger frame
+   * captures via capture_signal_handler(). The actual timing of these
+   * signals is controlled by arm_timer(), which calculates the appropriate
+   * monotonic clock targets based on our PTP-synchronized real time targets.
+   *
+   * Returns 0 on success, -errno on failure
    */
   struct sigevent sev;
   sev.sigev_notify = SIGEV_SIGNAL;
@@ -276,23 +288,41 @@ inline int init_timer() {
 }
 
 inline void arm_timer() {
-  /**
-   * Arms the timer which emits SIGUSR1 on timeout
-   *
-   * If the timestamp has not been set (see io_signal_handler())
-   * it returns early to not begin the capture/stream loop.
-   *
-   * If the timestamp has been set, it simply sets the timer
-   * to timeout when it reaches the timestamp value. The timestamp
-   * is incremented (if it's set) by the frame duration in main()
-   * just before calling this function, ensuring the next frame capture
-   * request is enqueued right on time. Because the main loop increments
-   * and rearms the timer on every iteration of the loop, this effectively
-   * drives the capture/stream loop forward until the timestamp is reset to
-   * zero. Combined with PTP clock sync across the network, and all devices
-   * receiving the same initial timestamp, this enables tight frame capture
-   * sync across all cameras in the network.
-   */
+    /**
+     * Arms the timer to trigger frame captures at precise timestamps
+     *
+     * This function is the core of our multi-camera synchronization system.
+     * It converts PTP-synchronized real time targets into monotonic clock
+     * targets that maintain precise timing between frames. The process works
+     * as follows:
+     *
+     * 1. We start with a target timestamp in CLOCK_REALTIME domain, initially
+     *    received from the server and shared across all cameras. This timestamp
+     *    is incremented by frame_duration (33.33ms at 30fps) before each call.
+     *
+     * 2. We calculate how far in the future this target is by comparing it
+     *    to the current CLOCK_REALTIME. If the target is in the past (which
+     *    can happen if we received the initial timestamp late), we adjust
+     *    forward by skipping frames until we're back on schedule.
+     *
+     * 3. We convert this future time delta into the CLOCK_MONOTONIC domain
+     *    by adding it to the current monotonic clock value. This maintains
+     *    our synchronized timing while protecting against clock adjustments.
+     *
+     * 4. We set an absolute (TIMER_ABSTIME) timer for this monotonic target.
+     *    Using absolute rather than relative timing prevents drift that could
+     *    accumulate from processing delays between frames.
+     *
+     * This system achieves microsecond-level synchronization across multiple
+     * cameras by:
+     * - Using PTP-synchronized CLOCK_REALTIME for a common time reference
+     * - Converting to CLOCK_MONOTONIC for stable intervals
+     * - Automatically adjusting for network delays in initial timestamp delivery
+     * - Using absolute rather than relative timer targets
+     *
+     * The timer will emit SIGUSR1 when the target time is reached, triggering
+     * capture_signal_handler() to initiate the actual frame capture.
+     */
     if (!timestamp) return;
 
     struct timespec real_time, mono_time;
