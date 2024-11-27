@@ -6,8 +6,8 @@
 #define CAMERAHANDLER_H
 
 #include <cstdint>
-#include <semaphore>
 #include <memory>
+#include <semaphore.h>
 #include <vector>
 #include <libcamera/libcamera.h>
 #include "config.h"

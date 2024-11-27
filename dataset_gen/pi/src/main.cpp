@@ -13,7 +13,6 @@
 #include <iostream>
 #include <memory>
 #include <sched.h>
-#include <semaphore.h>
 #include <signal.h>
 #include <sstream>
 #include <sys/socket.h>
@@ -22,13 +21,8 @@
 #include "camera_handler.h"
 #include "connection.h"
 #include "logger.h"
+#include "sem_init.h"
 #include "videnc.h"
-
-struct sem_deleter {
-  void operator()(sem_t* sem) const {
-    if (sem) sem_destroy(sem);
-  }
-};
 
 extern char** environ;
 volatile static sig_atomic_t running = 0;
@@ -55,13 +49,7 @@ int main() {
   try {
     config config = parse_config("config.txt");
     logger = std::make_unique<logger_t>("logs.txt");
-
-    sem_t sem;
-    loop_ctl_sem = std::unique_ptr<sem_t, sem_deleter>(&sem);
-    if (sem_init(loop_ctl_sem.get(), 0, 0) < 0) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to initialize semaphore");
-      return -errno;
-    }
+    loop_ctl_sem = init_semaphore();
 
     int64_t frame_duration = ns_per_s / config.fps;
     lock_free_queue_t frame_queue(config.dma_buffers);
@@ -134,14 +122,9 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context) {
    * incrementing the loop_ctl_sem to unblock the main loop so it can
    * handle the captured frame (see camera_handler::request_complete(request)).
    */
+  (void)signo;
   (void)info;
   (void)context;
-  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Capture signal handler entered");
-  
-  if (signo != SIGUSR1 || !running) {
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Invalid signal or not running");
-    return;
-  }
 
   cam->queue_request();
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
@@ -168,9 +151,9 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
    * but still allowing the main loop to handle any remaining frames since the
    * semaphore is incremented once per available frame.
    */
+  (void)signo;
   (void)info;
   (void)context;
-  if (signo != SIGIO) return;
 
   char buf[8];
   ssize_t bytes_recvd = recvfrom(
@@ -211,9 +194,9 @@ void exit_signal_handler(int signo, siginfo_t* info, void* context) {
    * semaphore without a frame so that the main loop can unblock
    * and then exit since the loop condition is false.
    */
+  (void)signo;
   (void)info;
   (void)context;
-  if (signo != SIGINT && signo != SIGTERM) return;
 
   running = 0;
   sem_post(loop_ctl_sem.get());
@@ -281,7 +264,7 @@ inline int init_timer() {
   sev.sigev_value.sival_ptr = &timerid;
 
   if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket disconnect timer");
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create timer");
     return -errno;
   }
   return 0;
@@ -337,9 +320,9 @@ inline void arm_timer() {
 
     // Debug log the timing calculations
     char debug_msg[256];
-    snprintf(debug_msg, sizeof(debug_msg), 
-             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)", 
-             current_real_ns, timestamp, ns_until_target, 
+    snprintf(debug_msg, sizeof(debug_msg),
+             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+             current_real_ns, timestamp, ns_until_target,
              ns_until_target / 1000000.0);
     logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 

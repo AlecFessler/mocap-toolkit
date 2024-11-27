@@ -89,9 +89,9 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
     throw std::runtime_error(err);
   }
 
-  memcpy(frame->data[0], yuv420_data, y_size);
-  memcpy(frame->data[1], yuv420_data + y_size, uv_size);
-  memcpy(frame->data[2], yuv420_data + y_size + uv_size, uv_size);
+  frame->data[0] = yuv420_data;
+  frame->data[1] = yuv420_data + y_size;
+  frame->data[2] = yuv420_data + y_size + uv_size;
 
   frame->pts = pts_counter++;
 
@@ -103,8 +103,7 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
 
   while (true) {
     int ret = avcodec_receive_packet(ctx, pkt);
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-      break;
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
     if (ret < 0) {
       const char* err = "Error receiving encoded packet";
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);

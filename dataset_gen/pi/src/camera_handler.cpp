@@ -206,7 +206,9 @@ void camera_handler_t::queue_request() {
    * occurs when the main loop calls sem_wait, decrementing the
    * semaphore, but before it dequeues the buffer. Thus, we check
    * for 2 less than max to ensure at least one is available even
-   * if the counter is behind by 1.
+   * if the counter is behind by 1. The queue counter may also be
+   * incremented externally without a frame to unblock the main
+   * loop. This is also safely handled with this same check.
    *
    * If requests are not returned at the same rate as they are queued,
    * this method will throw to signal that the camera is not keeping up,
@@ -217,10 +219,9 @@ void camera_handler_t::queue_request() {
    *  - std::runtime_error: Buffer is not ready for requeuing
    *  - std::runtime_error: Failed to queue request
    */
-  int enqueued_buffers = 0;
-  sem_getvalue(&queue_counter, &enqueued_buffers);
-
-  if (enqueued_buffers > dma_frame_buffers_ - 2) {
+  int enqueued_bufs;
+  sem_getvalue(&queue_counter, &enqueued_bufs);
+  if (enqueued_bufs > dma_frame_buffers_ - 2) {
     const char* err = "Buffer is not ready for requeuing";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
@@ -253,8 +254,7 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Request completed");
 
   void* data = mmap_buffers_[request->cookie()];
-
-  while(!frame_queue.enqueue(data));
+  frame_queue.enqueue(data);
 
   sem_post(&queue_counter);
   request->reuse(libcamera::Request::ReuseBuffers);
