@@ -4,59 +4,7 @@ This project aims to leverage Google's Mediapipe hand pose predictor, a custom m
 
 ### Architecture Diagram
 
-```mermaid
-flowchart TD
-    classDef timeClass fill:#f5f9ff,color:black,stroke:#d3e3fd
-    classDef cameraClass fill:#d3e3fd,color:black,stroke:#2b6cb0
-    classDef pipelineClass fill:#2b6cb0,color:white
-    classDef serverClass fill:#1a4971,color:white
-
-    subgraph Server["Control Server"]
-        NTP["NTP Server"]
-        Mgr["Manager Script"]
-
-        subgraph FFmpeg["FFmpeg Services"]
-            FF1["FFmpeg 1"] --> |"Write"| Seg1["Segments 1"]
-            FF2["FFmpeg 2"] --> |"Write"| Seg2["Segments 2"]
-            FF3["FFmpeg 3"] --> |"Write"| Seg3["Segments 3"]
-        end
-
-        Mgr --> |"Start/Stop"| FF1 & FF2 & FF3
-        Mgr --> |"Initial Timestamp"| UDP["UDP Broadcast"]
-    end
-
-    subgraph Network["Network Layer"]
-        Switch["Ethernet Switch"]
-        NTP --> |"Time Sync"| GM["Grandmaster Pi"]
-        GM --> |"PTP"| Switch
-        Switch --> |"PTP"| Pi2["Pi 2"] & Pi3["Pi 3"]
-    end
-
-    subgraph Pi1["Grandmaster Pi"]
-        Timer1["Timer"] --> Cap1["Camera Handler"]
-        Cap1 --> Enc1["H.264 Encoder"]
-        Enc1 --> |"TCP Stream"| FF1
-    end
-
-    subgraph Pi2["Raspberry Pi 2"]
-        Timer2["Timer"] --> Cap2["Camera Handler"]
-        Cap2 --> Enc2["H.264 Encoder"]
-        Enc2 --> |"TCP Stream"| FF2
-    end
-
-    subgraph Pi3["Raspberry Pi 3"]
-        Timer3["Timer"] --> Cap3["Camera Handler"]
-        Cap3 --> Enc3["H.264 Encoder"]
-        Enc3 --> |"TCP Stream"| FF3
-    end
-
-    UDP --> Timer1 & Timer2 & Timer3
-
-    class NTP,GM,Switch,Timer1,Timer2,Timer3 timeClass
-    class Cap1,Cap2,Cap3 cameraClass
-    class Enc1,Enc2,Enc3 pipelineClass
-    class Mgr,FF1,FF2,FF3,Seg1,Seg2,Seg3 serverClass
-```
+![System Architecture](assets/architecture_diagram.svg)
 
 ### Physical Setup
 [Photos/diagrams of recording frame and hardware]
