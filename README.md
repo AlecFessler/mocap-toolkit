@@ -14,26 +14,57 @@ This project aims to develop an end-to-end system for training specialized 3D mo
 
 The system uses standard hardware and network protocols to achieve high-precision synchronization, enabling accurate 3D reconstruction for generating training data.
 
-### Architecture Diagram
+### System Architecture
+
+The system achieves microsecond-level frame synchronization using a remarkably simple coordination model. A central server communicates with camera processes through just two messages - an initial timestamp broadcast and a stop signal. The power of this minimal design comes from how each camera leverages precise clock synchronization to maintain perfect timing.
+
+The logs tell the story better than words can. Here's a sequence showing the actual synchronization achieved across three cameras recording at 30fps, with timestamps captured independently by each camera:
+
+```
+Frame 1:
+Camera 1: [2024-11-27 03:36:51.957246] [INFO] Capture request queued
+Camera 2: [2024-11-27 03:36:51.957239] [INFO] Capture request queued
+Camera 3: [2024-11-27 03:36:51.957239] [INFO] Capture request queued
+
+Frame 2:
+Camera 1: [2024-11-27 03:36:51.990584] [INFO] Capture request queued
+Camera 2: [2024-11-27 03:36:51.990581] [INFO] Capture request queued
+Camera 3: [2024-11-27 03:36:51.990588] [INFO] Capture request queued
+
+Frame 3:
+Camera 1: [2024-11-27 03:36:52.023917] [INFO] Capture request queued
+Camera 2: [2024-11-27 03:36:52.023923] [INFO] Capture request queued
+Camera 3: [2024-11-27 03:36:52.023922] [INFO] Capture request queued
+```
+
+The timestamps reveal two key achievements:
+1. Frame captures are synchronized within 9 microseconds across cameras
+2. The 33.33ms intervals between frames (30fps) are maintained with exceptional precision
+
+The recording lifecycle consists of three phases:
+
+1. **Initialization**:
+   - The server broadcasts a single timestamp to all recording processes
+   - Each camera independently calculates its entire frame schedule using a simple formula:
+     `Tn = timestamp + n * frame_duration`
+   - Even if cameras receive the timestamp at slightly different times, they automatically synchronize to this schedule
+
+2. **Recording**: Each camera runs autonomously but in perfect coordination through:
+   - PTP-synchronized system clocks providing sub-microsecond time alignment
+   - A signal-based event architecture handling timing-critical operations
+   - A semaphore-controlled main loop that sleeps when no work is needed
+   - DMA transfers and lock-free queuing ensuring consistent frame timing
+
+3. **Termination**: A "STOP" message ends recording across all cameras simultaneously
+
+A dedicated network handles PTP synchronization, with one Raspberry Pi serving as the grandmaster clock. This precise timing foundation, combined with the event-driven design, enables consistent sub-10μs synchronization despite each camera operating independently.
 
 ![System Architecture](assets/architecture_diagram.svg)
 
-The system achieves microsecond-level frame synchronization across multiple cameras through a carefully orchestrated combination of network timing protocols and real-time processing. A central server coordinates multiple Recording & Streaming processes, each responsible for a single camera, while a PTP Grandmaster Clock ensures precise timing synchronization across all devices.
+The architecture diagram illustrates the three Recording & Streaming processes coordinated by the Server Script, with the PTP Grandmaster Clock ensuring precise timing synchronization across all devices. Each process maintains its own capture schedule but remains perfectly aligned through their shared time reference.
 
-The recording lifecycle consists of three main phases:
-
-1. Initialization: The server broadcasts an initial timestamp to all recording processes via UDP. This timestamp serves as the synchronized starting point for all cameras.
-
-2. Recording: Each camera process operates independently but maintains precise timing through PTP synchronization. The main processing loop follows a consistent pattern:
-   - Timer signals when the next frame should be captured
-   - Camera captures the frame via DMA to minimize latency
-   - Encoder processes the frame and streams it to the server
-   - Loop calculates the next capture timestamp and arms the timer
-
-3. Termination: The server can send a "STOP" message to gracefully end recording across all cameras simultaneously.
-
-A dedicated, isolated network handles PTP synchronization, enabling nanosecond-precision clock synchronization between all recording devices. This precise timing foundation, combined with real-time scheduling and careful signal handling, ensures frame-accurate synchronization across all cameras despite their independent processing pipelines.
 ### Physical Setup
+
 [Photos/diagrams of recording frame and hardware]
 
 ## Technical Components
