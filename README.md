@@ -71,11 +71,46 @@ The architecture diagram illustrates the three Recording & Streaming processes c
 
 ### Camera Synchronization
 
-The system achieves microsecond-level frame capture synchronization across multiple cameras through a carefully designed network time synchronization architecture. One Raspberry Pi serves as the grandmaster clock, synchronizing via NTP to the control server. The remaining Raspberry Pis use Precision Time Protocol (PTP) to synchronize their system clocks to the grandmaster Pi, creating a highly accurate shared time reference across the capture network. All devices are connected via ethernet to an unmanaged switch to minimize network latency variation.
+The system's tight frame synchronization emerges from the combination of hardware capabilities and network protocols, with PTP synchronization providing the foundation and an event-driven architecture ensuring precise frame timing.
 
-The synchronization mechanism leverages this precise clock alignment by having the server broadcast an initial timestamp to all cameras. Each camera then calculates subsequent frame capture times by adding frame duration intervals (33.33ms at 30fps) to this common starting point. This approach ensures that even if cameras receive the initial timestamp at slightly different times due to network delays, they will automatically adjust their timing to synchronize with the intended capture schedule.
+#### Precision Time Protocol (PTP)
+The Raspberry Pi 5's ethernet ports include dedicated hardware timestamping support, enabling PTP to achieve sub-microsecond clock synchronization across the camera network. While NTP typically achieves millisecond-level synchronization, PTP takes advantage of hardware timestamping to measure and compensate for network delays with much greater precision, making it ideal for creating a shared time reference across cameras.
 
-To maintain precise timing between frames, the system uses a combination of real-time and monotonic clocks. While the PTP-synchronized system clock provides the common time reference needed for coordination, frame intervals are scheduled using the monotonic clock to prevent disruption from any small clock adjustments. The system uses absolute rather than relative timer targets, preventing the accumulation of scheduling delays that could cause timing drift between cameras. Logging analysis shows that this architecture achieves frame capture synchronization within 9 microseconds between cameras, far exceeding the requirements for 30fps video where frames are 33.33ms apart.
+#### The Problem with Real Time
+Trying to capture frames at specific timestamps using the system clock (CLOCK_REALTIME) leads to a fatal flaw: while the clock steadily moves forward in time, PTP is constantly making tiny adjustments forward and backward to keep it synchronized. This means when you target a specific nanosecond timestamp, that exact number might literally never appear in the clock's sequence of values. The clock could jump right over it during an adjustment, going from slightly before your target to slightly after it. This isn't a theoretical problem - it caused a complete deadlock every single time before switching to monotonic clock timing. The process would get stuck waiting on the semaphore forever because it was waiting for a precise nanosecond value that the realtime clock would simply never reach.
+
+#### The Solution: Monotonic Timing
+The system resolves this by using the monotonic clock as a stable reference point:
+
+1. When a camera receives the initial timestamp, it samples both clocks in rapid succession:
+   ```cpp
+   clock_gettime(CLOCK_REALTIME, &real_time);    // PTP-synchronized time
+   clock_gettime(CLOCK_MONOTONIC, &mono_time);   // Steadily increasing time
+   ```
+
+2. It calculates how far in the future the target timestamp is relative to the current realtime clock:
+   ```cpp
+   int64_t ns_until_target = timestamp - current_real_ns;
+   ```
+
+3. This same time delta is then applied to the monotonic clock reading to get an absolute monotonic target:
+   ```cpp
+   int64_t mono_target_ns = current_mono_ns + ns_until_target;
+   ```
+
+4. The timer is set to this absolute monotonic target using TIMER_ABSTIME:
+   ```cpp
+   timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
+   ```
+
+Setting absolute timestamps in the monotonic clock domain ensures each timer will trigger at the exact intended moment, regardless of how long the setup takes or what the current time is. This preserves the synchronization established by the PTP-synced realtime clock while providing a stable time reference that won't be adjusted.
+
+Even when cameras receive the initial timestamp at slightly different times, they can calculate the correct monotonic clock targets for future frames. The system compensates by detecting if a target timestamp is in the past and adjusting forward by the appropriate number of frame intervals.
+
+#### Low-Latency Event Handling
+While PTP continuously runs in the background maintaining clock synchronization, the recording software focuses purely on frame capture timing. Signal handlers process timing-critical operations, and realtime scheduling ensures these handlers execute immediately when triggered. The process effectively becomes its own scheduler - it gets maximum priority on its dedicated CPU core, and its signal-driven architecture built around a central semaphore means the main loop only activates in response to real events, with zero polling or busy waiting.
+
+The logs demonstrate how these components work together - frame captures align within 9 microseconds across cameras, maintaining precise 33.33ms intervals for 30fps recording. The recording software achieves this by reading from system clocks that PTP keeps tightly synchronized behind the scenes.
 
 ### Video Pipeline
 
