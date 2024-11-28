@@ -114,9 +114,39 @@ The logs demonstrate how these components work together - frame captures align w
 
 ### Video Pipeline
 
-The video pipeline is a single-threaded recording application driven by two signal handlers - a design that evolved from multi-threaded versions after finding that cross-core data sharing and additional synchronization complexity reduced performance. When triggered by the timer reaching a target timestamp, one handler queues a capture request to the camera. Upon DMA buffer completion, a second handler enqueues the buffer pointer into a lock-free queue for processing. The main loop dequeues these buffers, performs H.264 encoding, and streams the result via TCP to the server's FFmpeg instance. A semaphore tracking queue size prevents busy waiting in the main loop. The lock-free queue design is crucial, allowing the capture completion handler to safely preempt the main loop while preventing data races between components.
+The video pipeline achieves true concurrency through a signal-driven architecture built around three core components that drive the recording cycle forward: a timer signal handler for initiating captures, a camera completion callback for queueing frames, and a main loop for frame processing. This design evolved from traditional multi-threaded approaches after finding that the overhead of cross-core data sharing and additional synchronization complexity actually reduced performance.
 
-Once the pipeline is running, timing between capture signal, capture completion, and frame transmission shows remarkable consistency, with the system maintaining precise 33.33ms intervals between frames. A timer-based disconnect mechanism closes the TCP connection after 0.3 seconds without new frames, enabling the server to detect recording completion and prepare for the next session. To enable precise timing analysis, a custom async-signal-safe logger captures events directly within signal handlers. Sub-millisecond synchronization is verified through comparing timestamps from these logs across cameras, made possible by the PTP clock synchronization across the capture network.
+#### Signal-Driven Recording Cycle
+When a timestamp is present, the system drives itself forward through a continuous cycle. At the start of each iteration, the main loop calculates the next target timestamp and arms the timer, ensuring the cycle will continue. The loop then blocks on the semaphore, knowing with certainty that either a timer signal will arrive or a frame will become available for processing.
+
+The cycle flows naturally:
+1. At the precise moment specified by the timer, the signal handler fires and queues a capture request to the camera
+2. When capture completes, the camera's callback enqueues the frame to a lock-free queue and increments the semaphore
+3. The main loop unblocks and processes the frame, encoding and streaming it
+4. The loop calculates the next timestamp and arms the timer before blocking again
+
+This cycle continues indefinitely until the server sends a "STOP" message, which simply unsets the timestamp. At this point, no new timers will be armed, but the semaphore's count ensures the main loop continues processing any remaining frames before exiting, providing clean shutdown without data loss.
+
+#### Concurrency Without Threads
+The system achieves true concurrency but without the complexity of threading. For example, after queueing a capture request, the main loop can process any backlog of frames while the camera is capturing the next image. This parallelizes I/O with CPU operations just like threading would, but without the overhead of context switching.
+
+The lock-free queue enables safe concurrent access between the camera's callback and the main loop. The callback can safely preempt the main loop even during a dequeue operation - when the callback returns, the main loop's compare-and-swap operation detects the interruption and retries. This achieves concurrent access with minimal overhead in a completely single-threaded design.
+
+DMA transfers ensure zero-copy frame capture, with the camera writing directly to memory buffers that are then passed through the pipeline via pointers in the lock-free queue. This minimizes both latency and memory usage, as frames never need to be copied between pipeline stages.
+
+#### Precision Through Scheduling
+The process runs with maximum priority FIFO scheduling on a dedicated CPU core. This means any process of equal priority must wait until this one is blocking on the semaphore before it can be scheduled on our core. Additionally, any process of lower priority will be preempted as soon as we have a signal to handle or the semaphore is unblocked.
+
+The significance of this scheduling becomes clear in the pipeline's operation. Timing-critical operations are handled by signal handlers, ensuring immediate response to timer events and camera callbacks. Less timing-critical operations like encoding and streaming occur in the main loop. This natural separation, combined with the FIFO scheduling, means the process effectively becomes its own scheduler.
+
+A custom logger enables precise timestamp logging directly within signal handlers through atomic file writes and entirely reentrant string formatting. This avoids issues with non-reentrant functions like sprintf while providing the precise timing data seen in the logs, verifying both the frame synchronization and the low-latency signal handling.
+
+#### Efficient Control Flow
+The main loop's design around a single semaphore creates remarkably efficient control flow. The semaphore count exactly matches the number of frames available for processing, ensuring the loop only iterates when there is real work to do. When no frames are available, the process sleeps, consuming no CPU cycles until the next frame capture completes.
+
+This efficiency makes multi-core parallelization unnecessary - the process spends so little time active that the overhead of cross-core data transfer would outweigh any potential benefits. The single-core, event-driven design provides all the concurrency needed while maintaining precise timing control. In practice, frame processing typically completes within 5ms of the initial capture signal, leaving plenty of headroom within the 33.33ms frame interval.
+
+The consistent timing between capture signal, capture completion, and frame transmission shown in the logs verifies this efficiency. Each step in the pipeline executes with predictable latency, maintaining the precise 33.33ms intervals required for 30fps video while using minimal system resources.
 
 ### Server-Side Pipeline
 
