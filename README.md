@@ -150,9 +150,19 @@ The consistent timing between capture signal, capture completion, and frame tran
 
 ### Server-Side Pipeline
 
-The server-side pipeline takes advantage of FFmpeg's native support for handling incoming streams, eliminating the need for a conventional server application. The system uses systemd services to handle FFmpeg instances, with a separate service instance listening on a dedicated port for each incoming camera stream. Incoming H.264 streams are recorded using FFmpeg's -segment feature, which creates new files for each segment within a session to allow seamless recovery after interruptions. The streams are transcoded server-side to H.265, leveraging GPU acceleration for efficient compression while minimizing computational load on the Raspberry Pis.
+The server-side pipeline leverages FFmpeg's native support for handling incoming streams, eliminating the need for a conventional server application. The system uses a systemd service template to manage independent FFmpeg instances, with each instance listening on a dedicated port for its corresponding camera stream. This design achieves robust multi-camera recording through remarkably simple means.
 
-A manager script provides commands to start, stop, restart, and monitor all services. The manager uses a simple counter stored in a dotfile to enumerate recording sessions, ensuring unique filenames across sessions. When launching a new recording session, the manager script broadcasts the initial synchronization timestamp to all cameras via UDP, then starts the FFmpeg services to receive the incoming video streams. The system monitors segment creation to confirm successful recording startup and uses inotify to detect when recording has completed on all cameras.
+#### Recording Management
+
+The recording lifecycle begins when the manager script broadcasts an initial synchronization timestamp to all cameras via UDP. The script then launches FFmpeg services to receive the incoming video streams. Each stream undergoes GPU-accelerated transcoding from H.264 to H.265, optimizing storage while minimizing computational load on the Raspberry Pis.
+
+FFmpeg's segment feature automatically divides recordings into sequential chunks, creating new files for each segment within a session. This segmentation strategy provides natural recovery points after any interruptions while maintaining continuous recording. The system monitors segment creation to confirm successful recording startup and uses inotify to detect when recording has completed on all cameras.
+
+#### Session Management
+
+A simple but effective session tracking system uses an atomic counter stored in a dotfile to enumerate recording sessions. This ensures unique filenames across sessions while maintaining a clear organizational structure. The counter automatically increments with each new recording, generating paths that clearly identify the source camera, session number, and segment sequence.
+
+The entire server implementation achieves sophisticated functionality through the strategic combination of standard system tools. By leveraging FFmpeg's capabilities and systemd's service management, the system delivers reliable multi-camera streaming with minimal custom code and maximum resilience.
 
 ### Calibration Pipeline
 - Lens distortion correction
