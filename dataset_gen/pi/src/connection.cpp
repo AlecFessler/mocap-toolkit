@@ -234,3 +234,14 @@ int connection::bind_udp() {
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "UDP socket bound successfully");
   return 0;
 }
+
+size_t connection::recv_msg(char* msg_buf) {
+  return recvfrom(
+    udpfd,
+    msg_buf,
+    sizeof(msg_buf),
+    0,
+    NULL,
+    NULL
+  );
+}

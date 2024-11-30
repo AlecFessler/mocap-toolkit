@@ -7,7 +7,6 @@
 
 #include <string>
 
-
 class connection {
 public:
   connection() noexcept;
@@ -25,6 +24,7 @@ public:
 
   int udpfd;
   int bind_udp();
+  size_t recv_msg(char* msg_buf);
 
 private:
   std::string server_ip;
