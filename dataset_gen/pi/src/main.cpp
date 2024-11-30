@@ -28,22 +28,20 @@ extern char** environ;
 
 constexpr int64_t ns_per_s = 1'000'000'000;
 
-volatile static sig_atomic_t running = 0;
+volatile static sig_atomic_t running = 1;
 volatile static sig_atomic_t msg_rdy = 0;
 volatile static sig_atomic_t cap_frame = 0;
+volatile static sig_atomic_t frame_rdy = 0;
 static std::unique_ptr<sem_t, sem_deleter> loop_ctl_sem;
 
 std::unique_ptr<logger_t> logger;
-
-void capture_signal_handler(int signo, siginfo_t* info, void* context);
-void io_signal_handler(int signo, siginfo_t* info, void* context);
-void exit_signal_handler(int signo, siginfo_t* info, void* context);
 
 inline int init_realtime_scheduling(int recording_cpu);
 inline int init_timer(timer_t* timerid);
 inline int init_signals();
 inline int init_sigio(int fd);
 inline void arm_timer(int64_t timestamp, timer_t timerid);
+inline void flush_encoder(videnc& encoder, connection& conn);
 
 int main() {
   try {
@@ -55,18 +53,13 @@ int main() {
     int64_t timestamp = 0;
     int64_t frame_duration = ns_per_s / config.fps;
 
-    lock_free_queue_t frame_queue{config.dma_buffers};
     camera_handler_t cam{
       config,
-      frame_queue,
-      *loop_ctl_sem.get()
+      *loop_ctl_sem.get(),
+      frame_rdy
     };
     videnc encoder{config};
-    connection conn{
-      config.server_ip,
-      config.tcp_port,
-      config.udp_port
-    };
+    connection conn{config};
 
     int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
@@ -75,50 +68,56 @@ int main() {
     if ((ret = conn.bind_udp()) < 0) return ret;
     if ((ret = init_sigio(conn.udpfd)) < 0) return ret;
 
-    running = 1;
     while (running) {
-      if (timestamp && running) {
-        timestamp += frame_duration;
-        arm_timer(timestamp, timerid);
-      }
-
       sem_wait(loop_ctl_sem.get());
 
+      // queue a frame for capture
       if (cap_frame) {
         cap_frame = 0;
         cam.queue_request();
         logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
       }
 
+      // encode a frame, and maybe recv and stream another
+      if (frame_rdy) {
+        frame_rdy = 0;
+        encoder.encode_frame(cam.frame_buffer);
+        int pkt_size = 0;
+        uint8_t* ptr = encoder.recv_frame(pkt_size);
+        if (!ptr) continue;
+        conn.stream_pkt(ptr, pkt_size);
+      }
+
+      // handle incoming message (timestamp to start recording, or stop signal to end)
       if (msg_rdy) {
         msg_rdy = 0;
         char buf[8];
         size_t size = conn.recv_msg(buf);
 
+        // 8 bytes is our timestamp
         if (size == 8) {
           uint64_t network_timestamp;
           memcpy(&network_timestamp, buf, sizeof(network_timestamp));
-          timestamp = be64toh(network_timestamp);  // Convert from big-endian to host byte order
+          // convert from big endian to host byte order
+          timestamp = be64toh(network_timestamp);
         }
 
+        // 4 bytes, "STOP" is our stop signal
         if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
-          encoder.flush(conn);
+          flush_encoder(encoder, conn);
           conn.discon_tcp();
         }
       }
 
-      // continue if no frame is available (cases 2 and 3 above)
-      // or if there is, send it for encoding
-      void* frame = frame_queue.dequeue();
-      if (!frame) continue;
-
-      encoder.encode_frame(
-        (uint8_t*)frame,
-        conn // encoder will stream frames if available
-      );
+      // if the timestamp is set and we're not exitting,
+      // then increment it and arm timer for the next capture
+      if (timestamp && running) {
+        timestamp += frame_duration;
+        arm_timer(timestamp, timerid);
+      }
     }
 
-    // flush frames here too
+    flush_encoder(encoder, conn);
 
   } catch (const std::exception& e) {
     if (logger)
@@ -380,4 +379,13 @@ inline int init_signals() {
     }
 
   return 0;
+}
+
+inline void flush_encoder(videnc& encoder, connection& conn) {
+    encoder.flush();
+    int pkt_size = 0;
+    uint8_t* ptr = nullptr;
+    while ((ptr = encoder.recv_frame(pkt_size)) != nullptr) {
+        conn.stream_pkt(ptr, pkt_size);
+    }
 }

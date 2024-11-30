@@ -6,18 +6,16 @@
 #include "camera_handler.h"
 #include "config.h"
 #include "logger.h"
-#include "lock_free_queue.h"
 
 extern std::unique_ptr<logger_t> logger;
 
 camera_handler_t::camera_handler_t(
   config& config,
-  lock_free_queue_t& frame_queue,
-  sem_t& queue_counter
+  sem_t& loop_ctl_sem,
+  volatile sig_atomic_t& frame_rdy
 ) :
-  frame_queue(frame_queue),
-  queue_counter(queue_counter),
-  next_req_idx_(0) {
+  loop_ctl_sem(loop_ctl_sem),
+  frame_rdy(frame_rdy) {
   /**
    * Manages camera operations using the libcamera API, providing a high-level interface
    * for frame capture and buffer management. The handler coordinates three key tasks:
@@ -33,7 +31,7 @@ camera_handler_t::camera_handler_t(
    * Parameters:
    *   config:        Camera and frame settings including resolution and buffer counts
    *   frame_queue:   Lock-free queue for sharing frame buffers with main loop
-   *   queue_counter: Semaphore tracking available frames in the queue
+   *   loop_ctl_sem: Semaphore tracking available frames in the queue
    *
    * The initialization sequence is:
    * 1. Configure frame properties (resolution, format)
@@ -42,14 +40,14 @@ camera_handler_t::camera_handler_t(
    * 4. Set up DMA buffers and memory mapping
    * 5. Configure camera controls (exposure, focus, etc)
    */
-  init_frame_config(config);
+  init_frame_bytes(config);
   init_camera_manager();
   init_camera_config(config);
-  init_dma_buffers();
+  init_dma_buffer();
   init_camera_controls(config);
 }
 
-void camera_handler_t::init_frame_config(config& config) {
+void camera_handler_t::init_frame_bytes(config& config) {
   /**
    * Calculates and stores frame buffer parameters based on YUV420 format.
    *
@@ -60,8 +58,6 @@ void camera_handler_t::init_frame_config(config& config) {
    * Parameters:
    *   config: Contains frame dimensions and buffer count settings
    */
-  dma_frame_buffers_ = config.dma_buffers;
-
   unsigned int y_plane_bytes = config.frame_width * config.frame_height;
   unsigned int u_plane_bytes = y_plane_bytes / 4;
   unsigned int v_plane_bytes = u_plane_bytes;
@@ -135,7 +131,7 @@ void camera_handler_t::init_camera_config(config& config) {
   libcamera::StreamConfiguration& cfg = config_->at(0);
   cfg.pixelFormat = libcamera::formats::YUV420;
   cfg.size = { (unsigned int)config.frame_width, (unsigned int)config.frame_height };
-  cfg.bufferCount = dma_frame_buffers_;
+  cfg.bufferCount = 1;
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
@@ -154,21 +150,7 @@ void camera_handler_t::init_camera_config(config& config) {
   }
 }
 
-void camera_handler_t::init_dma_buffers() {
-  /**
-   * Sets up DMA buffer system for zero-copy frame capture.
-   *
-   * For each buffer in the capture pipeline:
-   * 1. Creates a request with unique cookie as buffer identifier
-   * 2. Associates request with a DMA buffer
-   * 3. Maps buffer into process memory space
-   * 4. Stores mapping in mmap_buffers_ indexed by cookie
-   *
-   * Finally connects the request completion callback for frame handling.
-   *
-   * Throws:
-   *   std::runtime_error: If buffer allocation or mapping fails
-   */
+void camera_handler_t::init_dma_buffer() {
   allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
   stream_ = config_->at(0).stream();
   if (allocator_->allocate(stream_) < 0) {
@@ -177,54 +159,50 @@ void camera_handler_t::init_dma_buffers() {
     throw std::runtime_error(err);
   }
 
-  uint64_t req_cookie = 0; // maps request to index in mmap_buffers_
-  for (const std::unique_ptr<libcamera::FrameBuffer>& buffer : allocator_->buffers(stream_)) {
-    std::unique_ptr<libcamera::Request> request = camera_->createRequest(req_cookie++);
-    if (!request) {
-      const char* err = "Failed to create request";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    if (request->addBuffer(stream_, buffer.get()) < 0) {
-      const char* err = "Failed to add buffer to request";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    requests_.push_back(std::move(request));
-
-    const libcamera::FrameBuffer::Plane& y_plane = buffer->planes()[0];
-    const libcamera::FrameBuffer::Plane& u_plane = buffer->planes()[1];
-    const libcamera::FrameBuffer::Plane& v_plane = buffer->planes()[2];
-
-    unsigned int y_plane_bytes = frame_bytes_ * 2/3;  // Based on YUV420
-    unsigned int u_plane_bytes = y_plane_bytes / 4;
-    unsigned int v_plane_bytes = u_plane_bytes;
-
-    if (y_plane.length != y_plane_bytes || u_plane.length != u_plane_bytes || v_plane.length != v_plane_bytes) {
-      const char* err = "Plane size does not match expected size";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    void* data = mmap(
-      nullptr,
-      frame_bytes_,
-      PROT_READ | PROT_WRITE,
-      MAP_SHARED,
-      y_plane.fd.get(),
-      y_plane.offset
-    );
-
-    if (data == MAP_FAILED) {
-      std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
-      throw std::runtime_error(err);
-    }
-
-    mmap_buffers_.push_back(data);
+  const std::unique_ptr<libcamera::FrameBuffer>& buffer = allocator_->buffers(stream_)[0];
+  request = camera_->createRequest();
+  if (!request) {
+    const char* err = "Failed to create request";
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
   }
+
+  if (request->addBuffer(stream_, buffer.get()) < 0) {
+    const char* err = "Failed to add buffer to request";
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
+
+  const libcamera::FrameBuffer::Plane& y_plane = buffer->planes()[0];
+  const libcamera::FrameBuffer::Plane& u_plane = buffer->planes()[1];
+  const libcamera::FrameBuffer::Plane& v_plane = buffer->planes()[2];
+
+  unsigned int y_plane_bytes = frame_bytes_ * 2/3;  // Based on YUV420
+  unsigned int u_plane_bytes = y_plane_bytes / 4;
+  unsigned int v_plane_bytes = u_plane_bytes;
+
+  if (y_plane.length != y_plane_bytes || u_plane.length != u_plane_bytes || v_plane.length != v_plane_bytes) {
+    const char* err = "Plane size does not match expected size";
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
+
+  void* data = mmap(
+    nullptr,
+    frame_bytes_,
+    PROT_READ | PROT_WRITE,
+    MAP_SHARED,
+    y_plane.fd.get(),
+    y_plane.offset
+  );
+
+  if (data == MAP_FAILED) {
+    std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
+    throw std::runtime_error(err);
+  }
+
+  frame_buffer = (uint8_t*)data;
 
   camera_->requestCompleted.connect(this, &camera_handler_t::request_complete);
 }
@@ -302,8 +280,7 @@ camera_handler_t::~camera_handler_t() {
    * undefined behavior or resource leaks
    */
   camera_->stop();
-  for (void* data : mmap_buffers_)
-    munmap(data, frame_bytes_);
+  munmap(frame_buffer, frame_bytes_);
   allocator_->free(stream_);
   allocator_.reset();
   camera_->release();
@@ -312,77 +289,20 @@ camera_handler_t::~camera_handler_t() {
 }
 
 void camera_handler_t::queue_request() {
-  /**
-   * Queue the next request in the sequence.
-   *
-   * Before queuing the request, ensure that the number of enqueued
-   * buffers is no more than dma_frame_buffers_ - 2. This is because
-   * the queue counter may fall behind by, but no more than, 1. This
-   * occurs when the main loop calls sem_wait, decrementing the
-   * semaphore, but before it dequeues the buffer. Thus, we check
-   * for 2 less than max to ensure at least one is available even
-   * if the counter is behind by 1. The queue counter may also be
-   * incremented externally without a frame to unblock the main
-   * loop. This is also safely handled with this same check.
-   *
-   * If requests are not returned at the same rate as they are queued,
-   * this method will throw to signal that the camera is not keeping up,
-   * and this should be handled by adjusting the configuration.
-   * ie. framerate, exposure, gain, etc.
-   *
-   * Throws:
-   *  - std::runtime_error: Buffer is not ready for requeuing
-   *  - std::runtime_error: Failed to queue request
-   */
-  int enqueued_bufs;
-  sem_getvalue(&queue_counter, &enqueued_bufs);
-  if (enqueued_bufs > dma_frame_buffers_ - 2) {
-    const char* err = "Buffer is not ready for requeuing";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-    throw std::runtime_error(err);
-  }
-
-  if (camera_->queueRequest(requests_[next_req_idx_].get()) < 0) {
+  if (camera_->queueRequest(request.get()) < 0) {
     const char* err = "Failed to queue request";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-
-  ++next_req_idx_;
-  next_req_idx_ %= requests_.size();
 }
 
 void camera_handler_t::request_complete(libcamera::Request* request) {
-  /**
-   * Handles frame capture completion from libcamera's callback system.
-   *
-   * This method executes in libcamera's thread context when a DMA buffer
-   * is filled with a new frame. It performs three critical tasks:
-   *
-   * 1. Retrieves the filled buffer using the request's cookie as an index
-   * 2. Enqueues the buffer pointer to the lock-free queue for processing
-   * 3. Signals frame availability by incrementing the semaphore
-   *
-   * The lock-free design ensures this callback can safely preempt the main
-   * loop, even in the midst of a dequeue operation, as the CAS operation
-   * will detect the change and retry upon this functions return. The use
-   * of the semaphore ensures the main loop never does any polling or busy
-   * waiting, only awakening when there are available frames.
-   *
-   * Parameters:
-   *   request: Contains metadata about the completed capture, including
-   *           the cookie identifying which DMA buffer was used
-   *
-   * Note: Returns immediately if request status is RequestCancelled
-   */
   if (request->status() == libcamera::Request::RequestCancelled)
     return;
 
+  request->reuse(libcamera::Request::ReuseBuffers);
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Request completed");
 
-  void* data = mmap_buffers_[request->cookie()];
-  frame_queue.enqueue(data);
-
-  sem_post(&queue_counter);
-  request->reuse(libcamera::Request::ReuseBuffers);
+  frame_rdy = 1;
+  sem_post(&loop_ctl_sem);
 }

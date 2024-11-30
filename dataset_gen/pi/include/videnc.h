@@ -23,8 +23,9 @@ public:
   videnc(videnc&&) = delete;
   videnc& operator=(videnc&&) = delete;
 
-  void encode_frame(uint8_t* yuv420_data, connection& conn);
-  void flush(connection& conn);
+  void encode_frame(uint8_t* data);
+  void flush();
+  uint8_t* recv_frame(int& size);
 
 private:
   int width;
