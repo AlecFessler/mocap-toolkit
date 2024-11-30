@@ -132,6 +132,60 @@ int connection::conn_tcp() {
   return 0;
 }
 
+int connection::stream_pkt(const uint8_t* data, size_t size) {
+  /**
+   * Streams encoded video frames via tcp to the server
+   *
+   * This function is passed as a callback to the encoder
+   * which calls it whenever it has a frame to output. This
+   * is done because the encoder does not give an output
+   * upon every input, but instead buffers frames for some
+   * time before any are ready. Rather than having the encoder
+   * communicate externally about the outcome of encoding the
+   * video frame, we simply pass this function and main isn't
+   * concerned with whether it's called or not.
+   *
+   * The tcp socket is checked before use, and if it's not
+   * connected, we connect. This means the first connection to
+   * the tcp socket does not occur until sometime after recording
+   * begins, once the first encoded frame is ready for transmission.
+   */
+  size_t total_bytes_written = 0;
+  while (total_bytes_written < size) {
+    if (tcpfd < 0) {
+      int ret = conn_tcp();
+      if (ret < 0) return ret;
+    }
+
+    ssize_t result = write(
+      tcpfd,
+      data + total_bytes_written,
+      size - total_bytes_written
+    );
+
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
+      return -1;
+    }
+
+    total_bytes_written += result;
+  }
+
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
+  return 0;
+}
+
+void connection::discon_tcp() {
+  /**
+   * Disconnects from the tcp socket
+   */
+  if (tcpfd >= 0) {
+    close(tcpfd);
+    tcpfd = -1;
+  }
+}
+
 int connection::bind_udp() {
   /**
    * Creates and binds a UDP socket for receiving control messages.

@@ -1,6 +1,6 @@
 Write stereo calibration tool
 
-Add encoder flush method for recording software to call when STOP signal is received
+Fix the issue where the stop signal makes it so the pis can't start again with a newtimestamp cleanly
 
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 

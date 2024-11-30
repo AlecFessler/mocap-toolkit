@@ -25,13 +25,18 @@
 #include "videnc.h"
 
 extern char** environ;
+
 volatile static sig_atomic_t running = 0;
+volatile static sig_atomic_t stopping = 0;
+
 constexpr int64_t ns_per_s = 1'000'000'000;
 static int64_t timestamp = 0;
 static timer_t timerid;
+
 static std::unique_ptr<sem_t, sem_deleter> loop_ctl_sem;
 static std::unique_ptr<camera_handler_t> cam;
 static std::unique_ptr<connection> conn;
+
 std::unique_ptr<logger_t> logger;
 
 void capture_signal_handler(int signo, siginfo_t* info, void* context);
@@ -43,7 +48,6 @@ inline int init_timer();
 inline int init_signals();
 inline int init_sigio(int fd);
 inline void arm_timer();
-inline int stream_pkt(connection& conn, const uint8_t* data, size_t size);
 
 int main() {
   try {
@@ -52,13 +56,13 @@ int main() {
     loop_ctl_sem = init_semaphore();
 
     int64_t frame_duration = ns_per_s / config.fps;
-    lock_free_queue_t frame_queue(config.dma_buffers);
+    lock_free_queue_t frame_queue{config.dma_buffers};
     cam = std::make_unique<camera_handler_t>(
       config,
       frame_queue,
       *loop_ctl_sem.get()
     );
-    videnc encoder(config);
+    videnc encoder{config};
     conn = std::make_unique<connection>(
       config.server_ip,
       config.tcp_port,
@@ -83,20 +87,28 @@ int main() {
       if (timestamp) timestamp += frame_duration;
       // arm timer completes only if timestamp is nonzero
       arm_timer();
+
       // block until either:
       // 1. frame is ready to encode
       // 2. initial timestamp is received
       // 3. exit signal is received (not "STOP" message)
       sem_wait(loop_ctl_sem.get());
 
-      void* frame = frame_queue.dequeue();
       // continue if no frame is available (cases 2 and 3 above)
+      // or if there is, send it for encoding
+      void* frame = frame_queue.dequeue();
       if (!frame) continue;
+
       encoder.encode_frame(
         (uint8_t*)frame,
-        stream_pkt,
-        *conn
+        *conn // encoder will stream frames if available
       );
+
+      // flush remaining frames if stopping
+      if (!stopping) continue;
+      encoder.flush(*conn); // encoder will stream remaining frames
+      conn->discon_tcp();
+      stopping = 0;
     }
   } catch (const std::exception& e) {
     if (logger)
@@ -166,8 +178,10 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   );
 
   if (bytes_recvd == 4 && strncmp(buf, "STOP", 4) == 0) {
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received STOP signal, shutting down...");
-    timestamp = 0;
+    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received STOP signal, ending stream...");
+    timestamp = 0; // dont capture anymore frames
+    stopping = 1; // flush the encoder and stream remaining frames
+    sem_post(loop_ctl_sem.get());
     return;
   }
 
@@ -176,9 +190,11 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
     memcpy(&network_timestamp, buf, sizeof(network_timestamp));
     timestamp = be64toh(network_timestamp);  // Convert from big-endian to host byte order
 
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Received timestamp %ld", timestamp);
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, msg);
+    // TODO: implement custom format function
+    //char msg[128];
+    //snprintf(msg, sizeof(msg), "Received timestamp %ld", timestamp);
+    //logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, msg);
+
     sem_post(loop_ctl_sem.get());
     return;
   }
@@ -198,8 +214,10 @@ void exit_signal_handler(int signo, siginfo_t* info, void* context) {
   (void)info;
   (void)context;
 
-  running = 0;
-  sem_post(loop_ctl_sem.get());
+  running = 0; // exit loop
+  timestamp = 0; // dont capture anymore frames
+  stopping = 1; // flush the encoder and stream remaining frames
+  sem_post(loop_ctl_sem.get()); // unblock main loop
 }
 
 inline int init_realtime_scheduling(int recording_cpu) {
@@ -318,25 +336,25 @@ inline void arm_timer() {
     int64_t ns_until_target = timestamp - current_real_ns;
     int64_t frame_duration = ns_per_s / 30;
 
-    // Debug log the timing calculations
-    char debug_msg[256];
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-             current_real_ns, timestamp, ns_until_target,
-             ns_until_target / 1000000.0);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //char debug_msg[256];
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+    //         current_real_ns, timestamp, ns_until_target,
+    //         ns_until_target / 1000000.0);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
         int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
-        ns_until_target += frames_elapsed * frame_duration;
+        int64_t ns_elapsed = frames_elapsed * frame_duration;
+        ns_until_target += ns_elapsed;
+        timestamp += ns_elapsed;
 
-        snprintf(debug_msg, sizeof(debug_msg),
-                "Target in past, adjusted by %ld frames to delta: %ld ns",
-                frames_elapsed, ns_until_target);
-        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+        //snprintf(debug_msg, sizeof(debug_msg),
+        //        "Target in past, adjusted by %ld frames to delta: %ld ns",
+        //        frames_elapsed, ns_until_target);
+        //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
-    // Convert our realtime delta into a monotonic target
     int64_t mono_target_ns = current_mono_ns + ns_until_target;
 
     struct itimerspec its;
@@ -348,10 +366,10 @@ inline void arm_timer() {
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
 
     // Log the final timer setting
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Timer set for monotonic timestamp %ld (current mono: %ld)",
-             mono_target_ns, current_mono_ns);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
+    //         mono_target_ns, current_mono_ns);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {
@@ -428,49 +446,5 @@ inline int init_signals() {
       return -errno;
     }
 
-  return 0;
-}
-
-inline int stream_pkt(connection& conn, const uint8_t* data, size_t size) {
-  /**
-   * Streams encoded video frames via tcp to the server
-   *
-   * This function is passed as a callback to the encoder
-   * which calls it whenever it has a frame to output. This
-   * is done because the encoder does not give an output
-   * upon every input, but instead buffers frames for some
-   * time before any are ready. Rather than having the encoder
-   * communicate externally about the outcome of encoding the
-   * video frame, we simply pass this function and main isn't
-   * concerned with whether it's called or not.
-   *
-   * The tcp socket is checked before use, and if it's not
-   * connected, we connect. This means the first connection to
-   * the tcp socket does not occur until sometime after recording
-   * begins, once the first encoded frame is ready for transmission.
-   */
-  size_t total_bytes_written = 0;
-  while (total_bytes_written < size) {
-    if (conn.tcpfd < 0) {
-      int ret = conn.conn_tcp();
-      if (ret < 0) return ret;
-    }
-
-    ssize_t result = write(
-      conn.tcpfd,
-      data + total_bytes_written,
-      size - total_bytes_written
-    );
-
-    if (result < 0) {
-      if (errno == EINTR) continue;
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
-      return -1;
-    }
-
-    total_bytes_written += result;
-  }
-
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
   return 0;
 }

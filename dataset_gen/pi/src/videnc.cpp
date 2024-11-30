@@ -100,7 +100,24 @@ videnc::videnc(const config& config)
   }
 }
 
-void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& conn) {
+videnc::~videnc() {
+  /**
+   * Releases encoder resources in correct order.
+   *
+   * Cleanup sequence:
+   * 1. Free packet buffer
+   * 2. Free frame buffer
+   * 3. Free encoder context
+   *
+   * Note: Each step checks for null before freeing,
+   * allowing partial cleanup if constructor fails
+   */
+  if (pkt) av_packet_free(&pkt);
+  if (frame) av_frame_free(&frame);
+  if (ctx) avcodec_free_context(&ctx);
+}
+
+void videnc::encode_frame(uint8_t* yuv420_data, connection& conn) {
   /**
    * Encodes a single YUV420 frame and streams via callback.
    *
@@ -116,8 +133,7 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
    *
    * Parameters:
    *   yuv420_data: Raw frame data in YUV420 format
-   *   cb: Callback for streaming encoded packets
-   *   conn: Connection object passed to callback
+   *   conn: Connection object for streaming packets
    *
    * Throws:
    *   std::runtime_error: If encoding or streaming fails
@@ -152,7 +168,7 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
       throw std::runtime_error(err);
     }
 
-    if (cb(conn, pkt->data, pkt->size) < 0) {
+    if (conn.stream_pkt(pkt->data, pkt->size) < 0) {
       const char* err = "Error in stream callback";
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
       throw std::runtime_error(err);
@@ -162,19 +178,44 @@ void videnc::encode_frame(uint8_t* yuv420_data, pkt_callback cb, connection& con
   }
 }
 
-videnc::~videnc() {
+void videnc::flush(connection& conn) {
   /**
-   * Releases encoder resources in correct order.
+   * Flushes all remaining frames from encoder and streams them
    *
-   * Cleanup sequence:
-   * 1. Free packet buffer
-   * 2. Free frame buffer
-   * 3. Free encoder context
+   * When encoding is finished, some frames may still be buffered
+   * in the encoder due to B-frames and rate control. This function:
+   * 1. Signals end-of-stream to encoder
+   * 2. Retrieves all remaining packets
+   * 3. Streams them via callback
    *
-   * Note: Each step checks for null before freeing,
-   * allowing partial cleanup if constructor fails
+   * Parameters:
+   *   conn: Connection object for streaming packets
+   *
+   * Throws:
+   *   std::runtime_error: If flushing or streaming fails
    */
-  if (pkt) av_packet_free(&pkt);
-  if (frame) av_frame_free(&frame);
-  if (ctx) avcodec_free_context(&ctx);
+  int ret = avcodec_send_frame(ctx, nullptr); // signal end of stream
+  if (ret < 0) {
+    const char* err = "Error signaling EOF to encoder";
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
+  }
+
+  while (true) {
+    ret = avcodec_receive_packet(ctx, pkt);
+    if (ret == AVERROR_EOF) break; // no more packets
+    if (ret < 0) {
+      const char* err = "Error receiving packet during flush";
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      throw std::runtime_error(err);
+    }
+
+    if (conn.stream_pkt(pkt->data, pkt->size) < 0) {
+      const char* err = "Error in stream callback during flush";
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+      throw std::runtime_error(err);
+    }
+
+    av_packet_unref(pkt);
+  }
 }

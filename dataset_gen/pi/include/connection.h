@@ -18,11 +18,13 @@ public:
   ) noexcept;
   ~connection() noexcept;
 
-  int conn_tcp();
   int tcpfd;
+  int conn_tcp();
+  int stream_pkt(const uint8_t* data, size_t size);
+  void discon_tcp();
 
-  int bind_udp();
   int udpfd;
+  int bind_udp();
 
 private:
   std::string server_ip;
