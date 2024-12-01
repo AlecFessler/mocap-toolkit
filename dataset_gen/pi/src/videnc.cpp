@@ -117,27 +117,7 @@ videnc::~videnc() {
   if (ctx) avcodec_free_context(&ctx);
 }
 
-void videnc::encode_frame(uint8_t* yuv420_data, connection& conn) {
-  /**
-   * Encodes a single YUV420 frame and streams via callback.
-   *
-   * The encoding process:
-   * 1. Maps DMA buffer YUV planes to encoder frame buffer
-   * 2. Assigns presentation timestamp
-   * 3. Submits frame for encoding
-   * 4. Retrieves and streams any ready packets
-   *
-   * Note: The encoder may not output a packet for every input
-   * frame due to B-frames and rate control. The callback is
-   * only invoked when compressed packets are ready.
-   *
-   * Parameters:
-   *   yuv420_data: Raw frame data in YUV420 format
-   *   conn: Connection object for streaming packets
-   *
-   * Throws:
-   *   std::runtime_error: If encoding or streaming fails
-   */
+void videnc::encode_frame(uint8_t* data) {
   const int y_size = width * height;
   const int uv_size = y_size / 4;
 
@@ -147,9 +127,9 @@ void videnc::encode_frame(uint8_t* yuv420_data, connection& conn) {
     throw std::runtime_error(err);
   }
 
-  frame->data[0] = yuv420_data;
-  frame->data[1] = yuv420_data + y_size;
-  frame->data[2] = yuv420_data + y_size + uv_size;
+  frame->data[0] = data;
+  frame->data[1] = data + y_size;
+  frame->data[2] = data + y_size + uv_size;
 
   frame->pts = pts_counter++;
 
@@ -158,64 +138,26 @@ void videnc::encode_frame(uint8_t* yuv420_data, connection& conn) {
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
-
-  while (true) {
-    int ret = avcodec_receive_packet(ctx, pkt);
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-    if (ret < 0) {
-      const char* err = "Error receiving encoded packet";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    if (conn.stream_pkt(pkt->data, pkt->size) < 0) {
-      const char* err = "Error in stream callback";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    av_packet_unref(pkt);
-  }
 }
 
-void videnc::flush(connection& conn) {
-  /**
-   * Flushes all remaining frames from encoder and streams them
-   *
-   * When encoding is finished, some frames may still be buffered
-   * in the encoder due to B-frames and rate control. This function:
-   * 1. Signals end-of-stream to encoder
-   * 2. Retrieves all remaining packets
-   * 3. Streams them via callback
-   *
-   * Parameters:
-   *   conn: Connection object for streaming packets
-   *
-   * Throws:
-   *   std::runtime_error: If flushing or streaming fails
-   */
+void videnc::flush() {
   int ret = avcodec_send_frame(ctx, nullptr); // signal end of stream
   if (ret < 0) {
     const char* err = "Error signaling EOF to encoder";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
     throw std::runtime_error(err);
   }
+}
 
-  while (true) {
-    ret = avcodec_receive_packet(ctx, pkt);
-    if (ret == AVERROR_EOF) break; // no more packets
-    if (ret < 0) {
-      const char* err = "Error receiving packet during flush";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    if (conn.stream_pkt(pkt->data, pkt->size) < 0) {
-      const char* err = "Error in stream callback during flush";
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
-      throw std::runtime_error(err);
-    }
-
-    av_packet_unref(pkt);
+uint8_t* videnc::recv_frame(int& size) {
+  int ret = avcodec_receive_packet(ctx, pkt);
+  if (ret == AVERROR(EAGAIN)) return nullptr; // no packets available yet
+  if (ret == AVERROR_EOF) return nullptr; // no more packets
+  if (ret < 0) {
+    const char* err = "Error receiving packet";
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    throw std::runtime_error(err);
   }
+  size = pkt->size;
+  return pkt->data;
 }

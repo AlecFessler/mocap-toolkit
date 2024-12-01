@@ -31,9 +31,7 @@ connection::connection()
 
 
 connection::connection(
-  std::string& server_ip,
-  std::string& tcp_port,
-  std::string& udp_port
+  config& config
 ) noexcept :
   /**
    * Creates a connection object with specific network settings.
@@ -50,9 +48,9 @@ connection::connection(
    */
   tcpfd(-1),
   udpfd(-1),
-  server_ip(server_ip),
-  tcp_port(tcp_port),
-  udp_port(udp_port) {}
+  server_ip(config.server_ip),
+  tcp_port(config.tcp_port),
+  udp_port(config.udp_port) {}
 
 connection::~connection() noexcept {
   /**
@@ -233,4 +231,15 @@ int connection::bind_udp() {
 
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "UDP socket bound successfully");
   return 0;
+}
+
+size_t connection::recv_msg(char* msg_buf) {
+  return recvfrom(
+    udpfd,
+    msg_buf,
+    sizeof(msg_buf),
+    0,
+    NULL,
+    NULL
+  );
 }

@@ -26,12 +26,12 @@
 
 extern char** environ;
 
-volatile static sig_atomic_t running = 0;
-volatile static sig_atomic_t stopping = 0;
-
 constexpr int64_t ns_per_s = 1'000'000'000;
-static int64_t timestamp = 0;
-static timer_t timerid;
+
+volatile static int64_t timestamp = 0;
+volatile static sig_atomic_t running = 1;
+volatile static sig_atomic_t stream_end = 0;
+volatile static sig_atomic_t frame_rdy = 0;
 
 static std::unique_ptr<sem_t, sem_deleter> loop_ctl_sem;
 static std::unique_ptr<camera_handler_t> cam;
@@ -39,77 +39,78 @@ static std::unique_ptr<connection> conn;
 
 std::unique_ptr<logger_t> logger;
 
-void capture_signal_handler(int signo, siginfo_t* info, void* context);
-void io_signal_handler(int signo, siginfo_t* info, void* context);
-void exit_signal_handler(int signo, siginfo_t* info, void* context);
-
 inline int init_realtime_scheduling(int recording_cpu);
-inline int init_timer();
+inline int init_timer(timer_t* timerid);
 inline int init_signals();
 inline int init_sigio(int fd);
-inline void arm_timer();
+inline void arm_timer(
+  int64_t timestamp,
+  timer_t timerid,
+  int64_t frame_duration
+);
+inline void flush_encoder(
+  videnc& encoder,
+  connection& conn
+);
 
 int main() {
   try {
     logger = std::make_unique<logger_t>("logs.txt");
     config config = parse_config("config.txt");
+
     loop_ctl_sem = init_semaphore();
 
-    int64_t frame_duration = ns_per_s / config.fps;
-    lock_free_queue_t frame_queue{config.dma_buffers};
     cam = std::make_unique<camera_handler_t>(
       config,
-      frame_queue,
-      *loop_ctl_sem.get()
+      *loop_ctl_sem.get(),
+      frame_rdy
     );
+    conn = std::make_unique<connection>(config);
     videnc encoder{config};
-    conn = std::make_unique<connection>(
-      config.server_ip,
-      config.tcp_port,
-      config.udp_port
-    );
+
+    int64_t frame_duration = ns_per_s / config.fps;
+    timer_t timerid;
 
     int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
-    if ((ret = init_timer()) < 0) return ret;
+    if ((ret = init_timer(&timerid)) < 0) return ret;
     if ((ret = init_signals()) < 0) return ret;
+    if ((ret = conn->bind_udp()) < 0) return ret;
+    if ((ret = init_sigio(conn->udpfd)) < 0) return ret;
 
-    running = 1;
     while (running) {
-      // (re)connect to udp socket
-      // and bind fd for SIGIO on incoming data
-      if (conn->udpfd < 0) {
-        if ((ret = conn->bind_udp()) < 0) return ret;
-        if ((ret = init_sigio(conn->udpfd)) < 0) return ret;
+      if (timestamp && running) {
+        timestamp += frame_duration;
+        arm_timer(
+          timestamp,
+          timerid,
+          frame_duration
+        );
       }
 
-      // if timestamp is nonzero, get next frame capture time
-      if (timestamp) timestamp += frame_duration;
-      // arm timer completes only if timestamp is nonzero
-      arm_timer();
-
-      // block until either:
-      // 1. frame is ready to encode
-      // 2. initial timestamp is received
-      // 3. exit signal is received (not "STOP" message)
       sem_wait(loop_ctl_sem.get());
 
-      // continue if no frame is available (cases 2 and 3 above)
-      // or if there is, send it for encoding
-      void* frame = frame_queue.dequeue();
-      if (!frame) continue;
+      if (frame_rdy) {
+        frame_rdy = 0;
+        if (!stream_end) {
+          encoder.encode_frame(cam->frame_buffer);
+          int pkt_size = 0;
+          uint8_t* ptr = encoder.recv_frame(pkt_size);
+          if (ptr) conn->stream_pkt(ptr, pkt_size);
+        }
+      }
 
-      encoder.encode_frame(
-        (uint8_t*)frame,
-        *conn // encoder will stream frames if available
-      );
+      if (stream_end) {
+        stream_end = 0;
+        flush_encoder(encoder, *conn);
+        conn->discon_tcp();
+        encoder = videnc(config);
+      }
 
-      // flush remaining frames if stopping
-      if (!stopping) continue;
-      encoder.flush(*conn); // encoder will stream remaining frames
-      conn->discon_tcp();
-      stopping = 0;
     }
+
+    flush_encoder(encoder, *conn);
+
   } catch (const std::exception& e) {
     if (logger)
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, e.what());
@@ -122,102 +123,49 @@ int main() {
 }
 
 void capture_signal_handler(int signo, siginfo_t* info, void* context) {
-  /**
-   * Signal handler for queueing a capture request to the camera
-   *
-   * This is called when the timer (see init_timer(), arm_timer())
-   * hits the next capture timestamp and emits SIGUSR1.
-   * The next timestamp is timestamp + ns_per_s / fps
-   *
-   * When the capture request is completed, the camera will emit a signal
-   * which is handled by enqueuing a ptr to the filled dma buffer, and
-   * incrementing the loop_ctl_sem to unblock the main loop so it can
-   * handle the captured frame (see camera_handler::request_complete(request)).
-   */
   (void)signo;
   (void)info;
   (void)context;
-
   cam->queue_request();
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
 }
 
 void io_signal_handler(int signo, siginfo_t* info, void* context) {
-  /**
-   * Signal handler for handling messages from udp socket
-   *
-   * There are two types of messages:
-   * 1. 8 byte int - number of nanoseconds since unix epoch
-   * 2. 4 byte string - "STOP" signal
-   *
-   * The first message type is our starting timestamp, and all subsequent
-   * frame captures will be on multiples of the frame duration added to
-   * this initial timestamp value. It is assigned to the static timestamp
-   * variable, and then we increment the semaphore without a frame to enable
-   * the main loop to arm the timer before waiting for a frame (see arm_timer()).
-   * This drives recording and streaming, as the timer will be rearmed every
-   * time the loop resets, until the timestamp is set to zero again.
-   *
-   * The second message type is our stop signal, and is handled by resetting the
-   * timestamp to zero, preventing any more arm_timer() calls from completing,
-   * but still allowing the main loop to handle any remaining frames since the
-   * semaphore is incremented once per available frame.
-   */
   (void)signo;
   (void)info;
   (void)context;
 
   char buf[8];
-  ssize_t bytes_recvd = recvfrom(
-    conn->udpfd,
-    buf,
-    sizeof(buf),
-    0,
-    NULL,
-    NULL
-  );
+  size_t size = conn->recv_msg(buf);
 
-  if (bytes_recvd == 4 && strncmp(buf, "STOP", 4) == 0) {
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received STOP signal, ending stream...");
-    timestamp = 0; // dont capture anymore frames
-    stopping = 1; // flush the encoder and stream remaining frames
-    sem_post(loop_ctl_sem.get());
-    return;
-  }
-
-  if (bytes_recvd == 8) {
+  // 8 bytes is our timestamp
+  if (size == 8) {
+    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Receied timestamp, starting stream...");
     uint64_t network_timestamp;
     memcpy(&network_timestamp, buf, sizeof(network_timestamp));
-    timestamp = be64toh(network_timestamp);  // Convert from big-endian to host byte order
-
-    // TODO: implement custom format function
-    //char msg[128];
-    //snprintf(msg, sizeof(msg), "Received timestamp %ld", timestamp);
-    //logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, msg);
-
+    timestamp = be64toh(network_timestamp);
     sem_post(loop_ctl_sem.get());
     return;
   }
 
-  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Received unexpected message size");
+  // 4 bytes, "STOP" is our stop signal
+  if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
+    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
+    timestamp = 0;
+    stream_end = 1;
+    sem_post(loop_ctl_sem.get());
+    return;
+  }
+
+  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Unexpected udp message size");
 }
 
 void exit_signal_handler(int signo, siginfo_t* info, void* context) {
-  /**
-   * Signal handler for allowing the process to gracefully exit
-   *
-   * Handled by setting running to 0, and then incrementing the
-   * semaphore without a frame so that the main loop can unblock
-   * and then exit since the loop condition is false.
-   */
   (void)signo;
   (void)info;
   (void)context;
-
-  running = 0; // exit loop
-  timestamp = 0; // dont capture anymore frames
-  stopping = 1; // flush the encoder and stream remaining frames
-  sem_post(loop_ctl_sem.get()); // unblock main loop
+  running = 0;
+  sem_post(loop_ctl_sem.get());
 }
 
 inline int init_realtime_scheduling(int recording_cpu) {
@@ -253,7 +201,7 @@ inline int init_realtime_scheduling(int recording_cpu) {
 }
 
 
-inline int init_timer() {
+inline int init_timer(timer_t* timerid) {
   /**
    * Initializes a CLOCK_MONOTONIC timer for precise frame capture timing
    *
@@ -279,16 +227,16 @@ inline int init_timer() {
   struct sigevent sev;
   sev.sigev_notify = SIGEV_SIGNAL;
   sev.sigev_signo = SIGUSR1;
-  sev.sigev_value.sival_ptr = &timerid;
+  sev.sigev_value.sival_ptr = timerid;
 
-  if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) {
+  if (timer_create(CLOCK_MONOTONIC, &sev, timerid) == -1) {
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create timer");
     return -errno;
   }
   return 0;
 }
 
-inline void arm_timer() {
+inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration) {
     /**
      * Arms the timer to trigger frame captures at precise timestamps
      *
@@ -324,8 +272,6 @@ inline void arm_timer() {
      * The timer will emit SIGUSR1 when the target time is reached, triggering
      * capture_signal_handler() to initiate the actual frame capture.
      */
-    if (!timestamp) return;
-
     struct timespec real_time, mono_time;
     clock_gettime(CLOCK_REALTIME, &real_time);
     clock_gettime(CLOCK_MONOTONIC, &mono_time);
@@ -334,7 +280,6 @@ inline void arm_timer() {
     int64_t current_mono_ns = (int64_t)mono_time.tv_sec * ns_per_s + mono_time.tv_nsec;
 
     int64_t ns_until_target = timestamp - current_real_ns;
-    int64_t frame_duration = ns_per_s / 30;
 
     //char debug_msg[256];
     //snprintf(debug_msg, sizeof(debug_msg),
@@ -365,7 +310,6 @@ inline void arm_timer() {
 
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
 
-    // Log the final timer setting
     //snprintf(debug_msg, sizeof(debug_msg),
     //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
     //         mono_target_ns, current_mono_ns);
@@ -436,7 +380,7 @@ inline int init_signals() {
   struct sigaction exit_action;
   exit_action.sa_sigaction = exit_signal_handler;
   exit_action.sa_flags = SA_SIGINFO | SA_RESTART;
-  sigemptyset(&io_action.sa_mask);
+  sigemptyset(&exit_action.sa_mask);
 
   if (sigaction(SIGUSR1, &action, NULL) < 0 ||
       sigaction(SIGIO, &io_action, NULL) < 0 ||
@@ -447,4 +391,13 @@ inline int init_signals() {
     }
 
   return 0;
+}
+
+inline void flush_encoder(videnc& encoder, connection& conn) {
+    encoder.flush();
+    int pkt_size = 0;
+    uint8_t* ptr = nullptr;
+    while ((ptr = encoder.recv_frame(pkt_size)) != nullptr) {
+        conn.stream_pkt(ptr, pkt_size);
+    }
 }

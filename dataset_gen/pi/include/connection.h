@@ -6,16 +6,12 @@
 #define CONNECTION_H
 
 #include <string>
-
+#include "config.h"
 
 class connection {
 public:
   connection() noexcept;
-  connection(
-    std::string& server_ip,
-    std::string& tcp_port,
-    std::string& udp_port
-  ) noexcept;
+  connection(config& config) noexcept;
   ~connection() noexcept;
 
   int tcpfd;
@@ -25,6 +21,7 @@ public:
 
   int udpfd;
   int bind_udp();
+  size_t recv_msg(char* msg_buf);
 
 private:
   std::string server_ip;
