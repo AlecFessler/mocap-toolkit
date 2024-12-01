@@ -1,9 +1,9 @@
 Write stereo calibration tool
 
-Fix the issue where the stop signal makes it so the pis can't start again with a newtimestamp cleanly
-
 Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
 
 Perform camera calibration
 
 Write preprocessing script
+
+Finish writing and updating docstrings in recording/streaming software
