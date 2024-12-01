@@ -246,18 +246,6 @@ void camera_handler_t::init_camera_controls(config& config) {
   controls_->set(libcamera::controls::AeEnable, false);
   controls_->set(libcamera::controls::ExposureTime, frame_duration_min);
 
-  // Fix focus to ~12 inches
-  // Focus value should be reciprocal of distance in meters
-  controls_->set(libcamera::controls::AfMode, libcamera::controls::AfModeManual);
-  controls_->set(libcamera::controls::LensPosition, 3.33);
-
-  // Fix white balance, gain, and disable HDR
-  controls_->set(libcamera::controls::AwbEnable, false);
-  controls_->set(libcamera::controls::AnalogueGain, 1.0);
-  controls_->set(libcamera::controls::HdrMode, libcamera::controls::HdrModeOff);
-
-  controls_->set(libcamera::controls::rpi::StatsOutputEnable, false);
-
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
     logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
