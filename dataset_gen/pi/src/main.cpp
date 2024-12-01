@@ -35,7 +35,6 @@ volatile static sig_atomic_t frame_rdy = 0;
 
 static std::unique_ptr<sem_t, sem_deleter> loop_ctl_sem;
 static std::unique_ptr<camera_handler_t> cam;
-static std::unique_ptr<videnc> encoder;
 static std::unique_ptr<connection> conn;
 
 std::unique_ptr<logger_t> logger;
@@ -66,8 +65,8 @@ int main() {
       *loop_ctl_sem.get(),
       frame_rdy
     );
-    encoder = std::make_unique<videnc>(config);
     conn = std::make_unique<connection>(config);
+    videnc encoder{config};
 
     int64_t frame_duration = ns_per_s / config.fps;
     timer_t timerid;
@@ -94,23 +93,23 @@ int main() {
       if (frame_rdy) {
         frame_rdy = 0;
         if (!stream_end) {
-          encoder->encode_frame(cam->frame_buffer);
+          encoder.encode_frame(cam->frame_buffer);
           int pkt_size = 0;
-          uint8_t* ptr = encoder->recv_frame(pkt_size);
+          uint8_t* ptr = encoder.recv_frame(pkt_size);
           if (ptr) conn->stream_pkt(ptr, pkt_size);
         }
       }
 
       if (stream_end) {
         stream_end = 0;
-        flush_encoder(*encoder, *conn);
+        flush_encoder(encoder, *conn);
         conn->discon_tcp();
-        encoder = std::make_unique<videnc>(config);
+        encoder = videnc(config);
       }
 
     }
 
-    flush_encoder(*encoder, *conn);
+    flush_encoder(encoder, *conn);
 
   } catch (const std::exception& e) {
     if (logger)
@@ -282,12 +281,12 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     int64_t ns_until_target = timestamp - current_real_ns;
 
-    char debug_msg[256];
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-             current_real_ns, timestamp, ns_until_target,
-             ns_until_target / 1000000.0);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //char debug_msg[256];
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+    //         current_real_ns, timestamp, ns_until_target,
+    //         ns_until_target / 1000000.0);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
         int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
@@ -295,10 +294,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
         ns_until_target += ns_elapsed;
         timestamp += ns_elapsed;
 
-        snprintf(debug_msg, sizeof(debug_msg),
-                "Target in past, adjusted by %ld frames to delta: %ld ns",
-                frames_elapsed, ns_until_target);
-        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+        //snprintf(debug_msg, sizeof(debug_msg),
+        //        "Target in past, adjusted by %ld frames to delta: %ld ns",
+        //        frames_elapsed, ns_until_target);
+        //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
     int64_t mono_target_ns = current_mono_ns + ns_until_target;
@@ -311,11 +310,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
 
-    // Log the final timer setting
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Timer set for monotonic timestamp %ld (current mono: %ld)",
-             mono_target_ns, current_mono_ns);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
+    //         mono_target_ns, current_mono_ns);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {

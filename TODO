@@ -1,6 +1,6 @@
-Write stereo calibration tool
+Fix inotify wait in shell script
 
-Test the camera configuration to confirm any settings really are necessary to achieve sub ms sync
+Write stereo calibration tool
 
 Perform camera calibration
 
