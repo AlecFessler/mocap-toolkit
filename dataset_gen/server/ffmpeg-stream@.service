@@ -1,0 +1,17 @@
+# © 2024 Alec Fessler
+# MIT License
+# See LICENSE file in the project root for full license information.
+
+# This file needs to be relocated to the directory below for use
+
+# /etc/systemd/system/ffmpeg-stream@.service
+[Unit]
+Description=FFmpeg Stream %i
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/ffmpeg-stream
+ExecStart=/usr/bin/ffmpeg -f h264 -i tcp://0.0.0.0:%i?listen=1 -c:v hevc_nvenc -preset slow -crf 20 -movflags +faststart+frag_keyframe -f segment "${FILENAME}"
+Restart=always
+RestartSec=0
+KillSignal=SIGINT

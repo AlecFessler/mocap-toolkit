@@ -1,0 +1,23 @@
+# © 2024 Alec Fessler
+# MIT License
+# See LICENSE file in the project root for full license information.
+
+# This file needs to be relocated to the directory below for use
+
+# /etc/systemd/system/framecap.service
+[Unit]
+Description=Frame Capture Service
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/home/alecfessler/Documents/vidcap/bin/framecap
+WorkingDirectory=/home/alecfessler/Documents/vidcap
+Restart=always
+RestartSec=1
+KillSignal=SIGINT
+User=alecfessler
+Environment=PATH=/usr/bin:/usr/local/bin
+
+[Install]
+WantedBy=multi-user.target
