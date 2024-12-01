@@ -1,9 +1,0 @@
-Fix inotify wait in shell script
-
-Write stereo calibration tool
-
-Perform camera calibration
-
-Write preprocessing script
-
-Finish writing and updating docstrings in recording/streaming software
