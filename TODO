@@ -1,4 +1,10 @@
-Fix inotify wait in shell script
+Update the logging in the server python script
+
+Debug why rpicam3's CamStream coroutine is failing to allow a connection
+
+Integrate and test the frame collector
+
+Design and write the API used to connect and receive data from the frame collector for downstream tasks
 
 Write stereo calibration tool
 
@@ -6,4 +12,6 @@ Perform camera calibration
 
 Write preprocessing script
 
-Finish writing and updating docstrings in recording/streaming software
+Finish writing and updating docstrings in recording/streaming software and server python script
+
+Update Readme based on new architecture

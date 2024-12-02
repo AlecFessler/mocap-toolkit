@@ -11,6 +11,8 @@
 #include "connection.h"
 #include "logger.h"
 
+static constexpr char FRAME_MARKER[] = "HELLYEAH";
+
 extern std::unique_ptr<logger_t> logger;
 
 connection::connection()
@@ -25,13 +27,16 @@ connection::connection()
    */
   tcpfd(-1),
   udpfd(-1),
+  timestamp(0),
+  frame_duration(0),
   server_ip("UNSET_SERVER"),
   tcp_port("UNSET_PORT"),
   udp_port("UNSET_PORT") {}
 
 
 connection::connection(
-  config& config
+  config& config,
+  int64_t frame_duration
 ) noexcept :
   /**
    * Creates a connection object with specific network settings.
@@ -48,6 +53,8 @@ connection::connection(
    */
   tcpfd(-1),
   udpfd(-1),
+  timestamp(0),
+  frame_duration(frame_duration),
   server_ip(config.server_ip),
   tcp_port(config.tcp_port),
   udp_port(config.udp_port) {}
@@ -131,25 +138,9 @@ int connection::conn_tcp() {
 }
 
 int connection::stream_pkt(const uint8_t* data, size_t size) {
-  /**
-   * Streams encoded video frames via tcp to the server
-   *
-   * This function is passed as a callback to the encoder
-   * which calls it whenever it has a frame to output. This
-   * is done because the encoder does not give an output
-   * upon every input, but instead buffers frames for some
-   * time before any are ready. Rather than having the encoder
-   * communicate externally about the outcome of encoding the
-   * video frame, we simply pass this function and main isn't
-   * concerned with whether it's called or not.
-   *
-   * The tcp socket is checked before use, and if it's not
-   * connected, we connect. This means the first connection to
-   * the tcp socket does not occur until sometime after recording
-   * begins, once the first encoded frame is ready for transmission.
-   */
-  size_t total_bytes_written = 0;
-  while (total_bytes_written < size) {
+  size_t marker_size = sizeof(FRAME_MARKER) - 1; // exclude null terminator
+  size_t total_written = 0;
+  while (total_written < marker_size) {
     if (tcpfd < 0) {
       int ret = conn_tcp();
       if (ret < 0) return ret;
@@ -157,8 +148,52 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
 
     ssize_t result = write(
       tcpfd,
-      data + total_bytes_written,
-      size - total_bytes_written
+      FRAME_MARKER + total_written,
+      marker_size - total_written
+    );
+
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting marker");
+      return -1;
+    }
+
+    total_written += result;
+  }
+
+  total_written = 0;
+  while (total_written < sizeof(timestamp)) {
+    if (tcpfd < 0) {
+      int ret = conn_tcp();
+      if (ret < 0) return ret;
+    }
+
+    ssize_t result = write(
+      tcpfd,
+      reinterpret_cast<const uint8_t*>(&timestamp) + total_written,
+      sizeof(timestamp) - total_written
+    );
+
+    if (result < 0) {
+        if (errno == EINTR) continue;
+        logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting timestamp");
+        return -1;
+    }
+
+    total_written += result;
+  }
+
+  total_written = 0;
+  while (total_written < size) {
+    if (tcpfd < 0) {
+      int ret = conn_tcp();
+      if (ret < 0) return ret;
+    }
+
+    ssize_t result = write(
+      tcpfd,
+      data + total_written,
+      size - total_written
     );
 
     if (result < 0) {
@@ -167,9 +202,10 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
       return -1;
     }
 
-    total_bytes_written += result;
+    total_written += result;
   }
 
+  timestamp += frame_duration;
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
   return 0;
 }
@@ -224,9 +260,9 @@ int connection::bind_udp() {
   udp_addr.sin_port = htons(udp_port_num);
 
   while (bind(udpfd, (struct sockaddr*)&udp_addr, sizeof(udp_addr)) < 0) {
-      if (errno == EINTR) continue;
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to bind UDP socket");
-      return -errno;
+    if (errno == EINTR) continue;
+    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to bind UDP socket");
+    return -errno;
   }
 
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "UDP socket bound successfully");

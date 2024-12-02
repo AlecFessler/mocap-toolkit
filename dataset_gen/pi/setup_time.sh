@@ -1,16 +1,7 @@
 #!/bin/bash
 # Setup script for Pi time synchronization
-# This configures each Pi to:
-# 1. Get time directly from the PC via NTP
-# 2. Participate in PTP synchronization according to its role (master or slave)
-
-# First argument determines if this is the grandmaster (gm) or slave
-if [ "$1" != "gm" ] && [ "$1" != "slave" ]; then
-    echo "Usage: $0 [gm|slave]"
-    echo "Example: $0 gm     # Set up as PTP grandmaster"
-    echo "Example: $0 slave  # Set up as PTP slave"
-    exit 1
-fi
+# This configures each Pi to participate in PTP synchronization
+# using Best Master Clock Algorithm (BMCA) for automatic master selection
 
 # Add NTP server configuration to sync with PC
 # We append to the existing config rather than replacing it
@@ -20,44 +11,33 @@ sudo tee -a /etc/chrony/chrony.conf << 'EOF'
 server 192.168.86.100 iburst minpoll 0 maxpoll 5 prefer
 EOF
 
-# Configure PTP based on role
-if [ "$1" = "gm" ]; then
-    # Grandmaster PTP configuration
-    sudo tee /etc/linuxptp/ptp4l.conf << 'EOF'
+# Configure PTP with BMCA-friendly settings
+sudo tee /etc/linuxptp/ptp4l.conf << 'EOF'
 [global]
-priority1               127
+# Default priorities - let BMCA choose the best master
+priority1               128
 priority2               128
-domainNumber            0
-slaveOnly               0
-time_stamping           hardware
-verbose                 1
-logging_level           6
-message_tag             master
+domainNumber           0
+# Don't force slave mode, allow BMCA to work
+slaveOnly              0
+time_stamping          hardware
+verbose                1
+logging_level          6
+# Set clock class to indicate we're happy to be master or slave
+clockClass             128
+# Additional BMCA parameters for fine-tuning
+G.8275.defaultDS.localPriority     128
+# Increase announce interval for better stability
+logAnnounceInterval    1
+# Add quality metrics that BMCA can use
+clockAccuracy         0xFE
+offsetScaledLogVariance 0xFFFF
 [eth0]
-network_transport       UDPv4
-delay_mechanism         E2E
-delay_filter            moving_median
-delay_filter_length     10
+network_transport      UDPv4
+delay_mechanism       E2E
+delay_filter         moving_median
+delay_filter_length  10
 EOF
-else
-    # Slave PTP configuration
-    sudo tee /etc/linuxptp/ptp4l.conf << 'EOF'
-[global]
-priority1               255
-priority2               255
-domainNumber            0
-slaveOnly               1
-time_stamping           hardware
-verbose                 1
-logging_level           6
-message_tag             slave
-[eth0]
-network_transport       UDPv4
-delay_mechanism         E2E
-delay_filter            moving_median
-delay_filter_length     10
-EOF
-fi
 
 # Create time initialization service
 # This ensures we get a rough sync via NTP before starting PTP
@@ -105,4 +85,4 @@ sudo systemctl start time-init.service
 sudo systemctl enable ptp4l
 sudo systemctl restart ptp4l
 
-echo "Pi time synchronization setup complete as $1"
+echo "Pi time synchronization setup complete with BMCA"

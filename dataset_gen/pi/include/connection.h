@@ -11,7 +11,7 @@
 class connection {
 public:
   connection() noexcept;
-  connection(config& config) noexcept;
+  connection(config& config, int64_t frame_duration) noexcept;
   ~connection() noexcept;
 
   int tcpfd;
@@ -22,6 +22,9 @@ public:
   int udpfd;
   int bind_udp();
   size_t recv_msg(char* msg_buf);
+
+  int64_t timestamp;
+  int64_t frame_duration;
 
 private:
   std::string server_ip;

@@ -58,6 +58,9 @@ int main() {
     logger = std::make_unique<logger_t>("logs.txt");
     config config = parse_config("config.txt");
 
+    int64_t frame_duration = ns_per_s / config.fps;
+    timer_t timerid;
+
     loop_ctl_sem = init_semaphore();
 
     cam = std::make_unique<camera_handler_t>(
@@ -65,11 +68,8 @@ int main() {
       *loop_ctl_sem.get(),
       frame_rdy
     );
-    conn = std::make_unique<connection>(config);
+    conn = std::make_unique<connection>(config, frame_duration);
     videnc encoder{config};
-
-    int64_t frame_duration = ns_per_s / config.fps;
-    timer_t timerid;
 
     int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
@@ -79,7 +79,7 @@ int main() {
     if ((ret = init_sigio(conn->udpfd)) < 0) return ret;
 
     while (running) {
-      if (timestamp && running) {
+      if (timestamp) {
         timestamp += frame_duration;
         arm_timer(
           timestamp,
@@ -96,7 +96,9 @@ int main() {
           encoder.encode_frame(cam->frame_buffer);
           int pkt_size = 0;
           uint8_t* ptr = encoder.recv_frame(pkt_size);
-          if (ptr) conn->stream_pkt(ptr, pkt_size);
+          if (ptr) {
+            conn->stream_pkt(ptr, pkt_size);
+          }
         }
       }
 
@@ -106,7 +108,6 @@ int main() {
         conn->discon_tcp();
         encoder = videnc(config);
       }
-
     }
 
     flush_encoder(encoder, *conn);
@@ -144,6 +145,7 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
     uint64_t network_timestamp;
     memcpy(&network_timestamp, buf, sizeof(network_timestamp));
     timestamp = be64toh(network_timestamp);
+    conn->timestamp = timestamp;
     sem_post(loop_ctl_sem.get());
     return;
   }
@@ -152,6 +154,7 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
     timestamp = 0;
+    conn->timestamp = 0;
     stream_end = 1;
     sem_post(loop_ctl_sem.get());
     return;
@@ -292,7 +295,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
         int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
         int64_t ns_elapsed = frames_elapsed * frame_duration;
         ns_until_target += ns_elapsed;
+        // the adjustment only happens a single time ever
+        // and only if the initial timestamp is received late
         timestamp += ns_elapsed;
+        conn->timestamp += ns_elapsed;
 
         //snprintf(debug_msg, sizeof(debug_msg),
         //        "Target in past, adjusted by %ld frames to delta: %ld ns",
