@@ -69,7 +69,7 @@ int main() {
       frame_rdy
     );
     conn = std::make_unique<connection>(config, frame_duration);
-    videnc encoder{config};
+    auto encoder = std::make_unique<videnc>(config);
 
     int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
@@ -93,9 +93,9 @@ int main() {
       if (frame_rdy) {
         frame_rdy = 0;
         if (!stream_end) {
-          encoder.encode_frame(cam->frame_buffer);
+          encoder->encode_frame(cam->frame_buffer);
           int pkt_size = 0;
-          uint8_t* ptr = encoder.recv_frame(pkt_size);
+          uint8_t* ptr = encoder->recv_frame(pkt_size);
           if (ptr) {
             conn->stream_pkt(ptr, pkt_size);
           }
@@ -104,13 +104,13 @@ int main() {
 
       if (stream_end) {
         stream_end = 0;
-        flush_encoder(encoder, *conn);
+        flush_encoder(*encoder, *conn);
         conn->discon_tcp();
-        encoder = videnc(config);
+        encoder = std::make_unique<videnc>(config);
       }
     }
 
-    flush_encoder(encoder, *conn);
+    flush_encoder(*encoder, *conn);
 
   } catch (const std::exception& e) {
     if (logger)
