@@ -11,7 +11,8 @@
 #include "connection.h"
 #include "logger.h"
 
-static constexpr char FRAME_MARKER[] = "HELLYEAH";
+static constexpr char FRAME_MARKER[] = "NEWFRAME";
+static constexpr char END_STREAM[] = "EOSTREAM";
 
 extern std::unique_ptr<logger_t> logger;
 
@@ -139,8 +140,27 @@ int connection::conn_tcp() {
 
 int connection::stream_pkt(const uint8_t* data, size_t size) {
   size_t marker_size = sizeof(FRAME_MARKER) - 1; // exclude null terminator
+  uint64_t pkt_size = size + marker_size + sizeof(timestamp);
+  uint8_t pkt[pkt_size];
+
+  memcpy(
+    pkt,
+    (const uint8_t*)FRAME_MARKER,
+    marker_size
+  );
+  memcpy(
+    pkt + marker_size,
+    (const uint8_t*)&timestamp,
+    sizeof(timestamp)
+  );
+  memcpy(
+    pkt + marker_size + sizeof(timestamp),
+    data,
+    size
+  );
+
   size_t total_written = 0;
-  while (total_written < marker_size) {
+  while (total_written < pkt_size) {
     if (tcpfd < 0) {
       int ret = conn_tcp();
       if (ret < 0) return ret;
@@ -148,57 +168,18 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
 
     ssize_t result = write(
       tcpfd,
-      FRAME_MARKER + total_written,
-      marker_size - total_written
+      pkt + total_written,
+      pkt_size - total_written
     );
 
     if (result < 0) {
       if (errno == EINTR) continue;
+      if (errno == EPIPE || errno == ECONNRESET) {
+        int ret = conn_tcp();
+        if (ret < 0) return ret;
+        continue;
+      }
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting marker");
-      return -1;
-    }
-
-    total_written += result;
-  }
-
-  total_written = 0;
-  while (total_written < sizeof(timestamp)) {
-    if (tcpfd < 0) {
-      int ret = conn_tcp();
-      if (ret < 0) return ret;
-    }
-
-    ssize_t result = write(
-      tcpfd,
-      reinterpret_cast<const uint8_t*>(&timestamp) + total_written,
-      sizeof(timestamp) - total_written
-    );
-
-    if (result < 0) {
-        if (errno == EINTR) continue;
-        logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting timestamp");
-        return -1;
-    }
-
-    total_written += result;
-  }
-
-  total_written = 0;
-  while (total_written < size) {
-    if (tcpfd < 0) {
-      int ret = conn_tcp();
-      if (ret < 0) return ret;
-    }
-
-    ssize_t result = write(
-      tcpfd,
-      data + total_written,
-      size - total_written
-    );
-
-    if (result < 0) {
-      if (errno == EINTR) continue;
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame");
       return -1;
     }
 
@@ -207,6 +188,40 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
 
   timestamp += frame_duration;
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
+  return 0;
+}
+
+int connection::end_stream() {
+  size_t end_stream_size = sizeof(END_STREAM) - 1;
+
+  size_t total_written = 0;
+  while (total_written < end_stream_size) {
+    if (tcpfd < 0) {
+      int ret = conn_tcp();
+      if (ret < 0) return ret;
+    }
+
+    ssize_t result = write(
+      tcpfd,
+      END_STREAM + total_written,
+      end_stream_size - total_written
+    );
+
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EPIPE || errno == ECONNRESET) {
+        int ret = conn_tcp();
+        if (ret < 0) return ret;
+        continue;
+      }
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error sending end stream message to server");
+      return -1;
+    }
+
+    total_written += result;
+  }
+
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Sent end stream message to server");
   return 0;
 }
 
@@ -269,11 +284,11 @@ int connection::bind_udp() {
   return 0;
 }
 
-size_t connection::recv_msg(char* msg_buf) {
+size_t connection::recv_msg(char* msg_buf, size_t size) {
   return recvfrom(
     udpfd,
     msg_buf,
-    sizeof(msg_buf),
+    size,
     0,
     NULL,
     NULL

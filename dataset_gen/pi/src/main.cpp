@@ -105,7 +105,8 @@ int main() {
       if (stream_end) {
         stream_end = 0;
         flush_encoder(*encoder, *conn);
-        conn->discon_tcp();
+        conn->end_stream();
+        conn->timestamp = 0;
         encoder = std::make_unique<videnc>(config);
       }
     }
@@ -136,8 +137,9 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   (void)info;
   (void)context;
 
-  char buf[8];
-  size_t size = conn->recv_msg(buf);
+  size_t buf_size = 8; // bytes
+  char buf[buf_size];
+  size_t size = conn->recv_msg(buf, buf_size);
 
   // 8 bytes is our timestamp
   if (size == 8) {
@@ -154,7 +156,6 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
     logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
     timestamp = 0;
-    conn->timestamp = 0;
     stream_end = 1;
     sem_post(loop_ctl_sem.get());
     return;

@@ -17,11 +17,12 @@ public:
   int tcpfd;
   int conn_tcp();
   int stream_pkt(const uint8_t* data, size_t size);
+  int end_stream();
   void discon_tcp();
 
   int udpfd;
   int bind_udp();
-  size_t recv_msg(char* msg_buf);
+  size_t recv_msg(char* msg_buf, size_t size);
 
   int64_t timestamp;
   int64_t frame_duration;
