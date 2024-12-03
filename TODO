@@ -1,6 +1,6 @@
-Update the logging in the server python script
+Debug why the cameras no longer cleanly start new streams after the previous one ends (dead locks after receiving timestamp)
 
-Debug why rpicam3's CamStream coroutine is failing to allow a connection
+Debug why the server never exits properly
 
 Integrate and test the frame collector
 
