@@ -88,6 +88,10 @@ class CamStream:
       self.logger.debug(f"Stream completed for {self.config['name']}")
       if self.server:
         self.server.close()
+    except asyncio.TimeoutError:
+      self.logger.warning(f"Camera {self.config['name']} timed out - no data received for 3s")
+      if self.server:
+        self.server.close()
     finally:
       writer.close()
       await writer.wait_closed()

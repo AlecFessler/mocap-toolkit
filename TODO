@@ -1,5 +1,3 @@
-Debug the unhandled timeout error
-
 Integrate and test the frame collector
 
 Design and write the API used to connect and receive data from the frame collector for downstream tasks
