@@ -4,11 +4,18 @@
 # using Best Master Clock Algorithm (BMCA) for automatic master selection
 
 # Add NTP server configuration to sync with PC
-# We append to the existing config rather than replacing it
-sudo tee -a /etc/chrony/chrony.conf << 'EOF'
-
-# Get time from PC at 192.168.86.100
+sudo tee /etc/chrony/chrony.conf << 'EOF'
+# Get time from PC with frequent polling
 server 192.168.86.100 iburst minpoll 0 maxpoll 5 prefer
+
+# Allow stepping the clock for large offsets
+makestep 10.0 3
+
+# Save drift for better startup accuracy
+driftfile /var/lib/chrony/drift
+
+# Disable server functionality
+port 0
 EOF
 
 # Configure PTP with BMCA-friendly settings

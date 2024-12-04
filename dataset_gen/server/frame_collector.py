@@ -19,15 +19,20 @@ class FrameSet:
   frames: List[Frame]  # Fixed size list, indexed by camera position
 
 class FrameCollector:
-  def __init__(self,
-               start_timestamp: int,
-               camera_configs: List[Dict[str, Any]],
-               callback: Optional[Callable[[int, List[Frame]], None]] = None,
-               frame_duration: int = 33_333_333):  # 33.33ms in ns
+  def __init__(
+    self,
+    start_timestamp: int,
+    camera_configs: List[Dict[str, Any]],
+    callback: Optional[Callable[[int, List[Frame]], None]] = None,
+    frame_duration: int = 33_333_333, # 33.33ms in ns
+    logger: logging.Logger
+  ):
     self.start_timestamp = start_timestamp
     self.frame_duration = frame_duration
     self.callback = callback
     self.total_cameras = len(camera_configs)
+    self.completed_cameras = set()
+    self.logger = logger
 
     # Atomic counter for camera index assignment
     self.next_index = atomic.AtomicInteger(0)
@@ -41,6 +46,11 @@ class FrameCollector:
     # Set initial processing timestamp
     self.next_process_time = self.start_timestamp + frame_duration
 
+  def mark_camera_complete(self, camera_name: str) -> None:
+    """Mark a camera as having completed its stream"""
+    self.completed_cameras.add(camera_name)
+    self.logger.debug(f"Camera {camera_name} marked complete. {len(self.completed_cameras)}/{self.total_cameras} cameras complete")
+
   def _add_frame_set(self) -> None:
     """Add a new empty frame set to the list"""
     timestamp = (self.start_timestamp +
@@ -48,10 +58,10 @@ class FrameCollector:
 
     frames = [Frame() for _ in range(self.total_cameras)]
     frame_set = FrameSet(
-        timestamp=timestamp,
-        total_cameras=self.total_cameras,
-        frames_filled=atomic.AtomicInteger(0),
-        frames=frames
+      timestamp=timestamp,
+      total_cameras=self.total_cameras,
+      frames_filled=atomic.AtomicInteger(0),
+      frames=frames
     )
     self.frame_sets.append(frame_set)
 
@@ -100,9 +110,9 @@ class FrameCollector:
       # Remove any incomplete sets before the complete one
       if complete_idx > 0:
         incomplete = self.frame_sets[:complete_idx]
-        logging.warning(
-            f"Disposing of {len(incomplete)} incomplete frame sets "
-            f"(timestamps: {[fs.timestamp for fs in incomplete]})"
+        self.logger.warning(
+          f"Disposing of {len(incomplete)} incomplete frame sets "
+          f"(timestamps: {[fs.timestamp for fs in incomplete]})"
         )
         self.frame_sets = self.frame_sets[complete_idx:]
 
@@ -120,7 +130,7 @@ class FrameCollector:
     Monitor frame sets and process them one frame duration after capture.
     Uses clock sync to align with camera captures.
     """
-    while True:
+    while len(self.completed_cameras) < self.total_cameras:
       # Calculate sleep duration
       current_real = time.clock_gettime(time.CLOCK_REALTIME)
       ns_until_target = self.next_process_time - current_real
@@ -133,3 +143,7 @@ class FrameCollector:
 
       # Update next processing time
       self.next_process_time += self.frame_duration
+
+    # Process any remaining sets
+    self._process_complete_sets()
+    self.logger.info("All cameras complete, frame collector exiting")

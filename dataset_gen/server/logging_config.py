@@ -3,24 +3,15 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Any
 
-def setup_logger(camera_config: Dict[str, Any] = None):
+def setup_logger():
   """
   Configure root logger with rotating file handler.
-  If camera_config is provided, sets up logging for specific camera.
-  Otherwise sets up main process logging.
-
-  Args:
-      camera_config: Optional camera configuration dictionary
   """
   log_dir = Path("/var/log/multicam")
   log_dir.mkdir(exist_ok=True)
 
-  if camera_config:
-    logger_name = f"camstream_{camera_config['name']}"
-    log_file = log_dir / f"camstream_{camera_config['name']}.log"
-  else:
-    logger_name = "multicam_main"
-    log_file = log_dir / "multicam_main.log"
+  logger_name = "multicam_main"
+  log_file = log_dir / "multicam_main.log"
 
   logger = logging.getLogger(logger_name)
   logger.setLevel(logging.DEBUG)

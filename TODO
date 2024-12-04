@@ -1,7 +1,5 @@
 Debug why the cameras no longer cleanly start new streams after the previous one ends (dead locks after receiving timestamp)
 
-Debug why the server never exits properly
-
 Integrate and test the frame collector
 
 Design and write the API used to connect and receive data from the frame collector for downstream tasks

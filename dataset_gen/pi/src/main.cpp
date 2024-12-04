@@ -285,12 +285,12 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     int64_t ns_until_target = timestamp - current_real_ns;
 
-    //char debug_msg[256];
-    //snprintf(debug_msg, sizeof(debug_msg),
-    //         "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-    //         current_real_ns, timestamp, ns_until_target,
-    //         ns_until_target / 1000000.0);
-    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    char debug_msg[256];
+    snprintf(debug_msg, sizeof(debug_msg),
+             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+             current_real_ns, timestamp, ns_until_target,
+             ns_until_target / 1000000.0);
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
         int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
@@ -301,10 +301,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
         timestamp += ns_elapsed;
         conn->timestamp += ns_elapsed;
 
-        //snprintf(debug_msg, sizeof(debug_msg),
-        //        "Target in past, adjusted by %ld frames to delta: %ld ns",
-        //        frames_elapsed, ns_until_target);
-        //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+        snprintf(debug_msg, sizeof(debug_msg),
+                "Target in past, adjusted by %ld frames to delta: %ld ns",
+                frames_elapsed, ns_until_target);
+        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
     int64_t mono_target_ns = current_mono_ns + ns_until_target;
@@ -317,10 +317,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
 
-    //snprintf(debug_msg, sizeof(debug_msg),
-    //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
-    //         mono_target_ns, current_mono_ns);
-    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    snprintf(debug_msg, sizeof(debug_msg),
+             "Timer set for monotonic timestamp %ld (current mono: %ld)",
+             mono_target_ns, current_mono_ns);
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {
