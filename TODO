@@ -1,4 +1,4 @@
-Debug why the cameras no longer cleanly start new streams after the previous one ends (dead locks after receiving timestamp)
+Debug the unhandled timeout error
 
 Integrate and test the frame collector
 

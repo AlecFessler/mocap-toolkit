@@ -10,7 +10,7 @@ logger = setup_logger()
 
 CAM_CONF_FILE = 'cams.yaml'
 
-async def check_connections(stream_managers, timeout=5):
+async def check_connections(stream_managers, timeout=10):
   """
   Monitor camera connections and raise an error if any cameras
   haven't connected within the timeout period.

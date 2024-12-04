@@ -143,22 +143,20 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
 
   // 8 bytes is our timestamp
   if (size == 8) {
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Receied timestamp, starting stream...");
-    uint64_t network_timestamp;
-    memcpy(&network_timestamp, buf, sizeof(network_timestamp));
-    timestamp = be64toh(network_timestamp);
-    conn->timestamp = timestamp;
-    sem_post(loop_ctl_sem.get());
-    return;
+      uint64_t network_timestamp;
+      memcpy(&network_timestamp, buf, sizeof(network_timestamp));
+      timestamp = be64toh(network_timestamp);
+      conn->timestamp = timestamp;
+      sem_post(loop_ctl_sem.get());
+      return;
   }
 
-  // 4 bytes, "STOP" is our stop signal
   if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
-    logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
-    timestamp = 0;
-    stream_end = 1;
-    sem_post(loop_ctl_sem.get());
-    return;
+      logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
+      timestamp = 0;
+      stream_end = 1;
+      sem_post(loop_ctl_sem.get());
+      return;
   }
 
   logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Unexpected udp message size");
@@ -285,12 +283,12 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     int64_t ns_until_target = timestamp - current_real_ns;
 
-    char debug_msg[256];
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-             current_real_ns, timestamp, ns_until_target,
-             ns_until_target / 1000000.0);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //char debug_msg[256];
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+    //         current_real_ns, timestamp, ns_until_target,
+    //         ns_until_target / 1000000.0);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
         int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
@@ -301,10 +299,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
         timestamp += ns_elapsed;
         conn->timestamp += ns_elapsed;
 
-        snprintf(debug_msg, sizeof(debug_msg),
-                "Target in past, adjusted by %ld frames to delta: %ld ns",
-                frames_elapsed, ns_until_target);
-        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+        //snprintf(debug_msg, sizeof(debug_msg),
+        //        "Target in past, adjusted by %ld frames to delta: %ld ns",
+        //        frames_elapsed, ns_until_target);
+        //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
     int64_t mono_target_ns = current_mono_ns + ns_until_target;
@@ -317,10 +315,10 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
 
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
 
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Timer set for monotonic timestamp %ld (current mono: %ld)",
-             mono_target_ns, current_mono_ns);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    //snprintf(debug_msg, sizeof(debug_msg),
+    //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
+    //         mono_target_ns, current_mono_ns);
+    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {

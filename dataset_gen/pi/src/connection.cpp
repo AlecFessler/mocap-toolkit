@@ -11,6 +11,7 @@
 #include "connection.h"
 #include "logger.h"
 
+static const int MAX_RETRIES = 3;
 static constexpr char FRAME_MARKER[] = "NEWFRAME";
 static constexpr char END_STREAM[] = "EOSTREAM";
 
@@ -159,11 +160,18 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
     size
   );
 
+  int retries = 0;
   size_t total_written = 0;
   while (total_written < pkt_size) {
     if (tcpfd < 0) {
       int ret = conn_tcp();
-      if (ret < 0) return ret;
+      if (ret < 0) {
+        if (retries++ == MAX_RETRIES) {
+          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "No more connection retries");
+          return ret;
+        }
+        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying");
+      }
     }
 
     ssize_t result = write(
@@ -175,11 +183,17 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
     if (result < 0) {
       if (errno == EINTR) continue;
       if (errno == EPIPE || errno == ECONNRESET) {
+        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Connection lost, attempting reconnect");
+        close(tcpfd);
+        tcpfd = -1;
         int ret = conn_tcp();
-        if (ret < 0) return ret;
+        if (ret < 0) {
+          if (retries++ == MAX_RETRIES) return ret;
+          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
+        }
         continue;
       }
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting marker");
+      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame packet");
       return -1;
     }
 
@@ -187,18 +201,22 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
   }
 
   timestamp += frame_duration;
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame");
+  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame packet");
   return 0;
 }
 
 int connection::end_stream() {
   size_t end_stream_size = sizeof(END_STREAM) - 1;
 
+  int retries = 0;
   size_t total_written = 0;
   while (total_written < end_stream_size) {
     if (tcpfd < 0) {
       int ret = conn_tcp();
-      if (ret < 0) return ret;
+      if (ret < 0) {
+        if (retries++ == MAX_RETRIES) return ret;
+        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
+      }
     }
 
     ssize_t result = write(
@@ -210,8 +228,14 @@ int connection::end_stream() {
     if (result < 0) {
       if (errno == EINTR) continue;
       if (errno == EPIPE || errno == ECONNRESET) {
+        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Connection lost, attempting reconnect");
+        close(tcpfd);
+        tcpfd = -1;
         int ret = conn_tcp();
-        if (ret < 0) return ret;
+        if (ret < 0) {
+          if (retries++ == MAX_RETRIES) return ret;
+          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
+        }
         continue;
       }
       logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error sending end stream message to server");
