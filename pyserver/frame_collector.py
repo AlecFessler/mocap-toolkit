@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import List, Dict, Any, Callable, Optional, Set
+from itertools import islice
+from typing import List, Dict, Any, Set, Deque
 
 @dataclass
 class Frame:
@@ -39,7 +41,7 @@ class FrameCollector:
     self.next_index = 0 # Assigns unique index to cameras
     self.camera_indices: Dict[str, int] = {}
 
-    self.frame_sets: List[FrameSet] = []
+    self.frame_sets: Deque[FrameSet] = deque()
     self._add_frame_set()
 
   def mark_camera_complete(self, camera_name: str) -> None:
@@ -76,7 +78,7 @@ class FrameCollector:
         self._add_frame_set()
 
     frame_set = None
-    for fs in self.frame_sets:
+    for fs in reversed(self.frame_sets):
       if fs.timestamp == timestamp:
         frame_set = fs
         break
@@ -113,16 +115,17 @@ class FrameCollector:
         break
 
       if complete_idx > 0:
-        incomplete = self.frame_sets[:complete_idx]
+        incomplete = list(islice(self.frame_sets, complete_idx))
         self.incomplete_sets += len(incomplete)
         for fs in incomplete:
           self.logger.warning(
               f"Disposing incomplete frame set (timestamp: {fs.timestamp}, "
               f"frames: {fs.frames_filled}/{self.total_cameras})"
           )
-        self.frame_sets = self.frame_sets[complete_idx:]
+        for _ in range(complete_idx):
+          self.frame_sets.popleft()
 
-      complete_set = self.frame_sets.pop(0)
+      complete_set = self.frame_sets.popleft()
       self.complete_sets += 1
       self.logger.info(
           f"Processing complete frame set {complete_set.timestamp}. "

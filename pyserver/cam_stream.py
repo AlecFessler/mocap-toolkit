@@ -6,6 +6,8 @@ from frame_collector import FrameCollector
 
 FRAME_MARKER = b'NEWFRAME'
 END_STREAM = b'EOSTREAM'
+BUFFER_SIZE = 32768 # 32KB
+HEADER_SIZE = len(FRAME_MARKER) + 8
 
 class CamStream:
   def __init__(self, camera_config: Dict[str, Any], frame_collector: FrameCollector, logger: logging.Logger):
@@ -16,47 +18,67 @@ class CamStream:
     self.logger = logger
 
   async def parse_stream(self, reader: asyncio.StreamReader) -> None:
-    buffer = b''
+    buffer = bytearray(BUFFER_SIZE)
+    view = memoryview(buffer)
+    current_size = 0
+
     while True:
-      chunk = await asyncio.wait_for(reader.read(32768), timeout=3)  # 32KB
+      chunk = await asyncio.wait_for(
+        reader.read(BUFFER_SIZE - current_size),
+        timeout=3
+      )
       if not chunk:
         raise ConnectionResetError("Camera disconnected")
 
-      buffer += chunk
+      buffer[current_size:current_size + len(chunk)] = chunk
+      current_size += len(chunk)
 
-      while True:
-        frame_pos = buffer.find(FRAME_MARKER)
+      processed = 0
+      while processed < current_size:
+        remaining = view[processed:current_size]
+        frame_pos = remaining.tobytes().find(FRAME_MARKER)
+
         if frame_pos == -1:
           break
 
-        if frame_pos > 0:
-          buffer = buffer[frame_pos:]
-
-        header_size = len(FRAME_MARKER) + 8
-        if len(buffer) < header_size:
+        processed += frame_pos
+        if current_size - processed < HEADER_SIZE:
           break
 
-        timestamp_bytes = buffer[len(FRAME_MARKER):header_size]
-        timestamp = struct.unpack('<Q', timestamp_bytes)[0]
+        timestamp_bytes = view[processed + len(FRAME_MARKER):processed + HEADER_SIZE]
+        timestamp = struct.unpack('<Q', timestamp_bytes.tobytes())[0]
 
-        next_frame_pos = buffer[header_size:].find(FRAME_MARKER)
-        eos_pos = buffer[header_size:].find(END_STREAM)
+        data_start = processed + HEADER_SIZE
+        remaining = view[data_start:current_size]
+        remaining_bytes = remaining.tobytes()
+        next_frame_pos = remaining_bytes.find(FRAME_MARKER)
+        eos_pos = remaining_bytes.find(END_STREAM)
 
         if eos_pos != -1 and (next_frame_pos == -1 or eos_pos < next_frame_pos):
-          frame_data = buffer[header_size:header_size + eos_pos]
-          self.frame_collector.collect_frame(timestamp, self.config['name'], frame_data)
+          frame_data = remaining_bytes[:eos_pos]
+          self.frame_collector.collect_frame(
+            timestamp,
+            self.config['name'],
+            frame_data
+          )
           self.logger.debug(f"Got final frame with timestamp {timestamp} from {self.config['name']}")
-          self.logger.debug(f"Got end of stream signal from {self.config['name']}")
           return
 
         if next_frame_pos == -1:
           break
 
-        frame_data = buffer[header_size:header_size + next_frame_pos]
-        self.frame_collector.collect_frame(timestamp, self.config['name'], frame_data)
-        self.logger.debug(f"Got frame with timestamp {timestamp} from {self.config['name']}")
+        frame_data = remaining_bytes[:next_frame_pos]
+        self.frame_collector.collect_frame(
+          timestamp,
+          self.config['name'],
+          frame_data
+        )
+        processed += HEADER_SIZE + next_frame_pos
 
-        buffer = buffer[header_size + next_frame_pos:]
+      if processed > 0:
+        if current_size > processed:
+          buffer[:current_size - processed] = buffer[processed:current_size]
+        current_size -= processed
 
   async def manage(self) -> None:
     retry_count = 0
