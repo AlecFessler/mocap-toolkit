@@ -89,9 +89,18 @@ async def start_recording(cam_confs):
 async def main():
   parser = argparse.ArgumentParser(description='Manage multi-camera recording')
   parser.add_argument('action', choices=['start', 'stop'], help='Action to perform')
+  parser.add_argument('--camera', type=str, help='Start only this specific camera')
   args = parser.parse_args()
 
   cam_confs = load_camera_config(CAM_CONF_FILE)
+
+  # Filter for single camera if specified
+  if args.camera:
+    cam_confs = [conf for conf in cam_confs if conf['name'] == args.camera]
+    if not cam_confs:
+      logger.error(f"Camera '{args.camera}' not found in config file")
+      return 1
+  logger.info(f"Streaming on single camera: {args.camera}")
 
   if args.action == 'start':
     return await start_recording(cam_confs)
