@@ -2,15 +2,17 @@ import asyncio
 import logging
 import struct
 from typing import Dict, Any
+from frame_collector import FrameCollector
 
 FRAME_MARKER = b'NEWFRAME'
 END_STREAM = b'EOSTREAM'
 
 class CamStream:
-  def __init__(self, camera_config: Dict[str, Any], logger: logging.Logger):
+  def __init__(self, camera_config: Dict[str, Any], frame_collector: FrameCollector, logger: logging.Logger):
     self.config = camera_config
     self.server = None
     self.cam_connected = False
+    self.frame_collector = frame_collector
     self.logger = logger
 
   async def parse_stream(self, reader: asyncio.StreamReader) -> None:
@@ -42,6 +44,7 @@ class CamStream:
 
         if eos_pos != -1 and (next_frame_pos == -1 or eos_pos < next_frame_pos):
           frame_data = buffer[header_size:header_size + eos_pos]
+          self.frame_collector.collect_frame(timestamp, self.config['name'], frame_data)
           self.logger.debug(f"Got final frame with timestamp {timestamp} from {self.config['name']}")
           self.logger.debug(f"Got end of stream signal from {self.config['name']}")
           return
@@ -50,6 +53,7 @@ class CamStream:
           break
 
         frame_data = buffer[header_size:header_size + next_frame_pos]
+        self.frame_collector.collect_frame(timestamp, self.config['name'], frame_data)
         self.logger.debug(f"Got frame with timestamp {timestamp} from {self.config['name']}")
 
         buffer = buffer[header_size + next_frame_pos:]
@@ -88,10 +92,12 @@ class CamStream:
       self.logger.debug(f"Stream completed for {self.config['name']}")
       if self.server:
         self.server.close()
+      self.frame_collector.mark_camera_complete(self.config['name'])
     except asyncio.TimeoutError:
       self.logger.warning(f"Camera {self.config['name']} timed out - no data received for 3s")
       if self.server:
         self.server.close()
+      self.frame_collector.mark_camera_complete(self.config['name'])
     finally:
       writer.close()
       await writer.wait_closed()

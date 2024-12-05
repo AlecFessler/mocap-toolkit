@@ -29,16 +29,13 @@ connection::connection()
    */
   tcpfd(-1),
   udpfd(-1),
-  timestamp(0),
-  frame_duration(0),
   server_ip("UNSET_SERVER"),
   tcp_port("UNSET_PORT"),
   udp_port("UNSET_PORT") {}
 
 
 connection::connection(
-  config& config,
-  int64_t frame_duration
+  config& config
 ) noexcept :
   /**
    * Creates a connection object with specific network settings.
@@ -55,8 +52,6 @@ connection::connection(
    */
   tcpfd(-1),
   udpfd(-1),
-  timestamp(0),
-  frame_duration(frame_duration),
   server_ip(config.server_ip),
   tcp_port(config.tcp_port),
   udp_port(config.udp_port) {}
@@ -141,6 +136,8 @@ int connection::conn_tcp() {
 
 int connection::stream_pkt(const uint8_t* data, size_t size) {
   size_t marker_size = sizeof(FRAME_MARKER) - 1; // exclude null terminator
+  uint64_t timestamp = frame_timestamps.front();
+  frame_timestamps.pop();
   uint64_t pkt_size = size + marker_size + sizeof(timestamp);
   uint8_t pkt[pkt_size];
 
@@ -200,7 +197,6 @@ int connection::stream_pkt(const uint8_t* data, size_t size) {
     total_written += result;
   }
 
-  timestamp += frame_duration;
   logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame packet");
   return 0;
 }

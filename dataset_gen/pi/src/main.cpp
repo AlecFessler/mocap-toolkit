@@ -26,9 +26,9 @@
 
 extern char** environ;
 
-constexpr int64_t ns_per_s = 1'000'000'000;
+constexpr uint64_t ns_per_s = 1'000'000'000;
 
-volatile static int64_t timestamp = 0;
+volatile static uint64_t timestamp = 0;
 volatile static sig_atomic_t running = 1;
 volatile static sig_atomic_t stream_end = 0;
 volatile static sig_atomic_t frame_rdy = 0;
@@ -44,9 +44,9 @@ inline int init_timer(timer_t* timerid);
 inline int init_signals();
 inline int init_sigio(int fd);
 inline void arm_timer(
-  int64_t timestamp,
   timer_t timerid,
-  int64_t frame_duration
+  uint64_t frame_duration,
+  uint64_t& frame_counter
 );
 inline void flush_encoder(
   videnc& encoder,
@@ -58,7 +58,8 @@ int main() {
     logger = std::make_unique<logger_t>("logs.txt");
     config config = parse_config("config.txt");
 
-    int64_t frame_duration = ns_per_s / config.fps;
+    uint64_t frame_counter = 0;
+    uint64_t frame_duration = ns_per_s / config.fps;
     timer_t timerid;
 
     loop_ctl_sem = init_semaphore();
@@ -68,7 +69,7 @@ int main() {
       *loop_ctl_sem.get(),
       frame_rdy
     );
-    conn = std::make_unique<connection>(config, frame_duration);
+    conn = std::make_unique<connection>(config);
     auto encoder = std::make_unique<videnc>(config);
 
     int ret;
@@ -80,11 +81,10 @@ int main() {
 
     while (running) {
       if (timestamp) {
-        timestamp += frame_duration;
         arm_timer(
-          timestamp,
           timerid,
-          frame_duration
+          frame_duration,
+          ++frame_counter
         );
       }
 
@@ -106,7 +106,7 @@ int main() {
         stream_end = 0;
         flush_encoder(*encoder, *conn);
         conn->end_stream();
-        conn->timestamp = 0;
+        frame_counter = 0;
         encoder = std::make_unique<videnc>(config);
       }
     }
@@ -146,7 +146,6 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
       uint64_t network_timestamp;
       memcpy(&network_timestamp, buf, sizeof(network_timestamp));
       timestamp = be64toh(network_timestamp);
-      conn->timestamp = timestamp;
       sem_post(loop_ctl_sem.get());
       return;
   }
@@ -238,7 +237,7 @@ inline int init_timer(timer_t* timerid) {
   return 0;
 }
 
-inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration) {
+inline void arm_timer(timer_t timerid, uint64_t frame_duration, uint64_t& frame_counter) {
     /**
      * Arms the timer to trigger frame captures at precise timestamps
      *
@@ -278,34 +277,36 @@ inline void arm_timer(int64_t timestamp, timer_t timerid, int64_t frame_duration
     clock_gettime(CLOCK_REALTIME, &real_time);
     clock_gettime(CLOCK_MONOTONIC, &mono_time);
 
-    int64_t current_real_ns = (int64_t)real_time.tv_sec * ns_per_s + real_time.tv_nsec;
-    int64_t current_mono_ns = (int64_t)mono_time.tv_sec * ns_per_s + mono_time.tv_nsec;
+    uint64_t current_real_ns = (uint64_t)real_time.tv_sec * ns_per_s + real_time.tv_nsec;
+    uint64_t current_mono_ns = (uint64_t)mono_time.tv_sec * ns_per_s + mono_time.tv_nsec;
 
-    int64_t ns_until_target = timestamp - current_real_ns;
+    // cast frame_duration to prevent integer overflow at 129th frame
+    uint64_t target = timestamp + frame_duration * frame_counter;
+    uint64_t ns_until_target = target - current_real_ns;
 
-    //char debug_msg[256];
-    //snprintf(debug_msg, sizeof(debug_msg),
-    //         "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-    //         current_real_ns, timestamp, ns_until_target,
-    //         ns_until_target / 1000000.0);
-    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+    char debug_msg[256];
+    snprintf(debug_msg, sizeof(debug_msg),
+             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
+             current_real_ns, target, ns_until_target,
+             ns_until_target / 1000000.0);
+    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
-        int64_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
-        int64_t ns_elapsed = frames_elapsed * frame_duration;
-        ns_until_target += ns_elapsed;
-        // the adjustment only happens a single time ever
-        // and only if the initial timestamp is received late
-        timestamp += ns_elapsed;
-        conn->timestamp += ns_elapsed;
+        uint32_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
+        uint64_t ns_elapsed = frames_elapsed * frame_duration;
+        ns_until_target += ns_elapsed; // adjust ns_until_target for setting this current timer
+        frame_counter += frames_elapsed; // adjust counter so we're caught up for future frames
+        target += frame_duration * frames_elapsed; // adjust the target for the connections timestamp queue
 
-        //snprintf(debug_msg, sizeof(debug_msg),
-        //        "Target in past, adjusted by %ld frames to delta: %ld ns",
-        //        frames_elapsed, ns_until_target);
-        //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
+        snprintf(debug_msg, sizeof(debug_msg),
+                "Target in past, adjusted by %d frames, new frame count: %ld ns",
+                frames_elapsed, frame_counter);
+        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
-    int64_t mono_target_ns = current_mono_ns + ns_until_target;
+    conn->frame_timestamps.push(target);
+
+    uint64_t mono_target_ns = current_mono_ns + ns_until_target;
 
     struct itimerspec its;
     its.it_value.tv_sec = mono_target_ns / ns_per_s;

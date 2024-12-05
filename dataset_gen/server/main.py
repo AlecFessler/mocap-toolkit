@@ -3,6 +3,7 @@ import asyncio
 import logging
 from cam_stream import CamStream
 from config import load_camera_config
+from frame_collector import FrameCollector
 from logging_config import setup_logger
 from network import broadcast_stop, broadcast_timestamp
 
@@ -10,7 +11,7 @@ logger = setup_logger()
 
 CAM_CONF_FILE = 'cams.yaml'
 
-async def check_connections(stream_managers, timeout=10):
+async def check_connections(stream_managers, timeout=5):
   """
   Monitor camera connections and raise an error if any cameras
   haven't connected within the timeout period.
@@ -32,12 +33,19 @@ async def check_connections(stream_managers, timeout=10):
 async def start_recording(cam_confs):
   """Start recording process"""
   try:
-    stream_managers = [
-      CamStream(conf, logger)
-      for conf in cam_confs
-    ]
 
     timestamp = broadcast_timestamp(cam_confs, logger)
+
+    frame_collector = FrameCollector(
+      start_timestamp=timestamp,
+      camera_configs=cam_confs,
+      logger=logger
+    )
+
+    stream_managers = [
+      CamStream(conf, frame_collector, logger)
+      for conf in cam_confs
+    ]
 
     # Create tasks for both streaming and connection checking
     stream_tasks = [
@@ -47,10 +55,13 @@ async def start_recording(cam_confs):
     connection_check = asyncio.create_task(
       check_connections(stream_managers)
     )
+    collector_task = asyncio.create_task(
+      frame_collector.monitor_frames()
+    )
 
     # Wait for either all streams to complete or the connection check to fail
     done, pending = await asyncio.wait(
-      [*stream_tasks, connection_check],
+      [*stream_tasks, connection_check, collector_task],
       return_when=asyncio.FIRST_EXCEPTION
     )
 
