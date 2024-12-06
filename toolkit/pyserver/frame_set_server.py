@@ -4,8 +4,6 @@ import struct
 import os
 from typing import List, Optional
 
-FRAME_DELIMITER = b'NEWFRAME'
-
 class FrameSetServer:
   def __init__(self, socket_path: str, logger: logging.Logger):
     self.socket_path = socket_path
@@ -69,13 +67,11 @@ class FrameSetServer:
       return
 
     try:
-      self._writer.write(FRAME_DELIMITER)
       self._writer.write(struct.pack('>I', len(frames)))
 
       for camera_id, frame_bytes in frames:
         self._writer.write(struct.pack('>II', camera_id, len(frame_bytes)))
         self._writer.write(frame_bytes)
-        self._writer.write(FRAME_DELIMITER)
 
       await self._writer.drain()
 

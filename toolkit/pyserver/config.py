@@ -23,7 +23,7 @@ def load_camera_config(config_path: str) -> List[Dict[str, Any]]:
       if not isinstance(config, dict) or 'cameras' not in config:
         raise KeyError('Config file must contain a "cameras" list')
 
-      required_fields = {'name', 'eth_ip', 'wifi_ip', 'tcp_port', 'udp_port'}
+      required_fields = {'name', 'id', 'eth_ip', 'wifi_ip', 'tcp_port', 'udp_port'}
       for camera in config['cameras']:
         missing_fields = required_fields - set(camera.keys())
         if missing_fields:

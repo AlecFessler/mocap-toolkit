@@ -1,15 +1,18 @@
 import argparse
 import asyncio
 import logging
+import os
+import sys
 from cam_stream import CamStream
 from config import load_camera_config
 from frame_collector import FrameCollector
+from frame_set_server import FrameSetServer
 from logging_config import setup_logger
 from network import broadcast_stop, broadcast_timestamp
 
 logger = setup_logger()
 
-CAM_CONF_FILE = 'cams.yaml'
+CAM_CONF_FILE = '../cams.yaml'
 
 async def check_connections(stream_managers, timeout=5):
   """
@@ -36,9 +39,15 @@ async def start_recording(cam_confs):
 
     timestamp = broadcast_timestamp(cam_confs, logger)
 
+    frame_set_server = FrameSetServer(
+        socket_path='/tmp/frame_stream.sock',
+        logger=logger
+    )
+
     frame_collector = FrameCollector(
       start_timestamp=timestamp,
       camera_configs=cam_confs,
+      frame_set_server=frame_set_server,
       logger=logger
     )
 
@@ -58,10 +67,18 @@ async def start_recording(cam_confs):
     collector_task = asyncio.create_task(
       frame_collector.monitor_frames()
     )
+    server_task = asyncio.create_task(
+      frame_set_server.manage()
+    )
 
     # Wait for either all streams to complete or the connection check to fail
     done, pending = await asyncio.wait(
-      [*stream_tasks, connection_check, collector_task],
+      [
+        *stream_tasks,
+        connection_check,
+        collector_task,
+        server_task
+      ],
       return_when=asyncio.FIRST_EXCEPTION
     )
 
@@ -100,7 +117,7 @@ async def main():
     if not cam_confs:
       logger.error(f"Camera '{args.camera}' not found in config file")
       return 1
-  logger.info(f"Streaming on single camera: {args.camera}")
+    logger.info(f"Streaming on single camera: {args.camera}")
 
   if args.action == 'start':
     return await start_recording(cam_confs)

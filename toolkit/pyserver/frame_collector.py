@@ -3,6 +3,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
+from frame_set_server import FrameSetServer
 from itertools import islice
 from typing import List, Dict, Any, Set, Deque
 
@@ -23,6 +24,7 @@ class FrameCollector:
       self,
       start_timestamp: int,
       camera_configs: List[Dict[str, Any]],
+      frame_set_server: FrameSetServer,
       logger: logging.Logger,
       frame_duration: int = 33_333_333,  # 33.33ms in ns
   ):
@@ -40,9 +42,14 @@ class FrameCollector:
 
     self.next_index = 0 # Assigns unique index to cameras
     self.camera_indices: Dict[str, int] = {}
+    self.camera_ids: Dict[str, int] = {}
+    for cam in camera_configs:
+      self.camera_ids[cam['name']] = cam['id']
 
     self.frame_sets: Deque[FrameSet] = deque()
     self._add_frame_set()
+
+    self.frame_set_server = frame_set_server
 
   def mark_camera_complete(self, camera_name: str) -> None:
     self.completed_cameras.add(camera_name)
@@ -99,7 +106,7 @@ class FrameCollector:
         f"Set now has {frame_set.frames_filled}/{self.total_cameras} frames"
     )
 
-  def _process_complete_sets(self) -> None:
+  async def _process_complete_sets(self) -> None:
     while self.frame_sets:
       frame_set = self.frame_sets[0]
       found_complete = False
@@ -132,14 +139,19 @@ class FrameCollector:
           f"Stats: {self.complete_sets} complete, {self.incomplete_sets} incomplete"
       )
 
+      pkt = [(self.camera_ids[frame.camera_name], frame.data) for frame in complete_set.frames]
+      await self.frame_set_server.send_frame_set(pkt)
+
   async def monitor_frames(self) -> None:
     # wait for all cameras to be marked done
     while len(self.completed_cameras) < self.total_cameras:
-      self._process_complete_sets()
+      await self._process_complete_sets()
       await asyncio.sleep(self.frame_duration / 1_000_000_000)
 
     # process any remaining sets
-    self._process_complete_sets()
+    await self._process_complete_sets()
+
+    self.frame_set_server.stop()
 
     completion_rate = (
         self.complete_sets / (self.complete_sets + self.incomplete_sets)
