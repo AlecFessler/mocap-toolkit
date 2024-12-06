@@ -1,3 +1,22 @@
+Remove the unneeded async with context manager above wait_closed in cam_stream manage()
+
+Remove unused retry count from stream_cam manage()
+
+Add sleep(0) after each frame parsed to rotate event loop better
+
+Get rid of frame set server logic from pyserver main and frame collector. 
+This makes process complete sets no longer async.
+This also gets rid of the cam names to ids map.
+
+Consider making collect frame also handle complete frame sets to get rid of monitor task
+
+Refactor toolkit into python package:
+1. structure directory as toolkit/common and toolkit/tools/(invidual tool directories)
+2. create pyproject.toml in toolkit
+3. implement function in common/ to setup stream session and return asyncio tasks and frame collector.
+4. install package with pip install -e .
+5. can now import shared defs without relative imports
+
 Write stereo calibration tool
 
 Perform camera calibration
