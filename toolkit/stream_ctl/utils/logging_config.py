@@ -3,17 +3,16 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Any
 
-def setup_logger():
+def setup_logger(log_dir: str, log_file: str):
   """
   Configure root logger with rotating file handler.
   """
-  log_dir = Path("/var/log/stereo_calibration")
+  log_dir = Path(log_dir)
   log_dir.mkdir(exist_ok=True)
 
-  logger_name = "stereo_calibration"
-  log_file = log_dir / "stereo_calibration.log"
+  log_file = log_dir / log_file
 
-  logger = logging.getLogger(logger_name)
+  logger = logging.getLogger(__name__)
   logger.setLevel(logging.DEBUG)
 
   handler = RotatingFileHandler(

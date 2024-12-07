@@ -3,7 +3,6 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from frame_set_server import FrameSetServer
 from itertools import islice
 from typing import List, Dict, Any, Set, Deque
 
@@ -15,7 +14,6 @@ class Frame:
 @dataclass
 class FrameSet:
   timestamp: int  # Nanoseconds since epoch
-  total_cameras: int
   frames_filled: int
   frames: List[Frame]  # Fixed size list, indexed by camera position
 
@@ -24,7 +22,6 @@ class FrameCollector:
       self,
       start_timestamp: int,
       camera_configs: List[Dict[str, Any]],
-      frame_set_server: FrameSetServer,
       logger: logging.Logger,
       frame_duration: int = 33_333_333,  # 33.33ms in ns
   ):
@@ -40,23 +37,14 @@ class FrameCollector:
     self.complete_sets = 0
     self.incomplete_sets = 0
 
-    self.next_index = 0 # Assigns unique index to cameras
     self.camera_indices: Dict[str, int] = {}
-    self.camera_ids: Dict[str, int] = {}
-    for cam in camera_configs:
-      self.camera_ids[cam['name']] = cam['id']
+    for index, cam in enumerate(camera_configs):
+      self.camera_indices[cam['name']] = index
 
     self.frame_sets: Deque[FrameSet] = deque()
     self._add_frame_set()
 
-    self.frame_set_server = frame_set_server
-
-  def mark_camera_complete(self, camera_name: str) -> None:
-    self.completed_cameras.add(camera_name)
-    self.logger.info(
-        f"Camera {camera_name} marked complete. "
-        f"{len(self.completed_cameras)}/{self.total_cameras} cameras complete"
-    )
+    self.frame_queue = asyncio.Queue()
 
   def _add_frame_set(self) -> None:
     timestamp = (self.start_timestamp + self.frame_count * self.frame_duration)
@@ -65,19 +53,13 @@ class FrameCollector:
     frames = [Frame() for _ in range(self.total_cameras)]
     frame_set = FrameSet(
         timestamp=timestamp,
-        total_cameras=self.total_cameras,
         frames_filled=0,
         frames=frames
     )
     self.frame_sets.append(frame_set)
     self.logger.debug(f"Created new frame set for timestamp {timestamp}")
 
-  def collect_frame(self, timestamp: int, camera_name: str, frame_data: bytes) -> None:
-    if camera_name not in self.camera_indices:
-      self.camera_indices[camera_name] = self.next_index
-      self.next_index += 1
-      self.logger.info(f"Assigned index {self.camera_indices[camera_name]} to camera {camera_name}")
-
+  async def collect_frame(self, timestamp: int, camera_name: str, frame_data: bytes) -> None:
     camera_idx = self.camera_indices[camera_name]
 
     if not self.frame_sets or timestamp > self.frame_sets[-1].timestamp:
@@ -105,6 +87,9 @@ class FrameCollector:
         f"Collected frame from {camera_name} for timestamp {timestamp}. "
         f"Set now has {frame_set.frames_filled}/{self.total_cameras} frames"
     )
+
+    if frame_set.frames_filled == self.total_cameras:
+      await self._process_complete_sets()
 
   async def _process_complete_sets(self) -> None:
     while self.frame_sets:
@@ -139,28 +124,4 @@ class FrameCollector:
           f"Stats: {self.complete_sets} complete, {self.incomplete_sets} incomplete"
       )
 
-      pkt = [(self.camera_ids[frame.camera_name], frame.data) for frame in complete_set.frames]
-      await self.frame_set_server.send_frame_set(pkt)
-
-  async def monitor_frames(self) -> None:
-    # wait for all cameras to be marked done
-    while len(self.completed_cameras) < self.total_cameras:
-      await self._process_complete_sets()
-      await asyncio.sleep(self.frame_duration / 1_000_000_000)
-
-    # process any remaining sets
-    await self._process_complete_sets()
-
-    self.frame_set_server.stop()
-
-    completion_rate = (
-        self.complete_sets / (self.complete_sets + self.incomplete_sets)
-        if self.complete_sets + self.incomplete_sets > 0
-        else 0
-    )
-    self.logger.info(
-        "Frame collector exiting. Final statistics:\n"
-        f"Complete sets: {self.complete_sets}\n"
-        f"Incomplete sets: {self.incomplete_sets}\n"
-        f"Completion rate: {completion_rate:.2%}"
-    )
+      await self.frame_queue.put(complete_set)
