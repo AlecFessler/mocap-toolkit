@@ -1,6 +1,5 @@
 Rewrite frame collection server in C
 - one thread per stream
-- double semaphore sync
 - one slightly oversized buffer per thread
 - cas increment atomic counter to determine which thread was the last, to only have one post the main loops semaphore
 - change stream protocol {timestamp: 8 bytes, size: 4 bytes, frame: size bytes} for easy stream parsing server side
