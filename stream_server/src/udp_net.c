@@ -69,7 +69,7 @@ int broadcast_msg(cam_conf* confs, int confs_size, const char* msg, size_t msg_s
       );
       log(ERROR, logstr);
       ret = -errno;
-      goto cleanup;
+      break;
 
     } else {
       snprintf(
@@ -83,10 +83,6 @@ int broadcast_msg(cam_conf* confs, int confs_size, const char* msg, size_t msg_s
   }
 
   log(INFO, "Broadcast msg to all cameras successfully");
-
-  cleanup:
   close(sockfd);
-  sockfd = -1;
-
   return ret;
 }
