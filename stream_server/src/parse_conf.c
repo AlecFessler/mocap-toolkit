@@ -14,7 +14,7 @@
 
 static FILE* infile = NULL;
 
-int8_t count_cameras(const char* fpath) {
+int count_cameras(const char* fpath) {
   /**
    * Counts the instances of 'rpicam' substring appearing in the file
    *
@@ -26,7 +26,7 @@ int8_t count_cameras(const char* fpath) {
    * Returns:
    * - int8_t: either a negative error code, or positive count of cameras
    */
-  int8_t ret = 0;
+  int ret = 0;
   char logstr[128];
 
   infile = fopen(fpath, "r");
@@ -52,7 +52,7 @@ int8_t count_cameras(const char* fpath) {
   }
   yaml_parser_set_input_file(&parser, infile);
 
-  int8_t count = 0;
+  int count = 0;
   while (true) {
     if (!yaml_parser_parse(&parser, &event)) {
       log(ERROR, "Error parsing yaml file");
@@ -140,7 +140,7 @@ static const struct field_map fields[] = {
   {"udp_port", offsetof(cam_conf, udp_port), parse_uint16},
 };
 
-int8_t parse_conf(cam_conf* confs, int8_t count) {
+int parse_conf(cam_conf* confs, int count) {
   /**
    * Parses the yaml file and populates the array of structs
    *
@@ -149,12 +149,12 @@ int8_t parse_conf(cam_conf* confs, int8_t count) {
    *
    * Parameters:
    * - cam_conf* confs: an array of cam_conf structs
-   * - int8_t count: the number of cam confs in the array
+   * - int count: the number of cam confs in the array
    *
    * Returns:
-   * - int8_t: either a negative error code, or 0 on success
+   * - int: either a negative error code, or 0 on success
    */
-  int8_t ret = 0;
+  int ret = 0;
   char logstr[128];
 
   if (!infile) {
@@ -173,9 +173,9 @@ int8_t parse_conf(cam_conf* confs, int8_t count) {
   }
   yaml_parser_set_input_file(&parser, infile);
 
-  int8_t confs_parsed = 0;
-  size_t fields_parsed = 0;
-  const size_t fields_total = sizeof(fields)/sizeof(fields[0]);
+  int confs_parsed = 0;
+  int fields_parsed = 0;
+  const int fields_total = sizeof(fields)/sizeof(fields[0]);
 
   while (confs_parsed < count) {
 
@@ -208,7 +208,7 @@ int8_t parse_conf(cam_conf* confs, int8_t count) {
 
     #define pstr (char*)event.data.scalar.value
 
-    for (size_t i = 0; i < fields_total; i++) {
+    for (int i = 0; i < fields_total; i++) {
       // check if we have a key
       if (strcmp(pstr, fields[i].name) != 0) {
         continue;

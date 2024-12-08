@@ -145,7 +145,7 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   if (size == 8) {
       uint64_t network_timestamp;
       memcpy(&network_timestamp, buf, sizeof(network_timestamp));
-      timestamp = be64toh(network_timestamp);
+      timestamp = network_timestamp;
       sem_post(loop_ctl_sem.get());
       return;
   }

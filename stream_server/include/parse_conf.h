@@ -15,7 +15,7 @@ typedef struct cam_conf {
   char name[CAM_NAME_LEN]; // expected name format rpicamXX\0 where XX is a counter from 00-99
 } cam_conf;
 
-int8_t count_cameras(const char* fpath);
-int8_t parse_conf(cam_conf* confs, int8_t count);
+int count_cameras(const char* fpath);
+int parse_conf(cam_conf* confs, int count);
 
 #endif

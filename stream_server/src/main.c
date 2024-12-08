@@ -2,9 +2,15 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #include "parse_conf.h"
 #include "logging.h"
+#include "udp_net.h"
+
+#define TIMESTAMP_DELAY 3 // seconds
+
+
 
 int main() {
   int ret = 0;
@@ -17,7 +23,7 @@ int main() {
   }
 
   char* cams_conf_path = "/etc/mocap-toolkit/cams.yaml";
-  int8_t cam_count = count_cameras(cams_conf_path);
+  int cam_count = count_cameras(cams_conf_path);
   if (cam_count <= 0) {
     snprintf(
       logstr,
@@ -45,5 +51,19 @@ int main() {
     return ret;
   }
 
+  // broadcast timestamp
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
+  const char* ts_msg = (char*)&timestamp;
+  broadcast_msg(confs, cam_count, ts_msg, sizeof(timestamp))
+
+  // start stream mananger threads
+
+  // broadcast stop
+  const char* stop_msg = "STOP";
+  broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
+
+  cleanup_logging();
   return ret;
 }

@@ -24,3 +24,13 @@ Have an atomic int in main, and a semaphore.
 6. This process is repeat until all timestamps match, at which point the frame set can be shared with a consumer process through some IPC mechanism, maybe mmap.
 
 7. After consumer receives frame set, main loop can reset all flags simultaneously with a memset.
+__________________________________________________________________
+
+Next steps:
+
+1. Create a basic thread routine to test the core functionality
+2. Pin the thread to the core
+3. Define the struct to pass data (logger and anything else main shares) to threads
+4. Update stream protocol in picam, then write stream parsing logic in here (just read timestamp, then size, then recv_from for size)
+5. Write libav decoder package for threads to use
+6. Figure out how threads share decoded frammes with main

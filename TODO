@@ -1,21 +1,4 @@
 Rewrite frame collection server in C
-- one thread per stream
-- one slightly oversized buffer per thread
-- cas increment atomic counter to determine which thread was the last, to only have one post the main loops semaphore
-- change stream protocol {timestamp: 8 bytes, size: 4 bytes, frame: size bytes} for easy stream parsing server side
-- need to give longer duration for all cameras to hit initial frame capture
-- handle late starters by cycling through the loop, disposing of incomplete sets, until the first complete, may need some sort of thread local semaphore/signal for targeted cycle to specific timestamp
-- pin 1 thread per core, same ccd (try 3dv cache and regular, benchmark both)
-- use libav with nvdec to handle buffering for us like on recording/streaming software
-- main loop collects timestamp aligned frames from the decoder, use a queue to align them, this can be how we cycle for early starters
-
-This over the python server has:
-- True parallelization
-- Simpler control flow
-- C is fast, Python is not fast
-- No real stream parsing logic, just read size
-- Decoder acts as a queue for us, we can reuse a single buffer like the cameras do
-- Is otherwise a 1:1 mapping in terms of functionality and likely even file structure
 
 Write lens calibration tool
 
