@@ -1,16 +1,16 @@
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
 
-#include "parse_conf.h"
 #include "logging.h"
+#include "parse_conf.h"
+#include "stream_mgr.h"
 #include "udp_net.h"
 
 #define TIMESTAMP_DELAY 3 // seconds
-
-
 
 int main() {
   int ret = 0;
@@ -55,14 +55,30 @@ int main() {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
   uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
-  const char* ts_msg = (char*)&timestamp;
-  broadcast_msg(confs, cam_count, ts_msg, sizeof(timestamp))
+  //broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp))
 
   // start stream mananger threads
+  pthread_t threads[cam_count];
+  for (int i = 0; i < cam_count; i++) {
+    if ((ret = pthread_create(
+      &threads[i],
+      NULL,
+      stream_mgr,
+      (void*)"Thread msg"
+    ))) {
+      log(ERROR, "Error spawning thread");
+      cleanup_logging();
+      return ret;
+    }
+  }
 
   // broadcast stop
   const char* stop_msg = "STOP";
-  broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
+  //broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
+
+  for (int i = 0; i < cam_count; i++) {
+    pthread_join(threads[i], NULL);
+  }
 
   cleanup_logging();
   return ret;

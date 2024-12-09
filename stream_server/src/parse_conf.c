@@ -24,7 +24,7 @@ int count_cameras(const char* fpath) {
    * - const char* fpath: the file path of the camera conf
    *
    * Returns:
-   * - int8_t: either a negative error code, or positive count of cameras
+   * - int: either a negative error code, or positive count of cameras
    */
   int ret = 0;
   char logstr[128];

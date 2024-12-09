@@ -1,4 +1,4 @@
-One thread per camera stream, thread affinity to ccd0 cores for l3
+jne thread per camera stream, thread affinity to ccd0 cores for l3
 
 Single oversized buffer per thread
 
@@ -28,9 +28,10 @@ __________________________________________________________________
 
 Next steps:
 
-1. Create a basic thread routine to test the core functionality
-2. Pin the thread to the core
-3. Define the struct to pass data (logger and anything else main shares) to threads
-4. Update stream protocol in picam, then write stream parsing logic in here (just read timestamp, then size, then recv_from for size)
-5. Write libav decoder package for threads to use
-6. Figure out how threads share decoded frammes with main
+1. Create logic for udp broadcast of start and stop
+2. Create a basic thread routine to test the core functionality
+3. Pin the thread to the core
+4. Define the struct to pass data (logger and anything else main shares) to threads
+5. Update stream protocol in picam, then write stream parsing logic in here (just read timestamp, then size, then recv_from for size)
+6. Write libav decoder package for threads to use
+7. Figure out how threads share decoded frames with main
