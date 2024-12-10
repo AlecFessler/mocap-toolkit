@@ -8,7 +8,7 @@
 
 #include "parse_conf.h"
 
-#define ENCODED_FRAME_BUF_SIZE 3200 // 3.2kb
+#define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
 #define DECODED_FRAME_BUF_SIZE 2764800 // 1280 * 720 * 3 (720p RGB24)
 
 typedef struct thread_ctx {

@@ -7,11 +7,13 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "queue.h"
 #include "logging.h"
 #include "network.h"
 #include "stream_mgr.h"
 
 void* stream_mgr(void* ptr) {
+  int ret = 0;
   char logstr[128];
 
   struct thread_ctx* ctx = (struct thread_ctx*)ptr;
@@ -21,7 +23,21 @@ void* stream_mgr(void* ptr) {
     goto cleanup;
   }
 
-  pin_to_core(ctx->core);
+  ret = pin_to_core(ctx->core);
+  if (ret) {
+    goto cleanup;
+  }
+
+  queue timestamp_queue;
+  ret = init_queue(
+    &timestamp_queue,
+    sizeof(uint64_t),
+    32 // initial capacity
+  );
+  if (ret) {
+    log(ERROR, "Failed to allocate buffer for queue");
+    goto cleanup;
+  }
 
   int sockfd = setup_stream(ctx->conf);
   if (sockfd < 0) {
@@ -55,6 +71,12 @@ void* stream_mgr(void* ptr) {
 
     if (memcmp(&timestamp, "EOSTREAM", 8) == 0) {
       log(INFO, "Received end of stream signal");
+      break;
+    }
+
+    ret = enqueue(&timestamp_queue, (void*)&timestamp);
+    if (ret) {
+    log(ERROR, "Failed to allocate buffer for queue resize");
       break;
     }
 
@@ -118,16 +140,33 @@ void* stream_mgr(void* ptr) {
     log(INFO, logstr);
   }
 
+  // dequeue timestamps for testing
+  uint64_t ts = 0;
+  while (!dequeue(&timestamp_queue, (void*)&ts)) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Dequeued timestamp from cam %s with timestamp %lu",
+      ctx->conf->name,
+      ts
+    );
+    log(INFO, logstr);
+  }
+
 cleanup:
   if (enc_frame_buf) {
     free(enc_frame_buf);
   }
+
+  cleanup_queue(&timestamp_queue);
+
   if (sockfd >= 0) {
     close(sockfd);
   }
   if (clientfd >= 0) {
     close(clientfd);
   }
+
   return NULL;
 }
 
