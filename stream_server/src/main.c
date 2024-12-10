@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -59,11 +60,27 @@ int main() {
     return ret;
   }
 
-  // pin self to cam_count % 8 core (threads get 0 through cam_count % 8 to stay on ccd0)
-  ret = pin_to_core(cam_count % 8);
-  if (ret < 0) {
-    cleanup_logging();
-    return ret;
+  // pin to cam_count % 8 to stay on ccd0 for 3dv cache with threads
+  // but not be on the same core as any threads until there are 8+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cam_count % 8, &cpuset);
+
+  pid_t pid = getpid();
+  ret = sched_setaffinity(
+    pid,
+    sizeof(cpu_set_t),
+    &cpuset
+  );
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error pinning process: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    return -errno;
   }
 
   // initialize data shared between main and spawned threads
@@ -95,6 +112,7 @@ int main() {
   // spawn threads
   struct thread_ctx ctxs[cam_count];
   pthread_t threads[cam_count];
+
   for (int i = 0; i < cam_count; i++) {
     ctxs[i].loop_ctl_sem = &loop_ctl_sem;
     ctxs[i].frames_filled = &frames_filled;
@@ -128,7 +146,7 @@ int main() {
   uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
   broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp));
 
-  sleep(5);
+  sleep(5); // just for development and debugging
 
   // broadcast stop
   const char* stop_msg = "STOP";

@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <sched.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -13,75 +15,87 @@ void* stream_mgr(void* ptr) {
   char logstr[128];
 
   struct thread_ctx* ctx = (struct thread_ctx*)ptr;
-  uint8_t enc_frame_buf[ENCODED_FRAME_BUF_SIZE];
+  uint8_t* enc_frame_buf = malloc(ENCODED_FRAME_BUF_SIZE);
+  if (!enc_frame_buf) {
+    log(ERROR, "Failed to allocate encoded frame buffer in a thread");
+    goto cleanup;
+  }
 
   pin_to_core(ctx->core);
 
   int sockfd = setup_stream(ctx->conf);
   if (sockfd < 0) {
-    return NULL;
+    goto cleanup;
   }
 
   int clientfd = accept_conn(sockfd);
+  if (clientfd < 0) {
+    goto cleanup;
+  }
 
-  struct __attribute__((packed)) header {
-    uint64_t timestamp;
-    uint32_t size;
-  };
-  struct header hdr;
-
-  ssize_t pkt_size = 0;
-  do {
-    // reset header
-    memset(&hdr, 0, sizeof(hdr));
-
-    // receive header
-    pkt_size = recv_from_stream(
+  while (true) {
+    uint64_t timestamp = 0;
+    ssize_t pkt_size = recv_from_stream(
       clientfd,
-      (char*)&hdr,
-      sizeof(hdr)
+      (char*)&timestamp,
+      sizeof(timestamp)
     );
 
-    // validate packet size
-    if (pkt_size != sizeof(hdr)) {
+    if (pkt_size != sizeof(timestamp)) {
       snprintf(
         logstr,
         sizeof(logstr),
-        "Received unexpected header size with %zd bytes from cam %s",
+        "Received unexpected timestamp size with %zd bytes from cam %s",
         pkt_size,
         ctx->conf->name
       );
       log(ERROR, logstr);
+      break;
     }
 
-    // check if end of stream
-    if (memcmp(&hdr.timestamp, "EOSTREAM", 8) == 0) {
+    if (memcmp(&timestamp, "EOSTREAM", 8) == 0) {
       log(INFO, "Received end of stream signal");
       break;
     }
 
-    // validate frame size
-    if (hdr.size > ENCODED_FRAME_BUF_SIZE) {
+    uint32_t frame_size = 0;
+    pkt_size = recv_from_stream(
+      clientfd,
+      (char*)&frame_size,
+      sizeof(frame_size)
+    );
+
+    if (pkt_size != sizeof(frame_size)) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Received unexpected frame size buffer with %ld bytes from cam %s",
+        pkt_size,
+        ctx->conf->name
+      );
+      log(ERROR, logstr);
+      break;
+    }
+
+    if (frame_size > ENCODED_FRAME_BUF_SIZE) {
       snprintf(
         logstr,
         sizeof(logstr),
         "Received frame size that is larger than the allocated buffer of %d bytes: %d",
         ENCODED_FRAME_BUF_SIZE,
-        hdr.size
+        frame_size
       );
       log(ERROR, logstr);
       break;
     }
 
-    // receive frame
     pkt_size = recv_from_stream(
       clientfd,
       (char*)enc_frame_buf,
-      hdr.size
+      frame_size
     );
 
-    // validate packet size
-    if (pkt_size != hdr.size) {
+    if (pkt_size != frame_size) {
       snprintf(
         logstr,
         sizeof(logstr),
@@ -90,6 +104,7 @@ void* stream_mgr(void* ptr) {
         ctx->conf->name
       );
       log(ERROR, logstr);
+      break;
     }
 
     snprintf(
@@ -98,12 +113,15 @@ void* stream_mgr(void* ptr) {
       "Received frame with %zd bytes from cam %s with timestamp %lu",
       pkt_size,
       ctx->conf->name,
-      hdr.timestamp
+      timestamp
     );
     log(INFO, logstr);
+  }
 
-  } while(pkt_size > 0);
-
+cleanup:
+  if (enc_frame_buf) {
+    free(enc_frame_buf);
+  }
   if (sockfd >= 0) {
     close(sockfd);
   }
