@@ -7,13 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "logging.h"
 #include "parse_conf.h"
 #include "stream_mgr.h"
-#include "udp_net.h"
+#include "network.h"
 
-#define TIMESTAMP_DELAY 3 // seconds
+#define TIMESTAMP_DELAY 1 // seconds
 
 int main() {
   int ret = 0;
@@ -42,7 +43,6 @@ int main() {
     return cam_count;
   }
 
-  // initialize confs array
   struct cam_conf confs[cam_count];
 
   // parse conf file and populate conf structs
@@ -59,12 +59,6 @@ int main() {
     return ret;
   }
 
-  // broadcast timestamp
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
-  //broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp))
-
   // pin self to cam_count % 8 core (threads get 0 through cam_count % 8 to stay on ccd0)
   ret = pin_to_core(cam_count % 8);
   if (ret < 0) {
@@ -72,6 +66,7 @@ int main() {
     return ret;
   }
 
+  // initialize data shared between main and spawned threads
   atomic_uint_least8_t frames_filled = 0;
   atomic_bool new_frame_flags[cam_count];
 
@@ -127,9 +122,17 @@ int main() {
     }
   }
 
+  // broadcast timestamp
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
+  broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp));
+
+  sleep(5);
+
   // broadcast stop
   const char* stop_msg = "STOP";
-  //broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
+  broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
 
   for (int i = 0; i < cam_count; i++) {
     pthread_join(threads[i], NULL);

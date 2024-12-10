@@ -1,9 +1,3 @@
-one thread per camera stream, thread affinity to ccd0 cores for l3
-
-Single oversized buffer per thread
-
-Stream protocol {timestamp: 8 bytes, size: 4 bytes, frame: size bytes}
-
 Decode with libav using nvdec, use decoder for buffering
 
 Use a queue to align timestamps with frames exiting decoder
@@ -28,7 +22,5 @@ __________________________________________________________________
 
 Next steps:
 
-1. Define the struct to pass data (logger and anything else main shares) to threads
-2. Update stream protocol in picam, then write stream parsing logic in here (just read timestamp, then size, then recv_from for size)
-3. Write libav decoder package for threads to use
-4. Figure out how threads share decoded frames with main
+1. Write libav decoder package for threads to use
+2. Write main and thread sync

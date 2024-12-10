@@ -12,7 +12,6 @@
 #include "logger.h"
 
 static const int MAX_RETRIES = 3;
-static constexpr char FRAME_MARKER[] = "NEWFRAME";
 static constexpr char END_STREAM[] = "EOSTREAM";
 
 extern std::unique_ptr<logger_t> logger;
@@ -134,25 +133,24 @@ int connection::conn_tcp() {
   return 0;
 }
 
-int connection::stream_pkt(const uint8_t* data, size_t size) {
-  size_t marker_size = sizeof(FRAME_MARKER) - 1; // exclude null terminator
+int connection::stream_pkt(const uint8_t* data, uint32_t size) {
   uint64_t timestamp = frame_timestamps.front();
   frame_timestamps.pop();
-  uint64_t pkt_size = size + marker_size + sizeof(timestamp);
+  uint64_t pkt_size = size + sizeof(size) + sizeof(timestamp);
   uint8_t pkt[pkt_size];
 
   memcpy(
     pkt,
-    (const uint8_t*)FRAME_MARKER,
-    marker_size
-  );
-  memcpy(
-    pkt + marker_size,
     (const uint8_t*)&timestamp,
     sizeof(timestamp)
   );
   memcpy(
-    pkt + marker_size + sizeof(timestamp),
+    pkt + sizeof(timestamp),
+    (const uint8_t*)&size,
+    sizeof(size)
+  );
+  memcpy(
+    pkt + sizeof(timestamp) + sizeof(size),
     data,
     size
   );

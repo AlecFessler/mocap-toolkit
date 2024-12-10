@@ -17,7 +17,7 @@ public:
 
   int tcpfd;
   int conn_tcp();
-  int stream_pkt(const uint8_t* data, size_t size);
+  int stream_pkt(const uint8_t* data, uint32_t size);
   int end_stream();
   void discon_tcp();
 

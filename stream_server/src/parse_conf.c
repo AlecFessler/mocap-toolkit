@@ -45,7 +45,8 @@ int count_cameras(const char* fpath) {
   yaml_parser_t parser;
   yaml_event_t event;
 
-  if (!yaml_parser_initialize(&parser)) {
+  ret = yaml_parser_initialize(&parser);
+  if (ret == 0) {
     log(ERROR, "Error initializing yaml parser");
     ret = -ENOMEM;
     goto err_cleanup;
@@ -54,7 +55,8 @@ int count_cameras(const char* fpath) {
 
   int count = 0;
   while (true) {
-    if (!yaml_parser_parse(&parser, &event)) {
+    ret = yaml_parser_parse(&parser, &event);
+    if (ret == 0) {
       log(ERROR, "Error parsing yaml file");
       ret = -EINVAL;
       goto err_cleanup;
@@ -102,8 +104,9 @@ int count_cameras(const char* fpath) {
 typedef int (*parser_fn)(const char* str, void* field);
 
 static int parse_str(const char* str, void* field) {
-  if ((strcmp((char*)field, "name") == 0) &&
-      (strlen(str) > CAM_NAME_LEN)) {
+  bool inval_name = (strcmp((char*)field, "name") == 0) &&
+                    (strlen(str) > CAM_NAME_LEN);
+  if (inval_name) {
     return -EINVAL;
   }
 
@@ -166,7 +169,8 @@ int parse_conf(cam_conf* confs, int count) {
   yaml_parser_t parser;
   yaml_event_t event;
 
-  if (!yaml_parser_initialize(&parser)) {
+  ret = yaml_parser_initialize(&parser);
+  if (ret == 0) {
     log(ERROR, "Error initializing yaml parser");
     ret = -ENOMEM;
     goto cleanup;
@@ -180,7 +184,8 @@ int parse_conf(cam_conf* confs, int count) {
   while (confs_parsed < count) {
 
     #define try_parse() \
-    if (!yaml_parser_parse(&parser, &event)) { \
+    ret = yaml_parser_parse(&parser, &event); \
+    if (ret == 0) { \
       log(ERROR, "Error parsing yaml file"); \
       ret = -EINVAL; \
       goto cleanup; \
@@ -210,14 +215,16 @@ int parse_conf(cam_conf* confs, int count) {
 
     for (int i = 0; i < fields_total; i++) {
       // check if we have a key
-      if (strcmp(pstr, fields[i].name) != 0) {
+      ret = strcmp(pstr, fields[i].name);
+      if (ret != 0) {
         continue;
       }
 
       try_parse() // get the value
       void* field = (char*)&confs[confs_parsed] + fields[i].offset;
 
-      if (fields[i].parser(pstr, field) < 0) {
+      ret = fields[i].parser(pstr, field);
+      if (ret < 0) {
         snprintf(
           logstr,
           sizeof(logstr),
