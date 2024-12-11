@@ -9,7 +9,8 @@
 #include "parse_conf.h"
 
 #define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
-#define DECODED_FRAME_BUF_SIZE 2764800 // 1280 * 720 * 3 (720p RGB24)
+#define DECODED_FRAME_WIDTH 1080
+#define DECODED_FRAME_HEIGHT 720
 
 typedef struct thread_ctx {
   atomic_uint_least8_t* frames_filled;
@@ -18,12 +19,10 @@ typedef struct thread_ctx {
   cam_conf* conf;
   uint8_t* frame_buf;
   uint64_t timestamp;
-  uint8_t thread_idx;
   uint8_t core;
   uint8_t frames_total;
 } thread_ctx;
 
-int pin_to_core(int core);
 void* stream_mgr(void* ptr);
 
 #endif // STREAM_MGR_H

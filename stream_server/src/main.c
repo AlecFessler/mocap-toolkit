@@ -101,7 +101,9 @@ int main() {
   }
 
   uint64_t timestamps[cam_count];
-  uint8_t* frame_bufs = malloc(DECODED_FRAME_BUF_SIZE * cam_count);
+
+  size_t decoded_frame_size = DECODED_FRAME_HEIGHT * DECODED_FRAME_WIDTH * 1.5;
+  uint8_t* frame_bufs = malloc(decoded_frame_size * cam_count);
   if (!frame_bufs) {
     log(ERROR, "Failed to allocate memory for frame buffers");
     sem_destroy(&loop_ctl_sem);
@@ -120,8 +122,7 @@ int main() {
     ctxs[i].frames_total = cam_count;
     ctxs[i].conf = &confs[i];
     ctxs[i].timestamp = timestamps[i];
-    ctxs[i].frame_buf = frame_bufs + (i * DECODED_FRAME_BUF_SIZE);
-    ctxs[i].thread_idx = i;
+    ctxs[i].frame_buf = frame_bufs + (i * decoded_frame_size);
     ctxs[i].core = i % 8;
 
     ret = pthread_create(
@@ -146,7 +147,7 @@ int main() {
   uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
   broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp));
 
-  sleep(5); // just for development and debugging
+  sleep(30); // just for development and debugging
 
   // broadcast stop
   const char* stop_msg = "STOP";

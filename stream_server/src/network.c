@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>

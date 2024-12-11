@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "queue.h"
+#include "logging.h"
 
 int init_queue(
   queue* q,
@@ -12,6 +13,7 @@ int init_queue(
 ) {
   q->data = malloc(type_size * initial_capacity);
   if (!q->data) {
+    log(ERROR, "Failed to allocate buffer for queue");
     return -ENOMEM;
   }
 
@@ -27,6 +29,7 @@ int init_queue(
 static int resize(queue* q) {
   void* data = malloc(q->type_size * q->capacity * 2);
   if (!data) {
+    log(ERROR, "Failed to allocate buffer for queue resize");
     return -ENOMEM;
   }
 

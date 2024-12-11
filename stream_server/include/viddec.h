@@ -8,7 +8,7 @@ struct AVFrame;
 struct AVPacket;
 struct AVBufferRef;
 
-struct decoder {
+typedef struct decoder {
   struct AVCodecContext* ctx;
   struct AVFrame* frame;
   struct AVFrame* hw_frame;
@@ -17,26 +17,26 @@ struct decoder {
 
   uint32_t width;
   uint32_t height;
-};
+} decoder;
 
 int init_decoder(
-  struct decoder* dec,
+  decoder* dec,
   uint32_t width,
   uint32_t height
 );
 
 int decode_packet(
-  struct decoder* dec,
+  decoder* dec,
   uint8_t* data,
   uint32_t size
 );
 
 int recv_frame(
-  struct decoder* dec,
+  decoder* dec,
   uint8_t* out_buf
 );
 
-int flush_decoder(struct decoder* dec);
-void cleanup_decoder(struct decoder* dec);
+int flush_decoder(decoder* dec);
+void cleanup_decoder(decoder* dec);
 
 #endif // VIDDEC_H
