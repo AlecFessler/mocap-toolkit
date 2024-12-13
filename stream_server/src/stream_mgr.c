@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <semaphore.h>
 #include <sched.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,8 +15,6 @@
 #include "stream_mgr.h"
 #include "viddec.h"
 
-static int pin_to_core(int core);
-
 void* stream_mgr(void* ptr) {
   int ret = 0;
   char logstr[128];
@@ -26,8 +26,27 @@ void* stream_mgr(void* ptr) {
     goto cleanup;
   }
 
-  ret = pin_to_core(ctx->core);
-  if (ret) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(ctx->core, &cpuset);
+
+  pid_t tid = gettid();
+  ret = sched_setaffinity(
+    tid,
+    sizeof(cpu_set_t),
+    &cpuset
+  );
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error pinning thread %d to core %d, err: %s",
+      tid,
+      ctx->core,
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    ret = -errno;
     goto cleanup;
   }
 
@@ -64,8 +83,6 @@ void* stream_mgr(void* ptr) {
   }
 
   bool incoming_stream = true;
-  bool new_frame = true;
-
   while (true) {
     if (incoming_stream) {
       uint64_t timestamp = 0;
@@ -91,6 +108,9 @@ void* stream_mgr(void* ptr) {
         log(INFO, "Received end of stream signal");
         incoming_stream = false;
         ret = flush_decoder(&viddec);
+        if (ret) {
+          break;
+        }
         continue;
       }
 
@@ -151,10 +171,9 @@ void* stream_mgr(void* ptr) {
       snprintf(
         logstr,
         sizeof(logstr),
-        "Received frame with %zd bytes from cam %s with timestamp %lu",
-        pkt_size,
-        ctx->conf->name,
-        timestamp
+        "Thread %d has %d frames buffered in the decoder",
+        tid,
+        timestamp_queue.size
       );
       log(INFO, logstr);
 
@@ -168,7 +187,8 @@ void* stream_mgr(void* ptr) {
       }
     }
 
-    if (new_frame) {
+    if (atomic_load(ctx->new_frame)) {
+      log(DEBUG, "New frame flag set");
       ret = recv_frame(
         &viddec,
         ctx->frame_buf
@@ -182,18 +202,33 @@ void* stream_mgr(void* ptr) {
       } else if (ret) {
         break;
       } else {
-        log(INFO, "Recvd frame from decoder");
-
-        uint64_t ts = 0;
-        dequeue(&timestamp_queue, (void*)&ts);
+        // reset flag
+        atomic_store(ctx->new_frame, false);
+        // copy timestamp to buffer shared with main thread
+        dequeue(&timestamp_queue, (void*)ctx->timestamp);
+        // atomic increment the frames filled counter
+        uint32_t prior = atomic_fetch_add(ctx->frames_filled, 1);
         snprintf(
           logstr,
           sizeof(logstr),
-          "Dequeued timestamp from cam %s with timestamp %lu",
-          ctx->conf->name,
-          ts
+          "Incremented frames filled, prior: %d, thread: %d, timestamp: %lu",
+          prior,
+          tid,
+          *ctx->timestamp
         );
-        log(INFO, logstr);
+        log(DEBUG, logstr);
+        // check if we were the last to fill
+        if (prior >= ctx->frames_total - 1) {
+          snprintf(
+            logstr,
+            sizeof(logstr),
+            "Last thread to fill frame, thread: %d",
+            tid
+          );
+          log(DEBUG, logstr);
+          // unblock the main loop
+          sem_post(ctx->loop_ctl_sem);
+        }
       }
     }
   }
@@ -212,43 +247,4 @@ cleanup:
   }
 
   return NULL;
-}
-
-static int pin_to_core(int core) {
-  int ret = 0;
-  char logstr[128];
-
-  cpu_set_t cpuset;
-  CPU_ZERO(&cpuset);
-  CPU_SET(core, &cpuset);
-
-  pid_t tid = gettid();
-  ret = sched_setaffinity(
-    tid,
-    sizeof(cpu_set_t),
-    &cpuset
-  );
-  if (ret == -1) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error pinning thread %d to core %d, err: %s",
-      tid,
-      core,
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    return -errno;
-  }
-
-  snprintf(
-    logstr,
-    sizeof(logstr),
-    "Successfuly pinned thread %d to core %d",
-    tid,
-    core
-  );
-  log(INFO, logstr);
-
-  return ret;
 }

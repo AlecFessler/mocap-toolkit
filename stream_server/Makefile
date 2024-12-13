@@ -4,7 +4,7 @@ INCLUDES=-I./include $(PKG_AVCODEC)
 CFLAGS=-Wall -Wextra -g $(INCLUDES)
 
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
-LDFLAGS=-pthread -lyaml $(PKG_LIBS_AVCODEC)
+LDFLAGS=-pthread -latomic -lyaml $(PKG_LIBS_AVCODEC)
 
 CFILES=$(wildcard src/*.c)
 OBJFILES=$(CFILES:src/%.c=obj/%.o)

@@ -117,12 +117,22 @@ void cleanup_decoder(decoder* dec) {
 }
 
 int decode_packet(decoder* dec, uint8_t* data, uint32_t size) {
+  char logstr[128];
+
   dec->pkt->data = data;
   dec->pkt->size = size;
 
   int ret = avcodec_send_packet(dec->ctx, dec->pkt);
   if (ret < 0) {
-    log(ERROR, "Error sending packet for decoding");
+    char err[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(ret, err, AV_ERROR_MAX_STRING_SIZE);
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error sending packet for decoding: %s",
+      err
+    );
+    log(ERROR, logstr);
     return ret;
   }
 

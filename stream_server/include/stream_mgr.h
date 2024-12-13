@@ -13,14 +13,14 @@
 #define DECODED_FRAME_HEIGHT 720
 
 typedef struct thread_ctx {
-  atomic_uint_least8_t* frames_filled;
-  atomic_bool* new_frame;
-  sem_t* loop_ctl_sem;
   cam_conf* conf;
+  uint32_t core;
+  uint32_t frames_total;
+  atomic_uint_least32_t* frames_filled;
+  atomic_bool* new_frame;
+  uint64_t* timestamp;
   uint8_t* frame_buf;
-  uint64_t timestamp;
-  uint8_t core;
-  uint8_t frames_total;
+  sem_t* loop_ctl_sem;
 } thread_ctx;
 
 void* stream_mgr(void* ptr);
