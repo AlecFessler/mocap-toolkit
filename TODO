@@ -1,4 +1,4 @@
-Rewrite frame collection server in C
+Add the logic to the frame collection server in C to pass frame sets off to consumers
 
 Write lens calibration tool
 
