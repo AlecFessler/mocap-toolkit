@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include <errno.h>
-#include <semaphore.h>
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
