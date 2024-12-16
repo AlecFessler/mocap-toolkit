@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "parse_conf.h"
-#include "lockfree_containers.h"
+#include "spsc_queue.h"
 
 #define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
 #define DECODED_FRAME_WIDTH 1080
@@ -12,8 +12,8 @@
 
 struct thread_ctx {
   cam_conf* conf;
-  struct lf_queue* filled_bufs;
-  struct lf_queue* empty_bufs;
+  struct producer_q* filled_bufs;
+  struct consumer_q* empty_bufs;
   uint32_t core;
 };
 

@@ -10,7 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "lockfree_containers.h"
+#include "spsc_queue.h"
 #include "logging.h"
 #include "parse_conf.h"
 #include "stream_mgr.h"
@@ -89,7 +89,7 @@ int main() {
   const uint64_t frame_bufs_count = cam_count * FRAME_BUFS_PER_THREAD;
   struct ts_frame_buf ts_frame_bufs[frame_bufs_count];
 
-  const uint64_t frame_buf_size = DECODED_FRAME_WIDTH * DECODED_FRAME_HEIGHT * 1.5;
+  const uint64_t frame_buf_size = DECODED_FRAME_WIDTH * DECODED_FRAME_HEIGHT * 3 / 2;
   uint8_t* frame_bufs = malloc(frame_bufs_count * frame_buf_size);
   if (!frame_bufs) {
     log(ERROR, "Failed to allocate frame buffers");
@@ -102,28 +102,43 @@ int main() {
     ts_frame_bufs[i].frame_buf = frame_bufs + offset;
   }
 
-  struct lf_node nodes_filled_partition[frame_bufs_count + cam_count]; // one for each frame + one for each dummy
-  struct lf_node nodes_empty_partition[frame_bufs_count + cam_count];
-  struct lf_queue frame_queues[cam_count * 2];
-  for (int i = 0; i < cam_count; i++) {
-    size_t offset = i * FRAME_BUFS_PER_THREAD;
+  struct producer_q filled_frame_producer_qs[cam_count];
+  struct consumer_q filled_frame_consumer_qs[cam_count];
 
-    lf_queue_init(
-      &frame_queues[i*2],
-      &nodes_filled_partition[offset],
+  struct producer_q empty_frame_producer_qs[cam_count];
+  struct consumer_q empty_frame_consumer_qs[cam_count];
+
+  void* q_bufs = aligned_alloc(
+    CACHE_LINE_SIZE,
+    sizeof(void*) * frame_bufs_count * 2
+  );
+  if (q_bufs == NULL) {
+    log(ERROR, "Failed to allocate queue buffers");
+    free(frame_bufs);
+    cleanup_logging();
+    return -ENOMEM;
+  }
+
+  void** q_slots = (void**)q_bufs;
+  for (int i = 0; i < cam_count; i++) {
+    spsc_queue_init(
+      &filled_frame_producer_qs[i],
+      &filled_frame_consumer_qs[i],
+      q_slots + (i * 2 * FRAME_BUFS_PER_THREAD),
       FRAME_BUFS_PER_THREAD
     );
 
-    lf_queue_init(
-      &frame_queues[i*2+1],
-      &nodes_empty_partition[offset],
+    spsc_queue_init(
+      &empty_frame_producer_qs[i],
+      &empty_frame_consumer_qs[i],
+      q_slots + ((i * 2 + 1) * FRAME_BUFS_PER_THREAD),
       FRAME_BUFS_PER_THREAD
     );
 
     for (int j = 0; j < FRAME_BUFS_PER_THREAD; j++) {
-      lf_queue_nq(
-        &frame_queues[i*2+1],
-        &ts_frame_bufs[offset+j]
+      spsc_enqueue(
+        &empty_frame_producer_qs[i],
+        &ts_frame_bufs[i * FRAME_BUFS_PER_THREAD + j]
       );
     }
   }
@@ -132,8 +147,8 @@ int main() {
   pthread_t threads[cam_count];
   for (int i = 0; i < cam_count; i++) {
     ctxs[i].conf = &confs[i];
-    ctxs[i].filled_bufs = &frame_queues[i*2];
-    ctxs[i].empty_bufs = &frame_queues[i*2+1];
+    ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
+    ctxs[i].empty_bufs = &empty_frame_consumer_qs[i];
     ctxs[i].core = i % 8;
 
     ret = pthread_create(
@@ -145,6 +160,7 @@ int main() {
 
     if (ret) {
       log(ERROR, "Error spawning thread");
+      free(q_bufs);
       free(frame_bufs);
       cleanup_logging();
       return ret;
@@ -168,7 +184,7 @@ int main() {
       if (current_frames[i] != NULL)
         continue; // already set
 
-      current_frames[i] = lf_queue_dq(&frame_queues[i*2]);
+      current_frames[i] = spsc_dequeue(&filled_frame_consumer_qs[i]);
 
       if (current_frames[i] == NULL) {
         full_set = false; // queue empty
@@ -191,7 +207,7 @@ int main() {
     for (int i = 0; i < cam_count; i++) {
       if (current_frames[i]->timestamp != max_timestamp) {
         all_equal = false;
-        lf_queue_nq(&frame_queues[i*2+1], current_frames[i]);
+        spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
         current_frames[i] = NULL; // get a new timestamped buffer
       }
     }
@@ -210,7 +226,7 @@ int main() {
 
     // get a new full set
     for (int i = 0; i < cam_count; i++) {
-      lf_queue_nq(&frame_queues[i*2+1], current_frames[i]);
+      spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
       current_frames[i] = NULL;
     }
 
@@ -224,6 +240,7 @@ int main() {
     pthread_join(threads[i], NULL);
   }
 
+  free(q_bufs);
   free(frame_bufs);
   cleanup_logging();
   return ret;

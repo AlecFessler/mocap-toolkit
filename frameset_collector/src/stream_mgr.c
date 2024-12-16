@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "queue.h"
-#include "lockfree_containers.h"
+#include "spsc_queue.h"
 #include "logging.h"
 #include "network.h"
 #include "stream_mgr.h"
@@ -82,7 +82,7 @@ void* stream_mgr(void* ptr) {
     goto cleanup;
   }
 
-  struct ts_frame_buf* current_buf = (struct ts_frame_buf*)lf_queue_dq(ctx->empty_bufs);
+  struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
 
   bool incoming_stream = true;
   while (true) {
@@ -194,9 +194,9 @@ void* stream_mgr(void* ptr) {
       break;
     } else {
       dequeue(&timestamp_queue, (void*)&current_buf->timestamp);
-      lf_queue_nq(ctx->filled_bufs, current_buf);
+      spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
 
-      current_buf = (struct ts_frame_buf*)lf_queue_dq(ctx->empty_bufs);
+      current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       if (!current_buf) {
         log(ERROR, "Frame buffer queue was empty");
         ret = -ENOBUFS;
