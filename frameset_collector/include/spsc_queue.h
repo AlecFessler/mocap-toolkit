@@ -80,13 +80,13 @@ static inline int spsc_queue_init(
   atomic_store_explicit(&pq->head, 0, memory_order_relaxed);
   pq->tail_ptr = &cq->tail;
   pq->cached_tail = 0;
-  pq->cap = size + 1;
+  pq->cap = size;
   pq->buf = buf;
 
   atomic_store_explicit(&cq->tail, 0, memory_order_relaxed);
   cq->head_ptr = &pq->head;
   cq->cached_head = 0;
-  cq->cap = size + 1;
+  cq->cap = size;
   cq->buf = buf;
 
   return 0;
