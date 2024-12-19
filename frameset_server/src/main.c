@@ -376,7 +376,7 @@ static void perform_cleanup() {
     }
 
     for (int i = 0; i < cleanup.thread_count; i++) {
-        pthread_join(cleanup.threads[i], NULL);
+      pthread_join(cleanup.threads[i], NULL);
     }
   }
 

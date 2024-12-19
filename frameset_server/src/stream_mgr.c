@@ -69,9 +69,8 @@ void* stream_mgr_fn(void* ptr) {
     sizeof(uint64_t),
     8 // initial capacity
   );
-  if (ret) {
+  if (ret)
     goto cleanup;
-  }
 
   decoder viddec;
   ret = init_decoder(
@@ -79,9 +78,8 @@ void* stream_mgr_fn(void* ptr) {
     DECODED_FRAME_WIDTH,
     DECODED_FRAME_HEIGHT
   );
-  if (ret) {
+  if (ret)
     goto cleanup;
-  }
 
   sockfd = setup_stream(ctx->conf);
   if (sockfd < 0) {
@@ -133,9 +131,8 @@ void* stream_mgr_fn(void* ptr) {
       }
 
       ret = enqueue(&timestamp_queue, (void*)&timestamp);
-      if (ret) {
+      if (ret)
         break;
-      }
 
       uint32_t frame_size = 0;
       pkt_size = recv_from_stream(
@@ -197,9 +194,8 @@ void* stream_mgr_fn(void* ptr) {
         enc_frame_buf,
         frame_size
       );
-      if (ret) {
+      if (ret)
         break;
-      }
     }
 
     ret = recv_frame(

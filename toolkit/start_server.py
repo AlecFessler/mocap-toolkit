@@ -13,16 +13,11 @@ try:
 
   print(f"Server started with PID: {server_process.pid}")
 
-  for i in range(10):
+  for i in range(1000):
     consumer_ready.acquire()
     print(f"Got frame set {i}")
 
+finally:
   server_process.send_signal(signal.SIGTERM)
   server_process.wait()
   print("Server process terminated gracefully")
-
-finally:
-  try:
-    consumer_ready.unlink()
-  except posix_ipc.ExistentialError:
-    pass
