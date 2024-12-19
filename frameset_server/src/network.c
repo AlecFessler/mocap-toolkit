@@ -13,6 +13,9 @@
 #include "logging.h"
 #include "network.h"
 
+#define ACCEPT_TIMEOUT 10 // 10 sec
+#define RECV_TIMEOUT 1 // 1 sec
+
 static bool is_eth_conn(int sockfd) {
   struct ifreq ifr;
   strncpy(ifr.ifr_name, "eno1", IFNAMSIZ);
@@ -114,6 +117,28 @@ int setup_stream(cam_conf* conf) {
     return -errno;
   }
 
+  struct timeval accept_timeout = {
+    .tv_sec = ACCEPT_TIMEOUT,
+    .tv_usec = 0
+  };
+  ret = setsockopt(
+    sockfd,
+    SOL_SOCKET,
+    SO_RCVTIMEO,
+    &accept_timeout,
+    sizeof(accept_timeout)
+  );
+  if (ret < 0) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error setting accept timeout: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    return -errno;
+  }
+
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
@@ -164,6 +189,10 @@ int accept_conn(int sockfd) {
 
   int clientfd = accept(sockfd, (struct sockaddr*)&rcvr_addr, &addr_len);
   if (clientfd < 0) {
+    if (errno == EWOULDBLOCK) {
+      log(ERROR, "Accept connection timed out, no camera connected");
+      return -ETIMEDOUT;
+    }
     snprintf(
       logstr,
       sizeof(logstr),
@@ -171,6 +200,29 @@ int accept_conn(int sockfd) {
       strerror(errno)
     );
     log(ERROR, logstr);
+    return -errno;
+  }
+
+  struct timeval recv_timeout = {
+    .tv_sec = RECV_TIMEOUT,
+    .tv_usec = 0
+  };
+  int ret = setsockopt(
+    clientfd,
+    SOL_SOCKET,
+    SO_RCVTIMEO,
+    &recv_timeout,
+    sizeof(recv_timeout)
+  );
+  if (ret < 0) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error setting receive timeout: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    close(clientfd);
     return -errno;
   }
 
@@ -186,7 +238,11 @@ ssize_t recv_from_stream(int clientfd, char* buf, size_t size) {
     return 0;
   } else if (bytes < 0) {
     if (errno == EINTR)
-      return EINTR;
+      return -EINTR;
+    if (errno == EWOULDBLOCK) {
+      log(WARNING, "Timed out waiting for packet from client");
+      return -ETIMEDOUT;
+    }
 
     snprintf(
       logstr,

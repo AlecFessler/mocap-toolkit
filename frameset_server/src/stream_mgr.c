@@ -17,6 +17,9 @@
 #include "stream_mgr.h"
 #include "viddec.h"
 
+#define TS_Q_INIT_SIZE 8
+#define EMPTY_Q_WAIT 10000 // 0.01 ms
+
 static volatile sig_atomic_t running = 1;
 
 static void shutdown_handler(int signum);
@@ -36,10 +39,11 @@ void* stream_mgr_fn(void* ptr) {
   int clientfd = -1;
 
   struct thread_ctx* ctx = (struct thread_ctx*)ptr;
+
   uint8_t* enc_frame_buf = malloc(ENCODED_FRAME_BUF_SIZE);
   if (!enc_frame_buf) {
     log(ERROR, "Failed to allocate encoded frame buffer in a thread");
-    goto cleanup;
+    goto err_cleanup;
   }
 
   cpu_set_t cpuset;
@@ -61,17 +65,17 @@ void* stream_mgr_fn(void* ptr) {
     );
     log(ERROR, logstr);
     ret = -errno;
-    goto cleanup;
+    goto err_cleanup;
   }
 
   queue timestamp_queue;
   ret = init_queue(
     &timestamp_queue,
     sizeof(uint64_t),
-    8 // initial capacity
+    TS_Q_INIT_SIZE
   );
   if (ret)
-    goto cleanup;
+    goto err_cleanup;
 
   decoder viddec;
   ret = init_decoder(
@@ -80,18 +84,18 @@ void* stream_mgr_fn(void* ptr) {
     DECODED_FRAME_HEIGHT
   );
   if (ret)
-    goto cleanup;
+    goto err_cleanup;
 
   sockfd = setup_stream(ctx->conf);
   if (sockfd < 0) {
     ret = -EIO;
-    goto cleanup;
+    goto err_cleanup;
   }
 
   clientfd = accept_conn(sockfd);
   if (clientfd < 0) {
     ret = -EIO;
-    goto cleanup;
+    goto err_cleanup;
   }
 
   struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
@@ -107,8 +111,8 @@ void* stream_mgr_fn(void* ptr) {
       );
 
       if (pkt_size != sizeof(timestamp)) {
-        if (errno == EINTR)
-          break; // shutdown signal
+        if (errno == -EINTR)
+          goto shutdown_cleanup;
 
         snprintf(
           logstr,
@@ -118,22 +122,21 @@ void* stream_mgr_fn(void* ptr) {
           ctx->conf->name
         );
         log(ERROR, logstr);
-        break;
+        goto err_cleanup;
       }
 
       if (memcmp(&timestamp, "EOSTREAM", 8) == 0) {
-        log(INFO, "Received end of stream signal");
         incoming_stream = false;
         ret = flush_decoder(&viddec);
-        if (ret) {
-          break;
-        }
+        if (ret)
+          goto shutdown_cleanup;
+
         continue;
       }
 
       ret = enqueue(&timestamp_queue, (void*)&timestamp);
       if (ret)
-        break;
+        goto err_cleanup;
 
       uint32_t frame_size = 0;
       pkt_size = recv_from_stream(
@@ -143,8 +146,8 @@ void* stream_mgr_fn(void* ptr) {
       );
 
       if (pkt_size != sizeof(frame_size)) {
-        if (errno == EINTR)
-          break; // shutdown signal
+        if (errno == -EINTR)
+          goto shutdown_cleanup;
 
         snprintf(
           logstr,
@@ -154,7 +157,7 @@ void* stream_mgr_fn(void* ptr) {
           ctx->conf->name
         );
         log(ERROR, logstr);
-        break;
+        goto err_cleanup;
       }
 
       if (frame_size > ENCODED_FRAME_BUF_SIZE) {
@@ -166,7 +169,7 @@ void* stream_mgr_fn(void* ptr) {
           frame_size
         );
         log(ERROR, logstr);
-        break;
+        goto err_cleanup;
       }
 
       pkt_size = recv_from_stream(
@@ -176,8 +179,8 @@ void* stream_mgr_fn(void* ptr) {
       );
 
       if (pkt_size != frame_size) {
-        if (errno == EINTR)
-          break; // shutdown signal
+        if (errno == -EINTR)
+          goto shutdown_cleanup;
 
         snprintf(
           logstr,
@@ -187,7 +190,7 @@ void* stream_mgr_fn(void* ptr) {
           ctx->conf->name
         );
         log(ERROR, logstr);
-        break;
+        goto err_cleanup;
       }
 
       ret = decode_packet(
@@ -196,7 +199,7 @@ void* stream_mgr_fn(void* ptr) {
         frame_size
       );
       if (ret)
-        break;
+        goto err_cleanup;
     }
 
     ret = recv_frame(
@@ -206,11 +209,8 @@ void* stream_mgr_fn(void* ptr) {
 
     if (ret == EAGAIN) {
       continue;
-    } else if (ret == ENODATA) {
-      log(INFO, "Received EOF from decoder");
-      break;
     } else if (ret) {
-      break;
+      goto err_cleanup;
     } else {
       dequeue(&timestamp_queue, (void*)&current_buf->timestamp);
       spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
@@ -221,18 +221,20 @@ void* stream_mgr_fn(void* ptr) {
         while (!current_buf && running) {
           struct timespec ts = {
             .tv_sec = 0,
-            .tv_nsec = 10000
+            .tv_nsec = EMPTY_Q_WAIT
           };
           nanosleep(&ts, NULL);
           current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
         }
-        if (current_buf)
-          log(INFO, "Received frame buffer after retries");
       }
     }
   }
 
-cleanup:
+err_cleanup:
+  log(DEBUG, "Notified main thread of error");
+  pthread_kill(ctx->main_thread, SIGTERM);
+
+shutdown_cleanup:
   if (enc_frame_buf)
     free(enc_frame_buf);
   cleanup_decoder(&viddec);

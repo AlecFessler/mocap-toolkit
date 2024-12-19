@@ -27,7 +27,9 @@
 #define SHM_NAME "/mocap-toolkit_frameset"
 #define SEM_CONSUMER_READY "/mocap-toolkit_consumer_ready"
 
+#define CORES_PER_CCD 8
 #define TIMESTAMP_DELAY 1 // seconds
+#define EMPTY_QS_WAIT 10000 // 0.01 ms
 #define FRAME_BUFS_PER_THREAD 256
 
 static void shutdown_handler(int signum);
@@ -56,22 +58,38 @@ int main() {
   int ret = 0;
   char logstr[128];
 
-  struct sigaction sa = {
-    .sa_handler = shutdown_handler,
-    .sa_flags = 0
-  };
-  sigemptyset(&sa.sa_mask);
-  if (sigaction(SIGTERM, &sa, NULL) == -1 || sigaction(SIGINT, &sa, NULL) == -1) {
-    printf("Failed to set up signal handlers: %s\n", strerror(errno));
-    return -errno;
-  }
-
   ret = setup_logging(LOG_PATH);
   if (ret) {
     printf("Error opening log file: %s\n", strerror(errno));
     return -errno;
   }
   cleanup.logging_initialized = true;
+
+  struct sigaction sa = {
+    .sa_handler = shutdown_handler,
+    .sa_flags = 0
+  };
+  sigemptyset(&sa.sa_mask);
+  ret = sigaction(SIGTERM, &sa, NULL);
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set signal handler: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+  }
+  ret = sigaction(SIGINT, &sa, NULL);
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set signal handler: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+  }
 
   int cam_count = count_cameras(CAM_CONF_PATH);
   if (cam_count <= 0) {
@@ -104,9 +122,10 @@ int main() {
   // but not be on the same core as any threads until there are 8+
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
-  CPU_SET(cam_count % 8, &cpuset);
+  CPU_SET(cam_count % CORES_PER_CCD, &cpuset);
+  pid_t pid = getpid();
   ret = sched_setaffinity(
-    getpid(),
+    pid,
     sizeof(cpu_set_t),
     &cpuset
   );
@@ -186,7 +205,8 @@ int main() {
     ctxs[i].conf = &confs[i];
     ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
     ctxs[i].empty_bufs = &empty_frame_consumer_qs[i];
-    ctxs[i].core = i % 8;
+    ctxs[i].core = i % CORES_PER_CCD;
+    ctxs[i].main_thread = pid;
 
     ret = pthread_create(
       &threads[i],
@@ -286,7 +306,7 @@ int main() {
 
   // reuse ts for our sleep timer to prevent busy waiting
   ts.tv_sec = 0;
-  ts.tv_nsec = 10000;
+  ts.tv_nsec = EMPTY_QS_WAIT;
 
   while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread

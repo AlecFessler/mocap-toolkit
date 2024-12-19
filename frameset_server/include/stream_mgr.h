@@ -15,6 +15,7 @@ struct thread_ctx {
   struct producer_q* filled_bufs;
   struct consumer_q* empty_bufs;
   uint32_t core;
+  pid_t main_thread;
 };
 
 struct ts_frame_buf {
