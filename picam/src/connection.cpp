@@ -147,6 +147,8 @@ int connection::conn_tcp() {
 }
 
 int connection::stream_pkt(const uint8_t* data, uint32_t size) {
+  char logstr[128];
+
   uint64_t timestamp = frame_timestamps.front();
   frame_timestamps.pop();
   uint64_t pkt_size = size + sizeof(size) + sizeof(timestamp);
@@ -174,13 +176,14 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
     if (tcpfd < 0) {
       LOG(WARNING, "Not connected to server, trying to connect");
       while (tcpfd < 0) {
-        tcpfd = conn_tcp();
-        if (tcpfd < 0) {
+        int ret = conn_tcp();
+        if (ret < 0) {
           if (retries++ == MAX_RETRIES) {
             LOG(WARNING, "No more connection retries");
-            return tcpfd;
+            return ret;
           }
           LOG(WARNING, "Failed to connect, retrying");
+          continue;
         }
       }
     }
@@ -199,8 +202,14 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
         tcpfd = -1;
         continue;
       }
-      LOG(ERROR, "Error transmitting frame packet");
-      return -1;
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Error transmitting frame packet: %s",
+        strerror(errno)
+      );
+      LOG(ERROR, logstr);
+      return -errno;
     }
 
     total_written += result;
@@ -209,6 +218,7 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
 }
 
 int connection::end_stream() {
+  char logstr[128];
   size_t end_stream_size = sizeof(END_STREAM) - 1;
 
   int retries = 0;
@@ -217,13 +227,14 @@ int connection::end_stream() {
     if (tcpfd < 0) {
       LOG(WARNING, "Not connected to server, trying to connect");
       while (tcpfd < 0) {
-        tcpfd = conn_tcp();
-        if (tcpfd < 0) {
+        int ret = conn_tcp();
+        if (ret < 0) {
           if (retries++ == MAX_RETRIES) {
             LOG(WARNING, "No more connection retries");
-            return tcpfd;
+            return ret;
           }
           LOG(WARNING, "Failed to connect, retrying");
+          continue;
         }
       }
     }
@@ -242,8 +253,14 @@ int connection::end_stream() {
         tcpfd = -1;
         continue;
       }
-      LOG(ERROR, "Error sending end of stream to server");
-      return -1;
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Error transmitting end of stream packet: %s",
+        strerror(errno)
+      );
+      LOG(ERROR, logstr);
+      return -errno;
     }
 
     total_written += result;
