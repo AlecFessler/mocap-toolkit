@@ -8,7 +8,8 @@ LDFLAGS=-pthread -latomic -lyaml $(PKG_LIBS_AVCODEC)
 
 CFILES=$(wildcard src/*.c)
 OBJFILES=$(CFILES:src/%.c=obj/%.o)
-BINARY=bin/collect_frames
+BINARY=bin/mocap-toolkit-server
+INSTALL_PATH=/usr/local/bin/mocap-toolkit-server
 
 all: $(BINARY)
 
@@ -22,3 +23,11 @@ obj/%.o: src/%.c
 
 clean:
 	rm -f $(OBJFILES) $(BINARY)
+
+install: $(BINARY)
+	@echo "Installing mocap-toolkit-server to $(INSTALL_PATH)"
+	@sudo install -m 755 $(BINARY) $(INSTALL_PATH)
+
+uninstall:
+	@echo "Removing mocap-toolkit-server from $(INSTALL_PATH)"
+	@sudo rm -f $(INSTALL_PATH)
