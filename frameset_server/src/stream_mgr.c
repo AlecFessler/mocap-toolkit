@@ -215,15 +215,6 @@ void* stream_mgr_fn(void* ptr) {
       dequeue(&timestamp_queue, (void*)&current_buf->timestamp);
       spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
 
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Thread %d enqueued frame with timestamp %lu",
-        gettid(),
-        current_buf->timestamp
-      );
-      log(DEBUG, logstr);
-
       current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       if (!current_buf) {
         log(WARNING, "Frame buffer queue was empty");

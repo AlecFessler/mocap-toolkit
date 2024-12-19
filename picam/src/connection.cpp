@@ -180,9 +180,14 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
         if (ret < 0) {
           if (retries++ == MAX_RETRIES) {
             LOG(WARNING, "No more connection retries");
-            return ret;
+            return -ECONNRESET;
           }
           LOG(WARNING, "Failed to connect, retrying");
+          struct timespec ts {
+            .tv_sec = 0,
+            .tv_nsec = 1000000
+          };
+          nanosleep(&ts, NULL);
           continue;
         }
       }
@@ -229,11 +234,16 @@ int connection::end_stream() {
       while (tcpfd < 0) {
         int ret = conn_tcp();
         if (ret < 0) {
-          if (retries++ == MAX_RETRIES) {
+          if (++retries == MAX_RETRIES) {
             LOG(WARNING, "No more connection retries");
-            return ret;
+            return -ECONNRESET;
           }
           LOG(WARNING, "Failed to connect, retrying");
+          struct timespec ts {
+            .tv_sec = 0,
+            .tv_nsec = 1000000
+          };
+          nanosleep(&ts, NULL);
           continue;
         }
       }

@@ -28,7 +28,7 @@
 #define SEM_CONSUMER_READY "/mocap-toolkit_consumer_ready"
 
 #define TIMESTAMP_DELAY 1 // seconds
-#define FRAME_BUFS_PER_THREAD 32
+#define FRAME_BUFS_PER_THREAD 256
 
 static void shutdown_handler(int signum);
 static void perform_cleanup();
@@ -284,6 +284,10 @@ int main() {
   struct ts_frame_buf* current_frames[cam_count];
   memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
 
+  // reuse ts for our sleep timer to prevent busy waiting
+  ts.tv_sec = 0;
+  ts.tv_nsec = 10000;
+
   while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread
     bool full_set = true;
@@ -297,19 +301,12 @@ int main() {
         full_set = false; // queue empty
         continue;
       }
-
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Received frame with timestamp %lu from thread %d",
-        current_frames[i]->timestamp,
-        i
-      );
-      log(DEBUG, logstr);
     }
 
-    if (!full_set)
-      continue; // need a full set to proceed
+    if (!full_set) { // need a full set to proceed
+      nanosleep(&ts, NULL);
+      continue;
+    }
 
     // find the max timestamp
     uint64_t max_timestamp = 0;
@@ -328,16 +325,10 @@ int main() {
       }
     }
 
-    if (!all_equal)
+    if (!all_equal) {
+      nanosleep(&ts, NULL);
       continue;
-
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Received full frameset with timestamp %lu",
-      max_timestamp
-    );
-    log(DEBUG, logstr);
+    }
 
     // check if consumer_ready here
     int consumer_ready_val;
@@ -351,7 +342,6 @@ int main() {
         );
       }
       sem_post(consumer_ready);
-      log(DEBUG, "Copied frameset to consumer");
     }
 
     // get a new full set

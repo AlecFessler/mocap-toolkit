@@ -46,7 +46,7 @@ inline void arm_timer(
   uint64_t frame_duration,
   uint64_t& frame_counter
 );
-inline void flush_encoder(
+inline int flush_encoder(
   videnc& encoder,
   connection& conn
 );
@@ -99,16 +99,24 @@ int main() {
           int pkt_size = 0;
           uint8_t* ptr = encoder->recv_frame(pkt_size);
           if (ptr) {
-            conn->stream_pkt(ptr, pkt_size);
+            ret = conn->stream_pkt(ptr, pkt_size);
+            if (ret == -ECONNRESET) {
+              timestamp = 0;
+              frame_counter = 0;
+              stream_end = 0;
+              conn->discon_tcp();
+              encoder = std::make_unique<videnc>(config);
+            }
           }
         }
       }
 
       if (stream_end) {
         stream_end = 0;
-        flush_encoder(*encoder, *conn);
-        conn->end_stream();
         frame_counter = 0;
+        ret = flush_encoder(*encoder, *conn);
+        if (ret == 0)
+          conn->end_stream();
         encoder = std::make_unique<videnc>(config);
       }
     }
@@ -430,11 +438,13 @@ inline int init_signals() {
   return 0;
 }
 
-inline void flush_encoder(videnc& encoder, connection& conn) {
+inline int flush_encoder(videnc& encoder, connection& conn) {
     encoder.flush();
     int pkt_size = 0;
     uint8_t* ptr = nullptr;
     while ((ptr = encoder.recv_frame(pkt_size)) != nullptr) {
-        conn.stream_pkt(ptr, pkt_size);
+      int ret = conn.stream_pkt(ptr, pkt_size);
+      if (ret == -ECONNRESET) return ret;
     }
+    return 0;
 }
