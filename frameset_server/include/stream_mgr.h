@@ -22,6 +22,6 @@ struct ts_frame_buf {
   uint8_t* frame_buf;
 };
 
-void* stream_mgr(void* ptr);
+void* stream_mgr_fn(void* ptr);
 
 #endif // STREAM_MGR_H

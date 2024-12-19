@@ -1,5 +1,5 @@
 */__pycache__
 /data/
 cams.yaml
-/bin
-/obj
+frameset_server/bin
+frameset_server/obj

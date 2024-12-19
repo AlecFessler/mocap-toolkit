@@ -20,11 +20,9 @@ static bool is_eth_conn(int sockfd) {
                  !(ifr.ifr_flags & IFF_RUNNING);
 
   if (eth_conn) {
-    log(INFO, "Not connected to ethernet network, falling back to wifi");
     return false;
   }
 
-  log(INFO, "Connected to ethernet network");
   return true;
 }
 
@@ -74,18 +72,9 @@ int broadcast_msg(cam_conf* confs, int confs_size, const char* msg, size_t msg_s
       ret = -errno;
       break;
 
-    } else {
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Broadcast msg to %s",
-        confs[i].name
-      );
-      log(INFO, logstr);
     }
   }
 
-  log(INFO, "Broadcast msg to all cameras successfully");
   close(sockfd);
   return ret;
 }
@@ -166,7 +155,6 @@ int accept_conn(int sockfd) {
     return -errno;
   }
 
-  log(INFO, "Accepted connection");
   return clientfd;
 }
 
@@ -175,9 +163,12 @@ ssize_t recv_from_stream(int clientfd, char* buf, size_t size) {
 
   ssize_t bytes = recv(clientfd, buf, size, MSG_WAITALL);
   if (bytes == 0) {
-    log(INFO, "Client has disconnected");
+    log(WARNING, "Client has disconnected");
     return 0;
   } else if (bytes < 0) {
+    if (errno == EINTR)
+      return EINTR;
+
     snprintf(
       logstr,
       sizeof(logstr),

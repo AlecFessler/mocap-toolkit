@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -25,20 +26,52 @@
 
 #define SHM_NAME "/mocap-toolkit_frameset"
 #define SEM_CONSUMER_READY "/mocap-toolkit_consumer_ready"
-#define SEM_STOP_STREAMS  "/mocap-toolkit_stop_streams"
 
 #define TIMESTAMP_DELAY 1 // seconds
 #define FRAME_BUFS_PER_THREAD 32
 
+static void shutdown_handler(int signum);
+static void perform_cleanup();
+
+struct cleanup_ctx {
+  void* frame_bufs;
+  void* q_bufs;
+  void* frameset_buf;
+  size_t shm_size;
+  int shm_fd;
+  sem_t* consumer_ready;
+  pthread_t* threads;
+  int thread_count;
+  bool logging_initialized;
+};
+
+static struct cleanup_ctx cleanup = {
+  0,
+  .shm_fd = -1
+};
+
+static volatile sig_atomic_t running = 1;
+
 int main() {
   int ret = 0;
   char logstr[128];
+
+  struct sigaction sa = {
+    .sa_handler = shutdown_handler,
+    .sa_flags = 0
+  };
+  sigemptyset(&sa.sa_mask);
+  if (sigaction(SIGTERM, &sa, NULL) == -1 || sigaction(SIGINT, &sa, NULL) == -1) {
+    printf("Failed to set up signal handlers: %s\n", strerror(errno));
+    return -errno;
+  }
 
   ret = setup_logging(LOG_PATH);
   if (ret) {
     printf("Error opening log file: %s\n", strerror(errno));
     return -errno;
   }
+  cleanup.logging_initialized = true;
 
   int cam_count = count_cameras(CAM_CONF_PATH);
   if (cam_count <= 0) {
@@ -49,7 +82,7 @@ int main() {
       strerror(cam_count)
     );
     log(ERROR, logstr);
-    cleanup_logging();
+    perform_cleanup();
     return cam_count;
   }
 
@@ -63,7 +96,7 @@ int main() {
       strerror(ret)
     );
     log(ERROR, logstr);
-    cleanup_logging();
+    perform_cleanup();
     return ret;
   }
 
@@ -85,7 +118,7 @@ int main() {
       strerror(errno)
     );
     log(ERROR, logstr);
-    cleanup_logging();
+    perform_cleanup();
     return -errno;
   }
 
@@ -95,9 +128,10 @@ int main() {
   uint8_t* frame_bufs = malloc(frame_bufs_count * frame_buf_size);
   if (!frame_bufs) {
     log(ERROR, "Failed to allocate frame buffers");
-    cleanup_logging();
+    perform_cleanup();
     return -ENOMEM;
   }
+  cleanup.frame_bufs = frame_bufs;
 
   struct ts_frame_buf ts_frame_bufs[frame_bufs_count];
   for (uint i = 0; i < frame_bufs_count; i++) {
@@ -117,10 +151,10 @@ int main() {
   );
   if (q_bufs == NULL) {
     log(ERROR, "Failed to allocate queue buffers");
-    free(frame_bufs);
-    cleanup_logging();
+    perform_cleanup();
     return -ENOMEM;
   }
+  cleanup.q_bufs = q_bufs;
 
   for (int i = 0; i < cam_count; i++) {
     spsc_queue_init(
@@ -147,6 +181,7 @@ int main() {
 
   struct thread_ctx ctxs[cam_count];
   pthread_t threads[cam_count];
+  cleanup.threads = threads;
   for (int i = 0; i < cam_count; i++) {
     ctxs[i].conf = &confs[i];
     ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
@@ -156,17 +191,17 @@ int main() {
     ret = pthread_create(
       &threads[i],
       NULL,
-      stream_mgr,
+      stream_mgr_fn,
       (void*)&ctxs[i]
     );
 
     if (ret) {
       log(ERROR, "Error spawning thread");
-      free(q_bufs);
-      free(frame_bufs);
-      cleanup_logging();
+      perform_cleanup();
       return ret;
     }
+
+    cleanup.thread_count++;
   }
 
   sem_t* consumer_ready = sem_open(
@@ -183,33 +218,10 @@ int main() {
       strerror(errno)
     );
     log(ERROR, logstr);
-    free(q_bufs);
-    free(frame_bufs);
-    cleanup_logging();
+    perform_cleanup();
     return -errno;
   }
-
-  sem_t* stop_streams = sem_open(
-    SEM_STOP_STREAMS,
-    O_CREAT,
-    0666,
-    0
-  );
-  if (stop_streams == SEM_FAILED) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error opening semaphore: %s",
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    sem_close(consumer_ready);
-    sem_unlink(SEM_CONSUMER_READY);
-    free(q_bufs);
-    free(frame_bufs);
-    cleanup_logging();
-    return -errno;
-  }
+  cleanup.consumer_ready = consumer_ready;
 
   int shm_fd = shm_open(
     SHM_NAME,
@@ -224,14 +236,9 @@ int main() {
       strerror(errno)
     );
     log(ERROR, logstr);
-    sem_close(consumer_ready);
-    sem_close(stop_streams);
-    sem_unlink(SEM_CONSUMER_READY);
-    sem_unlink(SEM_STOP_STREAMS);
-    free(q_bufs);
-    free(frame_bufs);
-    cleanup_logging();
+    perform_cleanup();
   }
+  cleanup.shm_fd = shm_fd;
 
   size_t shm_size = frame_buf_size * cam_count;
   ret = ftruncate(
@@ -246,15 +253,7 @@ int main() {
       strerror(errno)
     );
     log(ERROR, logstr);
-    close(shm_fd);
-    shm_unlink(SHM_NAME);
-    sem_close(consumer_ready);
-    sem_close(stop_streams);
-    sem_unlink(SEM_CONSUMER_READY);
-    sem_unlink(SEM_STOP_STREAMS);
-    free(q_bufs);
-    free(frame_bufs);
-    cleanup_logging();
+    perform_cleanup();
   }
 
   void* frameset_buf = mmap(
@@ -273,16 +272,9 @@ int main() {
       strerror(errno)
     );
     log(ERROR, logstr);
-    close(shm_fd);
-    shm_unlink(SHM_NAME);
-    sem_close(consumer_ready);
-    sem_close(stop_streams);
-    sem_unlink(SEM_CONSUMER_READY);
-    sem_unlink(SEM_STOP_STREAMS);
-    free(q_bufs);
-    free(frame_bufs);
-    cleanup_logging();
+    perform_cleanup();
   }
+  cleanup.frameset_buf = frameset_buf;
 
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -292,8 +284,7 @@ int main() {
   struct ts_frame_buf* current_frames[cam_count];
   memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
 
-  int stop_val = 0; // set to 1 by frameset consumer process, checked at the end of the loop
-  while (!stop_val) {
+  while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread
     bool full_set = true;
     for(int i = 0; i < cam_count; i++) {
@@ -331,14 +322,6 @@ int main() {
     if (!all_equal)
       continue;
 
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Received full frame set with timestamp %lu",
-      max_timestamp
-    );
-    log(INFO, logstr);
-
     // check if consumer_ready here
     int consumer_ready_val;
     sem_getvalue(consumer_ready, &consumer_ready_val);
@@ -350,7 +333,6 @@ int main() {
           frame_buf_size
         );
       }
-      log(INFO, "Copied frameset to shared memory for consumer process");
       sem_post(consumer_ready);
     }
 
@@ -359,27 +341,51 @@ int main() {
       spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
       current_frames[i] = NULL;
     }
-
-    // check if we should stop and cleanup
-    sem_getvalue(stop_streams, &stop_val);
   }
 
+  // stop the camera devices
   const char* stop_msg = "STOP";
   broadcast_msg(confs, cam_count, stop_msg, strlen(stop_msg));
 
-  for (int i = 0; i < cam_count; i++) {
-    pthread_join(threads[i], NULL);
+  perform_cleanup();
+  return ret;
+}
+
+static void shutdown_handler(int signum) {
+  (void)signum;
+  running = 0;
+}
+
+static void perform_cleanup() {
+  if (cleanup.frameset_buf)
+    munmap(cleanup.frameset_buf, cleanup.shm_size);
+
+  if (cleanup.shm_fd >= 0) {
+    close(cleanup.shm_fd);
+    shm_unlink(SHM_NAME);
   }
 
-  munmap(frameset_buf, shm_size);
-  close(shm_fd);
-  shm_unlink(SHM_NAME);
-  sem_close(consumer_ready);
-  sem_close(stop_streams);
-  sem_unlink(SEM_CONSUMER_READY);
-  sem_unlink(SEM_STOP_STREAMS);
-  free(q_bufs);
-  free(frame_bufs);
-  cleanup_logging();
-  return ret;
+  if (cleanup.consumer_ready) {
+    sem_close(cleanup.consumer_ready);
+    sem_unlink(SEM_CONSUMER_READY);
+  }
+
+  if (cleanup.threads) {
+    for (int i = 0; i < cleanup.thread_count; i++) {
+      pthread_kill(cleanup.threads[i], SIGUSR2);
+    }
+
+    for (int i = 0; i < cleanup.thread_count; i++) {
+        pthread_join(cleanup.threads[i], NULL);
+    }
+  }
+
+  if (cleanup.q_bufs)
+    free(cleanup.q_bufs);
+
+  if (cleanup.frame_bufs)
+    free(cleanup.frame_bufs);
+
+  if (cleanup.logging_initialized)
+    cleanup_logging();
 }

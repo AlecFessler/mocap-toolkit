@@ -236,16 +236,6 @@ int parse_conf(cam_conf* confs, int count) {
         goto cleanup;
       }
 
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Setting field %s to value %s for %s",
-        fields[i].name,
-        pstr,
-        confs[confs_parsed].name
-      );
-      log(DEBUG, logstr);
-
       if (++fields_parsed == fields_total) {
         fields_parsed = 0;
         confs_parsed++;

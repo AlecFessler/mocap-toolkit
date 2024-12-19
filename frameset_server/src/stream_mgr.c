@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -15,9 +16,23 @@
 #include "stream_mgr.h"
 #include "viddec.h"
 
-void* stream_mgr(void* ptr) {
+static volatile sig_atomic_t running = 1;
+
+static void shutdown_handler(int signum);
+
+void* stream_mgr_fn(void* ptr) {
   int ret = 0;
   char logstr[128];
+
+  struct sigaction sa = {
+    .sa_handler = shutdown_handler,
+    .sa_flags = 0
+  };
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGUSR2, &sa, NULL);
+
+  int sockfd = -1;
+  int clientfd = -1;
 
   struct thread_ctx* ctx = (struct thread_ctx*)ptr;
   uint8_t* enc_frame_buf = malloc(ENCODED_FRAME_BUF_SIZE);
@@ -29,10 +44,8 @@ void* stream_mgr(void* ptr) {
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(ctx->core, &cpuset);
-
-  pid_t tid = gettid();
   ret = sched_setaffinity(
-    tid,
+    gettid(),
     sizeof(cpu_set_t),
     &cpuset
   );
@@ -41,7 +54,7 @@ void* stream_mgr(void* ptr) {
       logstr,
       sizeof(logstr),
       "Error pinning thread %d to core %d, err: %s",
-      tid,
+      gettid(),
       ctx->core,
       strerror(errno)
     );
@@ -70,13 +83,13 @@ void* stream_mgr(void* ptr) {
     goto cleanup;
   }
 
-  int sockfd = setup_stream(ctx->conf);
+  sockfd = setup_stream(ctx->conf);
   if (sockfd < 0) {
     ret = -EIO;
     goto cleanup;
   }
 
-  int clientfd = accept_conn(sockfd);
+  clientfd = accept_conn(sockfd);
   if (clientfd < 0) {
     ret = -EIO;
     goto cleanup;
@@ -85,7 +98,7 @@ void* stream_mgr(void* ptr) {
   struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
 
   bool incoming_stream = true;
-  while (true) {
+  while (running) {
     if (incoming_stream) {
       uint64_t timestamp = 0;
       ssize_t pkt_size = recv_from_stream(
@@ -95,10 +108,13 @@ void* stream_mgr(void* ptr) {
       );
 
       if (pkt_size != sizeof(timestamp)) {
+        if (errno == EINTR)
+          break; // shutdown signal
+
         snprintf(
           logstr,
           sizeof(logstr),
-          "Received unexpected timestamp size with %zd bytes from cam %s",
+          "Received unexpected timestamp size %zd from cam %s",
           pkt_size,
           ctx->conf->name
         );
@@ -129,10 +145,13 @@ void* stream_mgr(void* ptr) {
       );
 
       if (pkt_size != sizeof(frame_size)) {
+        if (errno == EINTR)
+          break; // shutdown signal
+
         snprintf(
           logstr,
           sizeof(logstr),
-          "Received unexpected frame size buffer with %ld bytes from cam %s",
+          "Received unexpected frame size %ld from cam %s",
           pkt_size,
           ctx->conf->name
         );
@@ -159,6 +178,9 @@ void* stream_mgr(void* ptr) {
       );
 
       if (pkt_size != frame_size) {
+        if (errno == EINTR)
+          break; // shutdown signal
+
         snprintf(
           logstr,
           sizeof(logstr),
@@ -206,17 +228,19 @@ void* stream_mgr(void* ptr) {
   }
 
 cleanup:
-  if (enc_frame_buf) {
+  if (enc_frame_buf)
     free(enc_frame_buf);
-  }
   cleanup_decoder(&viddec);
   cleanup_queue(&timestamp_queue);
-  if (sockfd >= 0) {
+  if (sockfd >= 0)
     close(sockfd);
-  }
-  if (clientfd >= 0) {
+  if (clientfd >= 0)
     close(clientfd);
-  }
 
   return NULL;
+}
+
+static void shutdown_handler(int signum) {
+  (void)signum;
+  running = 0;
 }
