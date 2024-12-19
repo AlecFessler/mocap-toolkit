@@ -325,10 +325,8 @@ int main() {
       }
     }
 
-    if (!all_equal) {
-      nanosleep(&ts, NULL);
+    if (!all_equal)
       continue;
-    }
 
     // check if consumer_ready here
     int consumer_ready_val;

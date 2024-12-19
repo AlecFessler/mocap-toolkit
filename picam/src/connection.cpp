@@ -178,7 +178,7 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
       while (tcpfd < 0) {
         int ret = conn_tcp();
         if (ret < 0) {
-          if (retries++ == MAX_RETRIES) {
+          if (++retries == MAX_RETRIES) {
             LOG(WARNING, "No more connection retries");
             return -ECONNRESET;
           }
