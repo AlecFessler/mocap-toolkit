@@ -5,10 +5,9 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
-#include "logger.h"
-#include "videnc.h"
 
-extern std::unique_ptr<logger_t> logger;
+#include "logging.h"
+#include "videnc.h"
 
 videnc::videnc(const config& config)
   : width(config.frame_width),
@@ -39,14 +38,14 @@ videnc::videnc(const config& config)
   codec = avcodec_find_encoder_by_name("libx264");
   if (!codec) {
     const char* err = "Could not find libx264 encoder";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
   ctx = avcodec_alloc_context3(codec);
   if (!ctx) {
     const char* err = "Could not allocate encoder context";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -65,7 +64,7 @@ videnc::videnc(const config& config)
     av_dict_free(&opts);
     avcodec_free_context(&ctx);
     const char* err = "Could not open codec";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
   av_dict_free(&opts);
@@ -74,7 +73,7 @@ videnc::videnc(const config& config)
   if (!frame) {
     avcodec_free_context(&ctx);
     const char* err = "Could not allocate frame";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -86,7 +85,7 @@ videnc::videnc(const config& config)
     av_frame_free(&frame);
     avcodec_free_context(&ctx);
     const char* err = "Could not allocate frame data";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -95,7 +94,7 @@ videnc::videnc(const config& config)
     av_frame_free(&frame);
     avcodec_free_context(&ctx);
     const char* err = "Could not allocate packet";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -123,7 +122,7 @@ void videnc::encode_frame(uint8_t* data) {
 
   if (av_frame_make_writable(frame) < 0) {
     const char* err = "Frame is not writable";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -135,7 +134,7 @@ void videnc::encode_frame(uint8_t* data) {
 
   if (avcodec_send_frame(ctx, frame) < 0) {
     const char* err = "Error sending frame for encoding";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -144,7 +143,7 @@ void videnc::flush() {
   int ret = avcodec_send_frame(ctx, nullptr); // signal end of stream
   if (ret < 0) {
     const char* err = "Error signaling EOF to encoder";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -155,7 +154,7 @@ uint8_t* videnc::recv_frame(int& size) {
   if (ret == AVERROR_EOF) return nullptr; // no more packets
   if (ret < 0) {
     const char* err = "Error receiving packet";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
   size = pkt->size;

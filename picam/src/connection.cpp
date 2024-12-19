@@ -4,17 +4,17 @@
 
 #include <arpa/inet.h>
 #include <cstring>
+#include <errno.h>
 #include <stdexcept>
 #include <string>
 #include <memory>
 #include <unistd.h>
+
 #include "connection.h"
-#include "logger.h"
+#include "logging.h"
 
 static const int MAX_RETRIES = 3;
 static constexpr char END_STREAM[] = "EOSTREAM";
-
-extern std::unique_ptr<logger_t> logger;
 
 connection::connection()
   noexcept :
@@ -95,10 +95,17 @@ int connection::conn_tcp() {
    *   -EINVAL on invalid port or IP address
    */
   if (tcpfd >= 0) return 0;
+  char logstr[128];
 
   tcpfd = socket(AF_INET, SOCK_STREAM, 0);
   if (tcpfd < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create socket");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to create socket: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
@@ -107,7 +114,7 @@ int connection::conn_tcp() {
 
   int tcp_port_num = std::stoi(tcp_port);
   if (tcp_port_num < 1 || tcp_port_num > 65535) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid tcp_port number");
+    LOG(ERROR, "Invalid tcp_port number");
     return -EINVAL;
   }
 
@@ -115,21 +122,27 @@ int connection::conn_tcp() {
 
   if (inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0) {
     if (errno == 0) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid IP address format");
+      LOG(ERROR, "Invalid IP address format");
       return -EINVAL;
     } else {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "System error during IP address conversion");
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Error during IP address conversion: %s",
+        strerror(errno)
+      );
+      LOG(ERROR, logstr);
       return -errno;
     }
   }
 
   while (connect(tcpfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
     if (errno == EINTR) continue;
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to connect to server");
+    LOG(ERROR, "Failed to connect to server");
     return -errno;
   }
 
-  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Connected to server");
+  LOG(DEBUG, "Connected to server");
   return 0;
 }
 
@@ -159,13 +172,16 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
   size_t total_written = 0;
   while (total_written < pkt_size) {
     if (tcpfd < 0) {
-      int ret = conn_tcp();
-      if (ret < 0) {
-        if (retries++ == MAX_RETRIES) {
-          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "No more connection retries");
-          return ret;
+      LOG(WARNING, "Not connected to server, trying to connect");
+      while (tcpfd < 0) {
+        tcpfd = conn_tcp();
+        if (tcpfd < 0) {
+          if (retries++ == MAX_RETRIES) {
+            LOG(WARNING, "No more connection retries");
+            return tcpfd;
+          }
+          LOG(WARNING, "Failed to connect, retrying");
         }
-        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying");
       }
     }
 
@@ -178,24 +194,17 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
     if (result < 0) {
       if (errno == EINTR) continue;
       if (errno == EPIPE || errno == ECONNRESET) {
-        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Connection lost, attempting reconnect");
+        LOG(WARNING, "Server disconnected while streaming a frame packet");
         close(tcpfd);
         tcpfd = -1;
-        int ret = conn_tcp();
-        if (ret < 0) {
-          if (retries++ == MAX_RETRIES) return ret;
-          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
-        }
         continue;
       }
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error transmitting frame packet");
+      LOG(ERROR, "Error transmitting frame packet");
       return -1;
     }
 
     total_written += result;
   }
-
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Transmitted frame packet");
   return 0;
 }
 
@@ -206,10 +215,16 @@ int connection::end_stream() {
   size_t total_written = 0;
   while (total_written < end_stream_size) {
     if (tcpfd < 0) {
-      int ret = conn_tcp();
-      if (ret < 0) {
-        if (retries++ == MAX_RETRIES) return ret;
-        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
+      LOG(WARNING, "Not connected to server, trying to connect");
+      while (tcpfd < 0) {
+        tcpfd = conn_tcp();
+        if (tcpfd < 0) {
+          if (retries++ == MAX_RETRIES) {
+            LOG(WARNING, "No more connection retries");
+            return tcpfd;
+          }
+          LOG(WARNING, "Failed to connect, retrying");
+        }
       }
     }
 
@@ -222,24 +237,18 @@ int connection::end_stream() {
     if (result < 0) {
       if (errno == EINTR) continue;
       if (errno == EPIPE || errno == ECONNRESET) {
-        logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Connection lost, attempting reconnect");
+        LOG(WARNING, "Server disconnected while notifying end of stream");
         close(tcpfd);
         tcpfd = -1;
-        int ret = conn_tcp();
-        if (ret < 0) {
-          if (retries++ == MAX_RETRIES) return ret;
-          logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Failed to connect, retrying...");
-        }
         continue;
       }
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Error sending end stream message to server");
+      LOG(ERROR, "Error sending end of stream to server");
       return -1;
     }
 
     total_written += result;
   }
 
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Sent end stream message to server");
   return 0;
 }
 
@@ -273,10 +282,17 @@ int connection::bind_udp() {
    *   -EINVAL on invalid port configuration
    */
   if (udpfd >= 0) return 0;
+  char logstr[128];
 
   udpfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (udpfd < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create UDP socket");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to create UDP socket: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
@@ -287,18 +303,23 @@ int connection::bind_udp() {
 
   int udp_port_num = std::stoi(udp_port);
   if (udp_port_num < 1 || udp_port_num > 65535) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Invalid udp_port number");
+    LOG(ERROR, "Invalid udp_port number");
     return -EINVAL;
   }
   udp_addr.sin_port = htons(udp_port_num);
 
   while (bind(udpfd, (struct sockaddr*)&udp_addr, sizeof(udp_addr)) < 0) {
     if (errno == EINTR) continue;
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to bind UDP socket");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to bind UDP socket: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "UDP socket bound successfully");
   return 0;
 }
 

@@ -3,11 +3,11 @@
 #include <semaphore.h>
 #include <stdexcept>
 #include <sys/mman.h>
+
 #include "camera_handler.h"
 #include "config.h"
-#include "logger.h"
+#include "logging.h"
 
-extern std::unique_ptr<logger_t> logger;
 
 camera_handler_t::camera_handler_t(
   config& config,
@@ -79,26 +79,26 @@ void camera_handler_t::init_camera_manager() {
   cm_ = std::make_unique<libcamera::CameraManager>();
   if (cm_->start() < 0) {
     const char* err = "Failed to start camera manager";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
   auto cameras = cm_->cameras();
   if (cameras.empty()) {
     const char* err = "No cameras available";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
   camera_ = cm_->get(cameras[0]->id());
   if (!camera_) {
     const char* err = "Failed to retrieve camera";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
   if (camera_->acquire() < 0) {
     const char* err = "Failed to acquire camera";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -124,7 +124,7 @@ void camera_handler_t::init_camera_config(config& config) {
   config_ = camera_->generateConfiguration({ libcamera::StreamRole::VideoRecording });
   if (!config_) {
     const char* err = "Failed to generate camera configuration";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -135,17 +135,17 @@ void camera_handler_t::init_camera_config(config& config) {
 
   if (config_->validate() == libcamera::CameraConfiguration::Invalid) {
     const char* err = "Invalid camera configuration, unable to adjust";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   } else if (config_->validate() == libcamera::CameraConfiguration::Adjusted) {
     const char* err = "Invalid camera configuration, adjusted";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
   if (camera_->configure(config_.get()) < 0) {
     const char* err = "Failed to configure camera";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -155,7 +155,7 @@ void camera_handler_t::init_dma_buffer() {
   stream_ = config_->at(0).stream();
   if (allocator_->allocate(stream_) < 0) {
     const char* err = "Failed to allocate buffers";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -163,13 +163,13 @@ void camera_handler_t::init_dma_buffer() {
   request = camera_->createRequest();
   if (!request) {
     const char* err = "Failed to create request";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
   if (request->addBuffer(stream_, buffer.get()) < 0) {
     const char* err = "Failed to add buffer to request";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -183,7 +183,7 @@ void camera_handler_t::init_dma_buffer() {
 
   if (y_plane.length != y_plane_bytes || u_plane.length != u_plane_bytes || v_plane.length != v_plane_bytes) {
     const char* err = "Plane size does not match expected size";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 
@@ -197,9 +197,15 @@ void camera_handler_t::init_dma_buffer() {
   );
 
   if (data == MAP_FAILED) {
-    std::string err = "Failed to mmap plane data: " + std::string(strerror(errno));
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err.c_str());
-    throw std::runtime_error(err);
+    char logstr[128];
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to mmap plane data: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
+    throw std::runtime_error(logstr);
   }
 
   frame_buffer = (uint8_t*)data;
@@ -248,7 +254,7 @@ void camera_handler_t::init_camera_controls(config& config) {
 
   if (camera_->start(controls_.get()) < 0) {
     const char* err = "Failed to start camera";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -279,7 +285,7 @@ camera_handler_t::~camera_handler_t() {
 void camera_handler_t::queue_request() {
   if (camera_->queueRequest(request.get()) < 0) {
     const char* err = "Failed to queue request";
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, err);
+    LOG(ERROR, err);
     throw std::runtime_error(err);
   }
 }
@@ -289,8 +295,6 @@ void camera_handler_t::request_complete(libcamera::Request* request) {
     return;
 
   request->reuse(libcamera::Request::ReuseBuffers);
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Request completed");
-
   frame_rdy = 1;
   sem_post(&loop_ctl_sem);
 }

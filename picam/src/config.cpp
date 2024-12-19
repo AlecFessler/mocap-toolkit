@@ -5,7 +5,9 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+
 #include "config.h"
+#include "logging.h"
 
 static void trim(std::string& str) {
   /**
@@ -67,7 +69,7 @@ config parse_config(const std::string& filename) {
   config config;
   std::ifstream file(filename);
   if (!file)
-    throw std::runtime_error("Could not open config file: " + filename);
+    LOG(ERROR, "Could not open config file");
 
   std::string line;
   while (std::getline(file, line)) {

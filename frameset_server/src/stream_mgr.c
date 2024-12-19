@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "queue.h"
@@ -214,11 +215,28 @@ void* stream_mgr_fn(void* ptr) {
       dequeue(&timestamp_queue, (void*)&current_buf->timestamp);
       spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
 
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Thread %d enqueued frame with timestamp %lu",
+        gettid(),
+        current_buf->timestamp
+      );
+      log(DEBUG, logstr);
+
       current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       if (!current_buf) {
-        log(ERROR, "Frame buffer queue was empty");
-        ret = -ENOBUFS;
-        goto cleanup;
+        log(WARNING, "Frame buffer queue was empty");
+        while (!current_buf && running) {
+          struct timespec ts = {
+            .tv_sec = 0,
+            .tv_nsec = 10000
+          };
+          nanosleep(&ts, NULL);
+          current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
+        }
+        if (current_buf)
+          log(INFO, "Received frame buffer after retries");
       }
     }
   }

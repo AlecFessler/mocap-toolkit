@@ -95,6 +95,25 @@ int setup_stream(cam_conf* conf) {
     return -errno;
   }
 
+  int enable = 1;
+  ret = setsockopt(
+    sockfd,
+    SOL_SOCKET,
+    SO_REUSEADDR,
+    &enable,
+    sizeof(int)
+  );
+  if (ret < 0) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error setting SO_REUSEADDR: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    return -errno;
+  }
+
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;

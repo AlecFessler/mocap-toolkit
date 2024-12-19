@@ -1,7 +1,7 @@
 CC=gcc
 PKG_AVCODEC=$(shell pkg-config --cflags libavcodec libavutil)
 INCLUDES=-I./include $(PKG_AVCODEC)
-CFLAGS=-Wall -Wextra -O3 $(INCLUDES)
+CFLAGS=-Wall -Wextra -O2 $(INCLUDES)
 
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
 LDFLAGS=-pthread -latomic -lyaml $(PKG_LIBS_AVCODEC)

@@ -297,6 +297,15 @@ int main() {
         full_set = false; // queue empty
         continue;
       }
+
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Received frame with timestamp %lu from thread %d",
+        current_frames[i]->timestamp,
+        i
+      );
+      log(DEBUG, logstr);
     }
 
     if (!full_set)
@@ -322,6 +331,14 @@ int main() {
     if (!all_equal)
       continue;
 
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Received full frameset with timestamp %lu",
+      max_timestamp
+    );
+    log(DEBUG, logstr);
+
     // check if consumer_ready here
     int consumer_ready_val;
     sem_getvalue(consumer_ready, &consumer_ready_val);
@@ -334,6 +351,7 @@ int main() {
         );
       }
       sem_post(consumer_ready);
+      log(DEBUG, "Copied frameset to consumer");
     }
 
     // get a new full set

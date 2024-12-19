@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <errno.h>
 #include <exception>
 #include <fcntl.h>
 #include <iostream>
@@ -18,13 +19,12 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
 #include "camera_handler.h"
 #include "connection.h"
-#include "logger.h"
+#include "logging.h"
 #include "sem_init.h"
 #include "videnc.h"
-
-extern char** environ;
 
 constexpr uint64_t ns_per_s = 1'000'000'000;
 
@@ -36,8 +36,6 @@ volatile static sig_atomic_t frame_rdy = 0;
 static std::unique_ptr<sem_t, sem_deleter> loop_ctl_sem;
 static std::unique_ptr<camera_handler_t> cam;
 static std::unique_ptr<connection> conn;
-
-std::unique_ptr<logger_t> logger;
 
 inline int init_realtime_scheduling(int recording_cpu);
 inline int init_timer(timer_t* timerid);
@@ -55,7 +53,12 @@ inline void flush_encoder(
 
 int main() {
   try {
-    logger = std::make_unique<logger_t>("logs.txt");
+    int ret = setup_logging("logs.txt");
+    if (ret) {
+      std::cout << "Error opening log file: " << strerror(errno) << "\n";
+      return -errno;
+    }
+
     config config = parse_config("config.txt");
 
     uint64_t frame_counter = 0;
@@ -72,7 +75,6 @@ int main() {
     conn = std::make_unique<connection>(config);
     auto encoder = std::make_unique<videnc>(config);
 
-    int ret;
     if ((ret = init_realtime_scheduling(config.recording_cpu)) < 0) return ret;
     if ((ret = init_timer(&timerid)) < 0) return ret;
     if ((ret = init_signals()) < 0) return ret;
@@ -112,12 +114,17 @@ int main() {
     }
 
     flush_encoder(*encoder, *conn);
+    cleanup_logging();
 
   } catch (const std::exception& e) {
-    if (logger)
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, e.what());
-    else
-      std::cerr << e.what() << std::endl;
+    char logstr[128];
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Runtime error: %s",
+      e.what()
+    );
+    LOG(ERROR, logstr);
     return EXIT_FAILURE;
   }
 
@@ -129,7 +136,6 @@ void capture_signal_handler(int signo, siginfo_t* info, void* context) {
   (void)info;
   (void)context;
   cam->queue_request();
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Capture request queued");
 }
 
 void io_signal_handler(int signo, siginfo_t* info, void* context) {
@@ -151,14 +157,14 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
   }
 
   if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
-      logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Received stop signal, ending stream...");
+      LOG(INFO, "Received stop signal, ending stream...");
       timestamp = 0;
       stream_end = 1;
       sem_post(loop_ctl_sem.get());
       return;
   }
 
-  logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, "Unexpected udp message size");
+  LOG(ERROR, "Unexpected udp message size");
 }
 
 void exit_signal_handler(int signo, siginfo_t* info, void* context) {
@@ -184,18 +190,32 @@ inline int init_realtime_scheduling(int recording_cpu) {
    *    of lower priority than max will be preempted as soon as we have
    *    a signal to handle or the semaphore is unblocked.
    */
+  char logstr[128];
+
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(recording_cpu, &cpuset);
   if (sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set CPU affinity");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set CPU affinity: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
   struct sched_param param;
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set real-time scheduling policy");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set real-time scheduling policy: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
   return 0;
@@ -225,13 +245,21 @@ inline int init_timer(timer_t* timerid) {
    *
    * Returns 0 on success, -errno on failure
    */
+  char logstr[128];
+
   struct sigevent sev;
   sev.sigev_notify = SIGEV_SIGNAL;
   sev.sigev_signo = SIGUSR1;
   sev.sigev_value.sival_ptr = timerid;
 
   if (timer_create(CLOCK_MONOTONIC, &sev, timerid) == -1) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to create timer");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to create timer: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
   return 0;
@@ -280,28 +308,15 @@ inline void arm_timer(timer_t timerid, uint64_t frame_duration, uint64_t& frame_
     uint64_t current_real_ns = (uint64_t)real_time.tv_sec * ns_per_s + real_time.tv_nsec;
     uint64_t current_mono_ns = (uint64_t)mono_time.tv_sec * ns_per_s + mono_time.tv_nsec;
 
-    // cast frame_duration to prevent integer overflow at 129th frame
     uint64_t target = timestamp + frame_duration * frame_counter;
     uint64_t ns_until_target = target - current_real_ns;
-
-    char debug_msg[256];
-    snprintf(debug_msg, sizeof(debug_msg),
-             "Current real: %ld, Target: %ld, Delta: %ld ns (%.2f ms)",
-             current_real_ns, target, ns_until_target,
-             ns_until_target / 1000000.0);
-    logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 
     if (ns_until_target <= 0) {
         uint32_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
         uint64_t ns_elapsed = frames_elapsed * frame_duration;
-        ns_until_target += ns_elapsed; // adjust ns_until_target for setting this current timer
-        frame_counter += frames_elapsed; // adjust counter so we're caught up for future frames
+        ns_until_target += ns_elapsed;             // adjust ns_until_target for setting this current timer
+        frame_counter += frames_elapsed;           // adjust counter so we're caught up for future frames
         target += frame_duration * frames_elapsed; // adjust the target for the connections timestamp queue
-
-        snprintf(debug_msg, sizeof(debug_msg),
-                "Target in past, adjusted by %d frames, new frame count: %ld ns",
-                frames_elapsed, frame_counter);
-        logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
     }
 
     conn->frame_timestamps.push(target);
@@ -315,11 +330,6 @@ inline void arm_timer(timer_t timerid, uint64_t frame_duration, uint64_t& frame_
     its.it_interval.tv_nsec = 0;
 
     timer_settime(timerid, TIMER_ABSTIME, &its, NULL);
-
-    //snprintf(debug_msg, sizeof(debug_msg),
-    //         "Timer set for monotonic timestamp %ld (current mono: %ld)",
-    //         mono_target_ns, current_mono_ns);
-    //logger->log(logger_t::level_t::DEBUG, __FILE__, __LINE__, debug_msg);
 }
 
 inline int init_sigio(int fd) {
@@ -336,17 +346,30 @@ inline int init_sigio(int fd) {
    * message since the SIGIO will be emitted upon receiving any
    * data on the port assigned to the udp file descriptor.
    */
+  char logstr[128];
+
   if (fcntl(fd, F_SETFL, O_NONBLOCK | O_ASYNC) < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set O_NONBLOCK | O_ASYNC on UDP socket");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set properties for UDP socket: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
   if (fcntl(fd, F_SETOWN, getpid()) < 0) {
-    logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set owner process for SIGIO");
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to set owner process for SIGIO: %s",
+      strerror(errno)
+    );
+    LOG(ERROR, logstr);
     return -errno;
   }
 
-  logger->log(logger_t::level_t::INFO, __FILE__, __LINE__, "Signal-driven I/O enabled");
   return 0;
 }
 
@@ -373,6 +396,8 @@ inline int init_signals() {
    * SA_RESTART flag is set, which means any interrupted syscalls
    * will be retried.
    */
+  char logstr[128];
+
   struct sigaction action;
   action.sa_sigaction = capture_signal_handler;
   action.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -392,7 +417,13 @@ inline int init_signals() {
       sigaction(SIGIO, &io_action, NULL) < 0 ||
       sigaction(SIGINT, &exit_action, NULL) < 0 ||
       sigaction(SIGTERM, &exit_action, NULL) < 0) {
-      logger->log(logger_t::level_t::ERROR, __FILE__, __LINE__, "Failed to set signal handlers");
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Failed to set signal handlers: %s",
+        strerror(errno)
+      );
+      LOG(ERROR, logstr);
       return -errno;
     }
 

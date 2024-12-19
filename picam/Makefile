@@ -2,7 +2,7 @@ CC=g++
 PKG_CAMERA=$(shell pkg-config --cflags libcamera)
 PKG_AVCODEC=$(shell pkg-config --cflags libavcodec libavutil)
 INCLUDES=-I./include $(PKG_CAMERA) $(PKG_AVCODEC)
-CFLAGS=-Wall -Wextra -g $(INCLUDES)
+CFLAGS=-Wall -Wextra -O3 $(INCLUDES)
 
 PKG_LIBS_CAMERA=$(shell pkg-config --libs libcamera)
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
