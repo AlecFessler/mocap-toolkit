@@ -7,7 +7,7 @@
 #include "spsc_queue.h"
 
 #define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
-#define DECODED_FRAME_WIDTH 1080
+#define DECODED_FRAME_WIDTH 1280
 #define DECODED_FRAME_HEIGHT 720
 
 struct thread_ctx {
