@@ -1,11 +1,24 @@
-Write lens calibration tool
+Immediate TODO
+______________________________________________________________________________________________
 
-Write stereo calibration tool
+- Add a second semaphore for frameset access so that the consumers don't miss any frames
 
-Perform camera calibration
+- Add a function to the parse_conf file to parse the stream parameters
 
-Write preprocessing script
+- Update the C server to use use the stream parameters from the yaml file
 
-Finish writing and updating docstrings
+- Copy the parse_conf file into toolkit/common/ and update the lens_calibration tool to use it
 
-Update Readme based on new architecture
+
+Long term TODO
+______________________________________________________________________________________________
+
+- Write stereo calibration tool
+
+- Perform camera calibration
+
+- Write preprocessing script
+
+- Finish writing and updating docstrings
+
+- Update Readme based on new architecture
