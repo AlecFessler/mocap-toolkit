@@ -266,6 +266,7 @@ int main() {
   );
 
   struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
+  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * frame_bufs_count);
   for (int i = 0; i < FRAME_BUFS_PER_THREAD; i++) {
     size_t offset = i * sizeof(struct ts_frame_buf*) * cam_count;
     spsc_enqueue(
