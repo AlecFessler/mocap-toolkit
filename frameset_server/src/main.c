@@ -2,7 +2,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -25,7 +24,6 @@
 #define CAM_CONF_PATH "/etc/mocap-toolkit/cams.yaml"
 
 #define SHM_NAME "/mocap-toolkit_frameset"
-#define SEM_CONSUMER_READY "/mocap-toolkit_consumer_ready"
 
 #define CORES_PER_CCD 8
 #define TIMESTAMP_DELAY 1 // seconds
@@ -36,12 +34,9 @@ static void shutdown_handler(int signum);
 static void perform_cleanup();
 
 struct cleanup_ctx {
-  void* frame_bufs;
-  void* q_bufs;
-  void* frameset_buf;
+  void* mmap_buf;
   size_t shm_size;
   int shm_fd;
-  sem_t* consumer_ready;
   pthread_t* threads;
   int thread_count;
   bool logging_initialized;
@@ -141,21 +136,142 @@ int main() {
     return -errno;
   }
 
+
+  int shm_fd = shm_open(
+    SHM_NAME,
+    O_CREAT | O_RDWR,
+    0666
+  );
+  if (shm_fd == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error creating shared memory: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    perform_cleanup();
+  }
+  cleanup.shm_fd = shm_fd;
+
+  #define align_up(offset, align) (((offset) + (align-1)) & ~(align-1))
+
+  // frame buffers
   const uint64_t frame_bufs_count = cam_count * FRAME_BUFS_PER_THREAD;
   const uint64_t frame_buf_size = DECODED_FRAME_WIDTH * DECODED_FRAME_HEIGHT * 3 / 2;
+  size_t shm_size = frame_buf_size * frame_bufs_count;
 
-  uint8_t* frame_bufs = malloc(frame_bufs_count * frame_buf_size);
-  if (!frame_bufs) {
-    log(ERROR, "Failed to allocate frame buffers");
+  // timestamped structs with frame buffer ptrs
+  shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf));
+  size_t ts_frame_bufs_offset = shm_size;
+  shm_size += sizeof(struct ts_frame_buf) * frame_bufs_count;
+
+  // filled frameset producer queue
+  shm_size = align_up(shm_size, _Alignof(struct producer_q));
+  size_t filled_frameset_producer_q_offset = shm_size;
+  shm_size += sizeof(struct producer_q);
+
+  // filled frameset consumer queue
+  shm_size = align_up(shm_size, _Alignof(struct consumer_q));
+  size_t filled_frameset_consumer_q_offset = shm_size;
+  shm_size += sizeof(struct consumer_q);
+
+  // empty frameset producer queue
+  shm_size = align_up(shm_size, _Alignof(struct producer_q));
+  size_t empty_frameset_producer_q_offset = shm_size;
+  shm_size += sizeof(struct producer_q);
+
+  // empty frameset consumer queue
+  shm_size = align_up(shm_size, _Alignof(struct consumer_q));
+  size_t empty_frameset_consumer_q_offset = shm_size;
+  shm_size += sizeof(struct consumer_q);
+
+  // filled frameset queue buffer
+  shm_size = align_up(shm_size, _Alignof(void**));
+  size_t filled_q_bufs_offset = shm_size;
+  shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
+
+  // empty frameset queue buffer
+  shm_size = align_up(shm_size, _Alignof(void**));
+  size_t empty_q_bufs_offset = shm_size;
+  shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
+
+  // framesets slots
+  shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf*));
+  size_t frameset_slots_offset = shm_size;
+  shm_size += sizeof(struct ts_frame_buf*) * frame_bufs_count;
+
+  ret = ftruncate(
+    shm_fd,
+    shm_size
+  );
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error creating shared memory: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
     perform_cleanup();
-    return -ENOMEM;
   }
-  cleanup.frame_bufs = frame_bufs;
+  cleanup.shm_size = shm_size;
 
-  struct ts_frame_buf ts_frame_bufs[frame_bufs_count];
+  uint8_t* mmap_buf = mmap(
+    NULL,
+    shm_size,
+    PROT_READ | PROT_WRITE,
+    MAP_SHARED,
+    shm_fd,
+    0
+  );
+  if (mmap_buf == MAP_FAILED) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error mapping shared memory: %s",
+      strerror(errno)
+    );
+    log(ERROR, logstr);
+    perform_cleanup();
+  }
+  cleanup.mmap_buf = mmap_buf;
+
+  // assign frame buffers to ts_frame_bufs (this is a permanent assignment)
+  uint8_t* frame_bufs = mmap_buf;
+  struct ts_frame_buf* ts_frame_bufs = (struct ts_frame_buf*)(mmap_buf + ts_frame_bufs_offset);
   for (uint i = 0; i < frame_bufs_count; i++) {
     size_t offset = i * frame_buf_size;
     ts_frame_bufs[i].frame_buf = frame_bufs + offset;
+  }
+
+  struct producer_q* filled_frameset_producer_q = (struct producer_q*)(mmap_buf + filled_frameset_producer_q_offset);
+  struct consumer_q* filled_frameset_consumer_q = (struct consumer_q*)(mmap_buf + filled_frameset_consumer_q_offset);
+  void* filled_frameset_q_bufs = (void**)(mmap_buf + filled_q_bufs_offset);
+  spsc_queue_init(
+    filled_frameset_producer_q,
+    filled_frameset_consumer_q,
+    filled_frameset_q_bufs,
+    FRAME_BUFS_PER_THREAD
+  );
+
+  struct producer_q* empty_frameset_producer_q = (struct producer_q*)(mmap_buf + empty_frameset_producer_q_offset);
+  struct consumer_q* empty_frameset_consumer_q = (struct consumer_q*)(mmap_buf + empty_frameset_consumer_q_offset);
+  void* empty_frameset_q_bufs = (void**)(mmap_buf + empty_q_bufs_offset);
+  spsc_queue_init(
+    empty_frameset_producer_q,
+    empty_frameset_consumer_q,
+    empty_frameset_q_bufs,
+    FRAME_BUFS_PER_THREAD
+  );
+
+  struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
+  for (int i = 0; i < FRAME_BUFS_PER_THREAD; i++) {
+    size_t offset = i * sizeof(struct ts_frame_buf*) * cam_count;
+    spsc_enqueue(
+      empty_frameset_producer_q,
+      frameset_slots + offset
+    );
   }
 
   struct producer_q filled_frame_producer_qs[cam_count];
@@ -164,29 +280,19 @@ int main() {
   struct producer_q empty_frame_producer_qs[cam_count];
   struct consumer_q empty_frame_consumer_qs[cam_count];
 
-  void** q_bufs = aligned_alloc(
-    CACHE_LINE_SIZE,
-    sizeof(void*) * frame_bufs_count * 2
-  );
-  if (q_bufs == NULL) {
-    log(ERROR, "Failed to allocate queue buffers");
-    perform_cleanup();
-    return -ENOMEM;
-  }
-  cleanup.q_bufs = q_bufs;
-
+  void* q_bufs[frame_bufs_count * 2];
   for (int i = 0; i < cam_count; i++) {
     spsc_queue_init(
       &filled_frame_producer_qs[i],
       &filled_frame_consumer_qs[i],
-      q_bufs + (i * 2 * FRAME_BUFS_PER_THREAD),
+      &q_bufs[i * 2 * FRAME_BUFS_PER_THREAD],
       FRAME_BUFS_PER_THREAD
     );
 
     spsc_queue_init(
       &empty_frame_producer_qs[i],
       &empty_frame_consumer_qs[i],
-      q_bufs + ((i * 2 + 1) * FRAME_BUFS_PER_THREAD),
+      &q_bufs[(i * 2 + 1) * FRAME_BUFS_PER_THREAD],
       FRAME_BUFS_PER_THREAD
     );
 
@@ -223,78 +329,6 @@ int main() {
 
     cleanup.thread_count++;
   }
-
-  sem_t* consumer_ready = sem_open(
-    SEM_CONSUMER_READY,
-    O_CREAT,
-    0666,
-    0
-  );
-  if (consumer_ready == SEM_FAILED) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error opening semaphore: %s",
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    perform_cleanup();
-    return -errno;
-  }
-  cleanup.consumer_ready = consumer_ready;
-
-  int shm_fd = shm_open(
-    SHM_NAME,
-    O_CREAT | O_RDWR,
-    0666
-  );
-  if (shm_fd == -1) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error creating shared memory: %s",
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    perform_cleanup();
-  }
-  cleanup.shm_fd = shm_fd;
-
-  size_t shm_size = frame_buf_size * cam_count + sizeof(uint64_t);
-  ret = ftruncate(
-    shm_fd,
-    shm_size
-  );
-  if (ret == -1) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error creating shared memory: %s",
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    perform_cleanup();
-  }
-
-  void* frameset_buf = mmap(
-    NULL,
-    shm_size,
-    PROT_WRITE,
-    MAP_SHARED,
-    shm_fd,
-    0
-  );
-  if (frameset_buf == MAP_FAILED) {
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Error mapping shared memory: %s",
-      strerror(errno)
-    );
-    log(ERROR, logstr);
-    perform_cleanup();
-  }
-  cleanup.frameset_buf = frameset_buf;
 
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -356,22 +390,6 @@ int main() {
     );
     log(DEBUG, logstr);
 
-    // check if consumer_ready here
-    int consumer_ready_val;
-    sem_getvalue(consumer_ready, &consumer_ready_val);
-    if (consumer_ready_val == 0) { // consumer is waiting on sem
-      for (int i = 0; i < cam_count; i++) {
-        memcpy(
-          frameset_buf + (i * frame_buf_size),
-          current_frames[i]->frame_buf,
-          frame_buf_size
-        );
-      }
-      uint64_t* timestamp_ptr = frameset_buf + (frame_buf_size * cam_count);
-      *timestamp_ptr = max_timestamp;
-      sem_post(consumer_ready);
-    }
-
     // get a new full set
     for (int i = 0; i < cam_count; i++) {
       spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
@@ -393,19 +411,6 @@ static void shutdown_handler(int signum) {
 }
 
 static void perform_cleanup() {
-  if (cleanup.frameset_buf)
-    munmap(cleanup.frameset_buf, cleanup.shm_size);
-
-  if (cleanup.shm_fd >= 0) {
-    close(cleanup.shm_fd);
-    shm_unlink(SHM_NAME);
-  }
-
-  if (cleanup.consumer_ready) {
-    sem_close(cleanup.consumer_ready);
-    sem_unlink(SEM_CONSUMER_READY);
-  }
-
   if (cleanup.threads) {
     for (int i = 0; i < cleanup.thread_count; i++) {
       pthread_kill(cleanup.threads[i], SIGUSR2);
@@ -416,11 +421,13 @@ static void perform_cleanup() {
     }
   }
 
-  if (cleanup.q_bufs)
-    free(cleanup.q_bufs);
+  if (cleanup.mmap_buf)
+    munmap(cleanup.mmap_buf, cleanup.shm_size);
 
-  if (cleanup.frame_bufs)
-    free(cleanup.frame_bufs);
+  if (cleanup.shm_fd >= 0) {
+    close(cleanup.shm_fd);
+    shm_unlink(SHM_NAME);
+  }
 
   if (cleanup.logging_initialized)
     cleanup_logging();

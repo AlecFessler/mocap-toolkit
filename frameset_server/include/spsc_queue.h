@@ -43,8 +43,8 @@ struct producer_q {
   _Atomic size_t* tail_ptr;
   size_t cached_tail;
   size_t cap;
-  alignas(CACHE_LINE_SIZE) void* buf;
-  char padding[
+  void* buf;
+  alignas(CACHE_LINE_SIZE) char padding[
     CACHE_LINE_SIZE
     - (sizeof(_Atomic size_t)
     + sizeof(_Atomic size_t*)
@@ -58,8 +58,8 @@ struct consumer_q {
   _Atomic size_t* head_ptr;
   size_t cached_head;
   size_t cap;
-  alignas(CACHE_LINE_SIZE) void* buf;
-  char padding[
+  void* buf;
+  alignas(CACHE_LINE_SIZE) char padding[
     CACHE_LINE_SIZE
     - (sizeof(_Atomic size_t)
     + sizeof(_Atomic size_t*)
@@ -74,9 +74,6 @@ static inline int spsc_queue_init(
   void* buf,
   size_t size
 ) {
-  if ((uintptr_t)buf % CACHE_LINE_SIZE != 0)
-    return -EINVAL;
-
   atomic_store_explicit(&pq->head, 0, memory_order_relaxed);
   pq->tail_ptr = &cq->tail;
   pq->cached_tail = 0;
