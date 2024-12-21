@@ -260,7 +260,7 @@ int main() {
   }
   cleanup.shm_fd = shm_fd;
 
-  size_t shm_size = frame_buf_size * cam_count;
+  size_t shm_size = frame_buf_size * cam_count + sizeof(uint64_t);
   ret = ftruncate(
     shm_fd,
     shm_size
@@ -348,6 +348,14 @@ int main() {
     if (!all_equal)
       continue;
 
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Received frameset with timestamp %lu",
+      max_timestamp
+    );
+    log(DEBUG, logstr);
+
     // check if consumer_ready here
     int consumer_ready_val;
     sem_getvalue(consumer_ready, &consumer_ready_val);
@@ -359,6 +367,8 @@ int main() {
           frame_buf_size
         );
       }
+      uint64_t* timestamp_ptr = frameset_buf + (frame_buf_size * cam_count);
+      *timestamp_ptr = max_timestamp;
       sem_post(consumer_ready);
     }
 
