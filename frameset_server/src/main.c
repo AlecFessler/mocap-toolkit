@@ -29,7 +29,7 @@
 #define TIMESTAMP_DELAY 1 // seconds
 #define EMPTY_QS_WAIT 10000 // 0.01 ms
 #define FRAME_BUFS_PER_THREAD 512
-#define NUM_FRAMESET_SLOTS 24
+#define FRAMESET_SLOTS_PER_THREAD 8
 
 static void shutdown_handler(int signum);
 static void perform_cleanup();
@@ -198,9 +198,10 @@ int main() {
   shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
 
   // framesets slots
+  size_t num_frameset_slots = FRAMESET_SLOTS_PER_THREAD * cam_count;
   shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf*));
   size_t frameset_slots_offset = shm_size;
-  shm_size += sizeof(struct ts_frame_buf*) * (NUM_FRAMESET_SLOTS);
+  shm_size += sizeof(struct ts_frame_buf*) * (num_frameset_slots);
 
   ret = ftruncate(
     shm_fd,
@@ -253,7 +254,7 @@ int main() {
     filled_frameset_producer_q,
     filled_frameset_consumer_q,
     filled_frameset_q_bufs,
-    FRAME_BUFS_PER_THREAD
+    num_frameset_slots
   );
 
   struct producer_q* empty_frameset_producer_q = (struct producer_q*)(mmap_buf + empty_frameset_producer_q_offset);
@@ -263,12 +264,12 @@ int main() {
     empty_frameset_producer_q,
     empty_frameset_consumer_q,
     empty_frameset_q_bufs,
-    FRAME_BUFS_PER_THREAD
+    num_frameset_slots
   );
 
   struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
-  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * NUM_FRAMESET_SLOTS);
-  for (size_t i = 0; i < NUM_FRAMESET_SLOTS; i++) {
+  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * num_frameset_slots);
+  for (size_t i = 0; i < num_frameset_slots; i++) {
     struct ts_frame_buf** slot_addr = frameset_slots + (i * cam_count);
     spsc_enqueue(
       empty_frameset_producer_q,
@@ -395,7 +396,7 @@ int main() {
     // about 8 frames before the worker threads begin to run
     // out, otherwise the frames held up in their decoders
     // will cause us to deplete and block the whole system
-    if (dequeued_framesets >= NUM_FRAMESET_SLOTS) {
+    if (dequeued_framesets >= FRAMESET_SLOTS_PER_THREAD) {
       for (int i = 0; i < cam_count; i++) {
         spsc_enqueue(&empty_frame_producer_qs[i], frameset[i]);
       }
