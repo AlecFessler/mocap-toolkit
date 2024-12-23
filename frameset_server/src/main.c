@@ -268,10 +268,10 @@ int main() {
   struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
   memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * frame_bufs_count);
   for (int i = 0; i < FRAME_BUFS_PER_THREAD; i++) {
-    size_t offset = i * sizeof(struct ts_frame_buf*) * cam_count;
+    struct ts_frame_buf** slot_addr = frameset_slots + (i * cam_count);
     spsc_enqueue(
       empty_frameset_producer_q,
-      frameset_slots + offset
+      slot_addr
     );
   }
 
@@ -343,6 +343,7 @@ int main() {
   ts.tv_sec = 0;
   ts.tv_nsec = EMPTY_QS_WAIT;
 
+  uint32_t dequeued_framesets = 0;
   while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread
     bool full_set = true;
@@ -383,19 +384,38 @@ int main() {
     if (!all_equal)
       continue;
 
+    struct ts_frame_buf** frameset = spsc_dequeue(empty_frameset_consumer_q);
+    while (!frameset) {
+      log(WARNING, "Frameset queue was empty");
+      nanosleep(&ts, NULL);
+      frameset = spsc_dequeue(empty_frameset_consumer_q);
+    }
+
+    // NOTE: DEBUG LOG
     snprintf(
       logstr,
       sizeof(logstr),
-      "Received frameset with timestamp %lu",
+      "Received frameset with addr %p timestamp %lu",
+      frameset,
       max_timestamp
     );
     log(DEBUG, logstr);
 
-    // get a new full set
-    for (int i = 0; i < cam_count; i++) {
-      spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
-      current_frames[i] = NULL;
+    // after one full cycle through our available frame buffers,
+    // filled framesets will start to contain ts_frame_bufs that
+    // need to be recycled into their original queues
+    if (dequeued_framesets >= FRAME_BUFS_PER_THREAD) {
+      log(DEBUG, "Recycling frames");
+      for (int i = 0; i < cam_count; i++) {
+        spsc_enqueue(&empty_frame_producer_qs[i], frameset[i]);
+      }
+    } else {
+      dequeued_framesets++;
     }
+
+    memcpy(frameset, current_frames, sizeof(struct ts_frame_buf*) * cam_count);
+    spsc_enqueue(filled_frameset_producer_q, frameset);
+    memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
   }
 
   // stop the camera devices
