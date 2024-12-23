@@ -137,7 +137,6 @@ int main() {
     return -errno;
   }
 
-
   int shm_fd = shm_open(
     SHM_NAME,
     O_CREAT | O_RDWR,
@@ -392,10 +391,6 @@ int main() {
       frameset = spsc_dequeue(empty_frameset_consumer_q);
     }
 
-    // we start returning framesets to their original queues
-    // about 8 frames before the worker threads begin to run
-    // out, otherwise the frames held up in their decoders
-    // will cause us to deplete and block the whole system
     if (dequeued_framesets >= FRAMESET_SLOTS_PER_THREAD) {
       for (int i = 0; i < cam_count; i++) {
         spsc_enqueue(&empty_frame_producer_qs[i], frameset[i]);

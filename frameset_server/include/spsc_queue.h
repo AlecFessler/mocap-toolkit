@@ -18,7 +18,7 @@
  * naively implementing a single struct with padding
  * puts other key info, like the capacity or buffer
  * ptr in a separate cache line. Benchmarking demonstrated
- * that this absolutely crippled IPC (instructions per cycle)
+ * that this absolutely crushed IPC (instructions per cycle)
  * by requiring multiple cache lines to complete an operation.
  * The dual struct approach provides the best of both worlds,
  * prevents false sharing, but also keeps everything needed
@@ -27,10 +27,17 @@
  * but the head/tail caching optimization also limits the
  * frequency of this happening as well.
  *
- * The actual capacity of the queue is size - 1, because
- * the queue needs to maintain a single empty slot to
- * distinguish between queue full (head + 1 == tail)
- * and queue empty (head == tail) states.
+ * The caching of the head and tail ptrs significantly
+ * cuts down on cache coherency traffic. I found this
+ * optimization from Erik Rigtorp's spsc queue implementation
+ * on github, linked here: https://github.com/rigtorp/SPSCQueue
+ *
+ * The split struct optimization was my own doing. You could
+ * hypothetically achieve a similar outcome with a single
+ * struct or a C++ class, simply by using a redundant
+ * copy of the capacity and buffer ptr, and splitting it
+ * up with padding to prevent false sharing, while still
+ * keeping each thread's 'workspace' in a single cache line
  */
 
 struct producer_q {
@@ -91,9 +98,6 @@ static inline int spsc_enqueue(
   // load head with relaxed ordering, we're the only writer
   size_t head = atomic_load_explicit(&q->head, memory_order_relaxed);
 
-  // always leave one extra slot in the queue
-  // that way we can distinguish between empty (head == tail)
-  // and full (head + 1 == tail) states
   size_t next = head + 1;
   if (next == q->cap)
     next = 0;
@@ -107,7 +111,9 @@ static inline int spsc_enqueue(
   void** slot = (void**)q->buf + head;
   *slot = data;
 
-  // update the head with release semantics so the consumer can see it
+  // update the head with release semantics so the consumer
+  // sees the assignment of the ptr to the slot before the
+  // atomic store of the head index
   atomic_store_explicit(&q->head, next, memory_order_release);
 
   return 0;
@@ -130,11 +136,11 @@ static inline void* spsc_dequeue(struct consumer_q* q) {
   if (next_tail == q->cap)
     next_tail = 0;
 
-  // update tail with relaxed semantics, the consumer (caller of this)
-  // will see the correct value for data thanks to per thread sequential consistency
-  // and it doesn't matter if the producer (enqueue caller) doesn't see the update
-  // immediately, because this will only lead to an extra conservative "is full"
-  // check, but will not put the queue into an invalid state
+  // update the tail with relaxed semantics, there's nothing with
+  // regards to ordering that the producer cares for in this operation
+  // (ie. unlike in the enqueue, where we need the ptr assignment to
+  // 'happen before' the atomic increment, there's no operation in
+  // this function that needs 'happens before' ordering wrt the atomic store
   atomic_store_explicit(&q->tail, next_tail, memory_order_relaxed);
 
   return data;
