@@ -1,17 +1,4 @@
-Immediate TODO
-______________________________________________________________________________________________
-
-- Add a second semaphore for frameset access so that the consumers don't miss any frames
-
-- Add a function to the parse_conf file to parse the stream parameters
-
-- Update the C server to use use the stream parameters from the yaml file
-
-- Copy the parse_conf file into toolkit/common/ and update the lens_calibration tool to use it
-
-
-Long term TODO
-______________________________________________________________________________________________
+- Write lens calibration tool
 
 - Write stereo calibration tool
 

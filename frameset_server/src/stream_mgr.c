@@ -216,22 +216,18 @@ void* stream_mgr_fn(void* ptr) {
       spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
 
       current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
-      if (!current_buf) {
-        log(WARNING, "Frame buffer queue was empty");
-        while (!current_buf && running) {
-          struct timespec ts = {
-            .tv_sec = 0,
-            .tv_nsec = EMPTY_Q_WAIT
-          };
-          nanosleep(&ts, NULL);
-          current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
-        }
+      while (!current_buf && running) {
+        struct timespec ts = {
+          .tv_sec = 0,
+          .tv_nsec = EMPTY_Q_WAIT
+        };
+        nanosleep(&ts, NULL);
+        current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       }
     }
   }
 
 err_cleanup:
-  log(DEBUG, "Notified main thread of error");
   pthread_kill(ctx->main_thread, SIGTERM);
 
 shutdown_cleanup:

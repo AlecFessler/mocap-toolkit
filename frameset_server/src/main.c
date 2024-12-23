@@ -28,8 +28,8 @@
 #define CORES_PER_CCD 8
 #define TIMESTAMP_DELAY 1 // seconds
 #define EMPTY_QS_WAIT 10000 // 0.01 ms
-#define FRAME_BUFS_PER_THREAD 256
-
+#define FRAME_BUFS_PER_THREAD 512
+#define NUM_FRAMESET_SLOTS 24
 
 static void shutdown_handler(int signum);
 static void perform_cleanup();
@@ -198,10 +198,9 @@ int main() {
   shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
 
   // framesets slots
-  size_t num_frameset_slots = 24;
   shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf*));
   size_t frameset_slots_offset = shm_size;
-  shm_size += sizeof(struct ts_frame_buf*) * (num_frameset_slots);
+  shm_size += sizeof(struct ts_frame_buf*) * (NUM_FRAMESET_SLOTS);
 
   ret = ftruncate(
     shm_fd,
@@ -268,8 +267,8 @@ int main() {
   );
 
   struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
-  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * num_frameset_slots);
-  for (size_t i = 0; i < num_frameset_slots; i++) {
+  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * NUM_FRAMESET_SLOTS);
+  for (size_t i = 0; i < NUM_FRAMESET_SLOTS; i++) {
     struct ts_frame_buf** slot_addr = frameset_slots + (i * cam_count);
     spsc_enqueue(
       empty_frameset_producer_q,
@@ -388,26 +387,15 @@ int main() {
 
     struct ts_frame_buf** frameset = spsc_dequeue(empty_frameset_consumer_q);
     while (!frameset) {
-      log(WARNING, "Frameset queue was empty");
       nanosleep(&ts, NULL);
       frameset = spsc_dequeue(empty_frameset_consumer_q);
     }
-
-    // NOTE: DEBUG LOG
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Received frameset with addr %p timestamp %lu",
-      frameset,
-      max_timestamp
-    );
-    log(DEBUG, logstr);
 
     // we start returning framesets to their original queues
     // about 8 frames before the worker threads begin to run
     // out, otherwise the frames held up in their decoders
     // will cause us to deplete and block the whole system
-    if (dequeued_framesets >= num_frameset_slots) {
+    if (dequeued_framesets >= NUM_FRAMESET_SLOTS) {
       for (int i = 0; i < cam_count; i++) {
         spsc_enqueue(&empty_frame_producer_qs[i], frameset[i]);
       }
@@ -419,6 +407,7 @@ int main() {
     spsc_enqueue(filled_frameset_producer_q, frameset);
     memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
 
+    // consumer process simulation for testing
     struct ts_frame_buf** consumer_frameset = spsc_dequeue(filled_frameset_consumer_q);
     spsc_enqueue(empty_frameset_producer_q, consumer_frameset);
   }

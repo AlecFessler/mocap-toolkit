@@ -27,11 +27,6 @@
  * but the head/tail caching optimization also limits the
  * frequency of this happening as well.
  *
- * The buffer must be CACHE_LINE_SIZE aligned,
- * this is to prevent false sharing between threads,
- * which would cause cache coherency traffic that isn't
- * strictly necessary.
- *
  * The actual capacity of the queue is size - 1, because
  * the queue needs to maintain a single empty slot to
  * distinguish between queue full (head + 1 == tail)
