@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -I/usr/include/opencv4
+CXXFLAGS = -std=c++17 -Wall -Wextra -g -I/usr/include/opencv4
 
 COMMON_DIR = ../common
 COMMON_SRC_DIR = $(COMMON_DIR)/src

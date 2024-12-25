@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <spsc_queue.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -14,7 +15,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "spsc_queue.h"
 #include "logging.h"
 #include "parse_conf.h"
 #include "stream_mgr.h"
@@ -23,7 +23,8 @@
 #define LOG_PATH "/var/log/mocap-toolkit/server.log"
 #define CAM_CONF_PATH "/etc/mocap-toolkit/cams.yaml"
 
-#define SHM_NAME "/mocap-toolkit_frameset"
+#define SHM_NAME "/mocap-toolkit_shm"
+#define SHM_ADDR ((void*)0x7f0000000000)
 
 #define CORES_PER_CCD 8
 #define TIMESTAMP_DELAY 1 // seconds
@@ -200,7 +201,7 @@ int main() {
   size_t num_frameset_slots = FRAMESET_SLOTS_PER_THREAD * cam_count;
   shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf*));
   size_t frameset_slots_offset = shm_size;
-  shm_size += sizeof(struct ts_frame_buf*) * (num_frameset_slots);
+  shm_size += sizeof(struct ts_frame_buf*) * num_frameset_slots;
 
   ret = ftruncate(
     shm_fd,
@@ -219,7 +220,7 @@ int main() {
   cleanup.shm_size = shm_size;
 
   uint8_t* mmap_buf = mmap(
-    NULL,
+    SHM_ADDR,
     shm_size,
     PROT_READ | PROT_WRITE,
     MAP_SHARED,
@@ -402,10 +403,6 @@ int main() {
     memcpy(frameset, current_frames, sizeof(struct ts_frame_buf*) * cam_count);
     spsc_enqueue(filled_frameset_producer_q, frameset);
     memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
-
-    // consumer process simulation for testing
-    struct ts_frame_buf** consumer_frameset = spsc_dequeue(filled_frameset_consumer_q);
-    spsc_enqueue(empty_frameset_producer_q, consumer_frameset);
   }
 
   // stop the camera devices

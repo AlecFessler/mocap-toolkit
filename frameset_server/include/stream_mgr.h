@@ -1,10 +1,10 @@
 #ifndef STREAM_MGR_H
 #define STREAM_MGR_H
 
+#include <spsc_queue.h>
 #include <stdint.h>
 
 #include "parse_conf.h"
-#include "spsc_queue.h"
 
 #define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
 #define DECODED_FRAME_WIDTH 1280

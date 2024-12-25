@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <signal.h>
+#include <spsc_queue.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,7 +12,6 @@
 #include <unistd.h>
 
 #include "queue.h"
-#include "spsc_queue.h"
 #include "logging.h"
 #include "network.h"
 #include "stream_mgr.h"

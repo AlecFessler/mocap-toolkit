@@ -1,14 +1,17 @@
+#include <cstdint>
+#include <cstring>
 #include <errno.h>
+#include <spsc_queue.hpp>
 #include <iostream>
-#include <opencv2/core.hpp>
+#include <unistd.h>
 
 #include "logging.h"
-#include "stream_controller.h"
+#include "stream_ctl.h"
 
-#define LOG_PATH "/var/log/mocap-toolkit/lens_calibration.log"
+constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/lens_calibration.log";
 
 int main() {
-  int ret = 0;
+  int32_t ret = 0;
   char logstr[128];
 
   ret = setup_logging(LOG_PATH);
@@ -17,26 +20,38 @@ int main() {
     return -errno;
   }
 
-  StreamController stream_ctlr = StreamController(
-    1280,
-    720,
-    3
-  );
+  struct stream_ctx stream_ctx;
+  ret = start_streams(stream_ctx, 3); // pass temp cam count until we can parse the conf file
+  if (ret < 0) {
+    cleanup_streams(stream_ctx);
+    cleanup_logging();
+    return ret;
+  }
 
-  cv::Mat frames[3];
-  uint64_t timestamp;
-  uint32_t counter = 0;
-  while(counter++ < 10) {
-    stream_ctlr.recv_frameset(frames, &timestamp);
+  uint32_t received_framesets = 0;
+  while (received_framesets < 100) {
+    struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
+      spsc_dequeue(stream_ctx.filled_frameset_q)
+    );
+    if (frameset == nullptr) {
+      usleep(1000); // 1ms
+      continue;
+    }
+
     snprintf(
       logstr,
       sizeof(logstr),
       "Received frameset with timestamp %lu",
-      timestamp
+      frameset[0]->timestamp
     );
     LOG(DEBUG, logstr);
+
+    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+
+    received_framesets++;
   }
 
+  cleanup_streams(stream_ctx);
   cleanup_logging();
   return 0;
 }
