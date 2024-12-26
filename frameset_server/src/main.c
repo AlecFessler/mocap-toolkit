@@ -51,7 +51,7 @@ static struct cleanup_ctx cleanup = {
 
 static volatile sig_atomic_t running = 1;
 
-int main() {
+int main(int argc, char* argv[]) {
   int ret = 0;
   char logstr[128];
 
@@ -114,6 +114,35 @@ int main() {
     log(ERROR, logstr);
     perform_cleanup();
     return ret;
+  }
+
+  // filter out target cam, otherwise stream with all cams in config
+  int target_cam_id;
+  if (argc > 1) {
+    target_cam_id = atoi(argv[1]);
+
+    bool found = false;
+    for (int i = 0; i < cam_count; i++) {
+      if (confs[i].id != target_cam_id)
+        continue;
+
+      confs[0] = confs[i];
+      cam_count = 1;
+      found = true;
+      break;
+    }
+
+    if (!found) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Camera ID %d not found in config",
+        target_cam_id
+      );
+      log(ERROR, logstr);
+      cleanup_logging();
+      return -EINVAL;
+    }
   }
 
   // pin to cam_count % 8 to stay on ccd0 for 3dv cache with threads

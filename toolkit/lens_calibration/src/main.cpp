@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <opencv2/opencv.hpp>
 #include <spsc_queue.hpp>
+#include <string>
 #include <iostream>
 #include <unistd.h>
 
@@ -13,7 +14,7 @@
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/lens_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 
-int main() {
+int main(int argc, char* argv[]) {
   int32_t ret = 0;
   char logstr[128];
 
@@ -51,8 +52,41 @@ int main() {
     return ret;
   }
 
+  int target_cam_id = -1;
+  if (argc == 2) {
+    target_cam_id = std::stoi(argv[1]);
+
+    bool found = false;
+    for (int i = 0; i < cam_count; i++) {
+      if (cam_confs[i].id != target_cam_id)
+        continue;
+
+      cam_confs[0] = cam_confs[i];
+      cam_count = 1;
+      found = true;
+      break;
+    }
+
+    if (!found) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "Camera ID %d not found in config",
+        target_cam_id
+      );
+      LOG(ERROR, logstr);
+      cleanup_logging();
+      return -EINVAL;
+    }
+  } else {
+    LOG(ERROR, "One camera ID required for lens calibration");
+    cleanup_logging();
+    return -EINVAL;
+  }
+
   struct stream_ctx stream_ctx;
-  ret = start_streams(stream_ctx, cam_count);
+  char* target_id = target_cam_id >= 0 ? argv[1] : nullptr;
+  ret = start_streams(stream_ctx, cam_count, target_id);
   if (ret < 0) {
     cleanup_streams(stream_ctx);
     cleanup_logging();

@@ -30,7 +30,7 @@ struct ts_frame_buf {
   uint8_t* frame_buf;
 };
 
-int32_t start_streams(stream_ctx& ctx, uint32_t cam_count);
+int32_t start_streams(stream_ctx& ctx, uint32_t cam_count, char* target_id);
 void cleanup_streams(stream_ctx& ctx);
 
 #endif // STREAM_CTL_H

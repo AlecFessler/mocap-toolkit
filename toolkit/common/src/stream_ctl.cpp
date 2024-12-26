@@ -18,7 +18,11 @@ static inline uint64_t alignup(uint64_t offset, uint64_t alignment) {
   return (offset + (alignment - 1)) & ~(alignment - 1);
 }
 
-int32_t start_streams(struct stream_ctx& ctx, uint32_t cam_count) {
+int32_t start_streams(
+  struct stream_ctx& ctx,
+  uint32_t cam_count,
+  char* target_id = nullptr
+) {
   char logstr[128];
 
   ctx.server_pid = 0;
@@ -42,7 +46,7 @@ int32_t start_streams(struct stream_ctx& ctx, uint32_t cam_count) {
   }
 
   if (ctx.server_pid == 0) {
-    execl(SERVER_EXE, SERVER_EXE, nullptr);
+    execl(SERVER_EXE, SERVER_EXE, target_id, nullptr);
     _exit(errno);
   }
 
