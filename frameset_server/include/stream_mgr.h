@@ -6,7 +6,7 @@
 
 #include "parse_conf.h"
 
-#define ENCODED_FRAME_BUF_SIZE 6400 // 6.4kb
+#define ENCODED_FRAME_BUF_SIZE 16000
 #define DECODED_FRAME_WIDTH 1280
 #define DECODED_FRAME_HEIGHT 720
 
