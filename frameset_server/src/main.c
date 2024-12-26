@@ -101,8 +101,9 @@ int main() {
     return cam_count;
   }
 
+  struct stream_conf stream_conf;
   struct cam_conf confs[cam_count];
-  ret = parse_conf(confs, cam_count);
+  ret = parse_conf(&stream_conf, confs, cam_count);
   if (ret) {
     snprintf(
       logstr,
@@ -159,7 +160,7 @@ int main() {
 
   // frame buffers
   const uint64_t frame_bufs_count = cam_count * FRAME_BUFS_PER_THREAD;
-  const uint64_t frame_buf_size = DECODED_FRAME_WIDTH * DECODED_FRAME_HEIGHT * 3 / 2;
+  const uint64_t frame_buf_size = stream_conf.frame_width * stream_conf.frame_height * 3 / 2;
   size_t shm_size = frame_buf_size * frame_bufs_count;
 
   // timestamped structs with frame buffer ptrs
@@ -312,6 +313,7 @@ int main() {
   cleanup.threads = threads;
   for (int i = 0; i < cam_count; i++) {
     ctxs[i].conf = &confs[i];
+    ctxs[i].stream_conf = &stream_conf;
     ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
     ctxs[i].empty_bufs = &empty_frame_consumer_qs[i];
     ctxs[i].core = i % CORES_PER_CCD;

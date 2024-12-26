@@ -29,7 +29,7 @@ static bool is_eth_conn(int sockfd) {
   return true;
 }
 
-int broadcast_msg(cam_conf* confs, int confs_size, const char* msg, size_t msg_size) {
+int broadcast_msg(struct cam_conf* confs, int confs_size, const char* msg, size_t msg_size) {
   int ret = 0;
   char logstr[128];
 
@@ -82,7 +82,7 @@ int broadcast_msg(cam_conf* confs, int confs_size, const char* msg, size_t msg_s
   return ret;
 }
 
-int setup_stream(cam_conf* conf) {
+int setup_stream(struct cam_conf* conf) {
   int ret = 0;
   char logstr[128];
 

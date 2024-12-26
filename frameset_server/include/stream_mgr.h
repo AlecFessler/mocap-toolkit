@@ -12,7 +12,8 @@
 #define DECODED_FRAME_HEIGHT 720
 
 struct thread_ctx {
-  cam_conf* conf;
+  struct cam_conf* conf;
+  struct stream_conf* stream_conf;
   struct producer_q* filled_bufs;
   struct consumer_q* empty_bufs;
   uint32_t core;

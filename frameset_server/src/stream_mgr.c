@@ -80,8 +80,8 @@ void* stream_mgr_fn(void* ptr) {
   decoder viddec;
   ret = init_decoder(
     &viddec,
-    DECODED_FRAME_WIDTH,
-    DECODED_FRAME_HEIGHT
+    ctx->stream_conf->frame_width,
+    ctx->stream_conf->frame_height
   );
   if (ret)
     goto err_cleanup;
