@@ -102,6 +102,7 @@ void* stream_mgr_fn(void* ptr) {
 
   bool incoming_stream = true;
   while (running) {
+
     if (incoming_stream) {
       uint64_t timestamp = 0;
       ssize_t pkt_size = recv_from_stream(

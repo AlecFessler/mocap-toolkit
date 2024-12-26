@@ -51,7 +51,7 @@ videnc::videnc(const config& config)
 
   ctx->width = width;
   ctx->height = height;
-  ctx->time_base = AVRational{1, config.fps};
+  ctx->time_base = AVRational{1, 90000}; // 90KHz
   ctx->framerate = AVRational{config.fps, 1};
   ctx->pix_fmt = AV_PIX_FMT_YUV420P;
   ctx->codec_type = AVMEDIA_TYPE_VIDEO;
@@ -59,6 +59,7 @@ videnc::videnc(const config& config)
   AVDictionary *opts = NULL;
   av_dict_set(&opts, "preset", config.enc_speed.c_str(), 0);
   av_dict_set(&opts, "crf", config.enc_quality.c_str(), 0);
+  av_dict_set(&opts, "tune", "zerolatency", 0);
 
   if (avcodec_open2(ctx, codec, &opts) < 0) {
     av_dict_free(&opts);

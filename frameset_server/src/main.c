@@ -439,4 +439,6 @@ static void perform_cleanup() {
 
   if (cleanup.logging_initialized)
     cleanup_logging();
+
+  log(DEBUG, "Server cleanly exitted");
 }
