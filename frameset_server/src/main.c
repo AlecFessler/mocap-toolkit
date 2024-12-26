@@ -315,7 +315,7 @@ int main() {
     ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
     ctxs[i].empty_bufs = &empty_frame_consumer_qs[i];
     ctxs[i].core = i % CORES_PER_CCD;
-    ctxs[i].main_thread = pid;
+    ctxs[i].main_running = &running;
 
     ret = pthread_create(
       &threads[i],
@@ -429,6 +429,9 @@ static void perform_cleanup() {
     }
   }
 
+  if (cleanup.logging_initialized)
+    cleanup_logging();
+
   if (cleanup.mmap_buf)
     munmap(cleanup.mmap_buf, cleanup.shm_size);
 
@@ -436,9 +439,4 @@ static void perform_cleanup() {
     close(cleanup.shm_fd);
     shm_unlink(SHM_NAME);
   }
-
-  if (cleanup.logging_initialized)
-    cleanup_logging();
-
-  log(DEBUG, "Server cleanly exitted");
 }

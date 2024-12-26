@@ -1,5 +1,3 @@
-- Make it so that worker threads notify main thread via an errno instead of signal for more robust cleanup
-
 - Write a function for the config file to load the stream params
 
 - Write lens calibration tool

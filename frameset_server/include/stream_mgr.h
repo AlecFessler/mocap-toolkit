@@ -1,6 +1,7 @@
 #ifndef STREAM_MGR_H
 #define STREAM_MGR_H
 
+#include <signal.h>
 #include <spsc_queue.h>
 #include <stdint.h>
 
@@ -15,7 +16,7 @@ struct thread_ctx {
   struct producer_q* filled_bufs;
   struct consumer_q* empty_bufs;
   uint32_t core;
-  pid_t main_thread;
+  volatile sig_atomic_t* main_running;
 };
 
 struct ts_frame_buf {

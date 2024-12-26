@@ -101,8 +101,7 @@ void* stream_mgr_fn(void* ptr) {
   struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
 
   bool incoming_stream = true;
-  while (running) {
-
+  while (running && ctx->main_running) {
     if (incoming_stream) {
       uint64_t timestamp = 0;
       ssize_t pkt_size = recv_from_stream(
@@ -229,7 +228,7 @@ void* stream_mgr_fn(void* ptr) {
   }
 
 err_cleanup:
-  pthread_kill(ctx->main_thread, SIGTERM);
+  ctx->main_running = 0;
 
 shutdown_cleanup:
   if (enc_frame_buf)
