@@ -7,9 +7,11 @@
 #include <unistd.h>
 
 #include "logging.h"
+#include "parse_conf.h"
 #include "stream_ctl.h"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/lens_calibration.log";
+constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 
 int main() {
   int32_t ret = 0;
@@ -21,7 +23,33 @@ int main() {
     return -errno;
   }
 
-  int32_t cam_count = 3; // pass temp cam count until we can parse the conf file
+  int cam_count = count_cameras(CAM_CONF_PATH);
+  if (cam_count <= 0) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error getting camera count: %s",
+      strerror(cam_count)
+    );
+    LOG(ERROR, logstr);
+    cleanup_logging();
+    return cam_count;
+  }
+
+  struct stream_conf stream_conf;
+  struct cam_conf cam_confs[cam_count];
+  ret = parse_conf(&stream_conf, cam_confs, cam_count);
+  if (ret) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error parsing camera confs %s",
+      strerror(ret)
+    );
+    LOG(ERROR, logstr);
+    cleanup_logging();
+    return ret;
+  }
 
   struct stream_ctx stream_ctx;
   ret = start_streams(stream_ctx, cam_count);
@@ -43,8 +71,8 @@ int main() {
 
     for (int i = 0; i < cam_count; i++) {
       cv::Mat nv12_frame(
-        FRAME_HEIGHT * 3/2,
-        FRAME_WIDTH,
+        stream_conf.frame_height * 3/2,
+        stream_conf.frame_width,
         CV_8UC1,
         frameset[i]->frame_buf
       );
@@ -56,12 +84,12 @@ int main() {
         cv::COLOR_YUV2BGR_NV12
       );
 
-      char name[8];
+      char name[9];
       snprintf(
         name,
         sizeof(name),
-        "Cam %d",
-        i
+        "%s",
+        cam_confs[i].name
       );
       cv::imshow(name, bgr_frame);
       cv::waitKey(1);
