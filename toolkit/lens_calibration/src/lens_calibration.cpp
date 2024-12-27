@@ -41,7 +41,7 @@ bool LensCalibration::try_frame(cv::Mat& gray_frame) {
     gray_frame,
     board_size,
     corners,
-    cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE
+    cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE + cv::CALIB_CB_FAST_CHECK
   );
 
   if (!found) return false;
@@ -73,12 +73,12 @@ void LensCalibration::display_corners(cv::Mat& bgr_frame) {
     img_pts[frame_count - 1],
     true
   );
-  cv::imshow("Corners", bgr_frame);
+  cv::imshow("stream", bgr_frame);
   cv::waitKey(1);
 }
 
-void LensCalibration::calibrate() {
-  if (frame_count < MIN_FRAMES) return;
+double LensCalibration::calibrate() {
+  if (frame_count < MIN_FRAMES) return -1.0;
 
   cv::Size img_size(frame_width, frame_height);
   projected_pts.resize(frame_count);
@@ -123,6 +123,8 @@ void LensCalibration::calibrate() {
   }
 
   reprojection_err = total_err / total_pts;
+
+  return reprojection_err;
 }
 
 bool LensCalibration::check_status() {

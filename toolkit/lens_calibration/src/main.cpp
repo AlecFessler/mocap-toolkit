@@ -1,3 +1,4 @@
+#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <errno.h>
@@ -19,9 +20,22 @@ constexpr uint32_t BOARD_WIDTH = 9;
 constexpr uint32_t BOARD_HEIGHT = 6;
 constexpr float SQUARE_SIZE = 25.0; // mm
 
+volatile sig_atomic_t stop_flag = 0;
+
+void stop_handler(int signum) {
+  (void)signum;
+  stop_flag = 1;
+}
+
 int main(int argc, char* argv[]) {
   int32_t ret = 0;
   char logstr[128];
+
+  struct sigaction sa;
+  sa.sa_handler = stop_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGINT, &sa, nullptr);
 
   ret = setup_logging(LOG_PATH);
   if (ret) {
@@ -106,41 +120,31 @@ int main(int argc, char* argv[]) {
     return ret;
   }
 
-  uint32_t cooldown = stream_conf.fps / 3;
+  /*
+   * In either a success or a failure case, we want to wait
+   * some cooldown before retrying a detection. This is because
+   * on a success case, we want to allow some time to pass to
+   * reposition the board before. For the failure case, this
+   * is because a detectChessboardPatterns on the failure case
+   * is quite costly, and will slow down the live stream, so
+   * we wait a few frames to prevent from putting backpressure
+   * on the stream
+   */
+
+  const uint32_t detection_cooldown = stream_conf.fps / 3;
+  const uint32_t failure_cooldown = stream_conf.fps / 5;
+  uint32_t cooldown = 0;
   uint32_t cooldown_counter = 0;
-  bool on_cooldown = false;
+
   bool calibration_complete = false;
-  while (!calibration_complete) {
+  while (!stop_flag && !calibration_complete) {
     struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
       spsc_dequeue(stream_ctx.filled_frameset_q)
     );
     if (frameset == nullptr) {
-      usleep(1000); // 1ms
+      usleep(100); // 0.1ms
       continue;
     }
-
-    if (on_cooldown) {
-      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
-      if (++cooldown_counter >= cooldown) {
-        on_cooldown = false;
-        cooldown_counter = 0;
-      }
-      continue;
-    }
-
-    cv::Mat gray_frame(
-      stream_conf.frame_height,
-      stream_conf.frame_width,
-      CV_8UC1,
-      frameset[0]->frame_buf
-    );
-
-    bool found_corners = calibrator.try_frame(gray_frame);
-    if (!found_corners) {
-      LOG(DEBUG, "Failed to find corners");
-      continue;
-    }
-    on_cooldown = true;
 
     cv::Mat nv12_frame(
       stream_conf.frame_height * 3/2,
@@ -156,11 +160,51 @@ int main(int argc, char* argv[]) {
       cv::COLOR_YUV2BGR_NV12
     );
 
-    calibrator.display_corners(bgr_frame);
-    calibrator.calibrate();
-    calibration_complete = calibrator.check_status();
+    if (cooldown > 0) {
+      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+
+      cv::imshow("stream", bgr_frame);
+      cv::waitKey(1);
+
+      if (++cooldown_counter >= cooldown) {
+        cooldown_counter = 0;
+        cooldown = 0;
+      }
+
+      continue;
+    }
+
+    cv::Mat gray_frame;
+    cv::cvtColor(
+      nv12_frame,
+      gray_frame,
+      cv::COLOR_YUV2GRAY_NV12
+    );
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+
+    bool found_corners = calibrator.try_frame(gray_frame);
+    if (!found_corners) {
+      cv::imshow("stream", bgr_frame);
+      cv::waitKey(1);
+      cooldown = failure_cooldown;
+      continue;
+    }
+
+    cooldown = detection_cooldown;
+    calibrator.display_corners(bgr_frame);
+
+    double err = calibrator.calibrate();
+
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Current calibration error: %.3f",
+      err
+    );
+    LOG(INFO, logstr);
+
+    calibration_complete = calibrator.check_status();
   }
 
   cleanup_streams(stream_ctx);

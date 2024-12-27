@@ -42,7 +42,7 @@ public:
   );
   bool try_frame(cv::Mat& gray_frame);
   void display_corners(cv::Mat& bgr_frame);
-  void calibrate();
+  double calibrate();
   bool check_status();
   //std::string final_params();
 };
