@@ -26,22 +26,11 @@ LensCalibration::LensCalibration(
   }
 
   corners.reserve(board_width * board_height);
-  img_pts.reserve(EXPECTED_FRAMES);
-  obj_pts.reserve(EXPECTED_FRAMES);
-  rvecs.reserve(EXPECTED_FRAMES);
-  tvecs.reserve(EXPECTED_FRAMES);
-  projected_pts.reserve(EXPECTED_FRAMES);
-
-  for (int i = 0; i < EXPECTED_FRAMES; i++) {
-    std::vector<cv::Point2f> inner_vec;
-    inner_vec.reserve(board_width * board_height);
-    img_pts.push_back(inner_vec);
-    projected_pts.push_back(inner_vec);
-
-    std::vector<cv::Point3f> inner_obj_vec;
-    inner_obj_vec.reserve(board_width * board_height);
-    obj_pts.push_back(inner_obj_vec);
-  }
+  img_pts.reserve(MIN_FRAMES);
+  obj_pts.reserve(MIN_FRAMES);
+  rvecs.reserve(MIN_FRAMES);
+  tvecs.reserve(MIN_FRAMES);
+  projected_pts.reserve(MIN_FRAMES);
 }
 
 bool LensCalibration::try_frame(cv::Mat& gray_frame) {
@@ -70,8 +59,8 @@ bool LensCalibration::try_frame(cv::Mat& gray_frame) {
     criteria
   );
 
-  img_pts[frame_count] = corners;
-  obj_pts[frame_count] = objp;
+  img_pts.push_back(corners);
+  obj_pts.push_back(objp);
   frame_count++;
 
   return true;
@@ -89,10 +78,13 @@ void LensCalibration::display_corners(cv::Mat& bgr_frame) {
 }
 
 void LensCalibration::calibrate() {
+  if (frame_count < MIN_FRAMES) return;
+
   cv::Size img_size(frame_width, frame_height);
-  projected_pts.clear();
+  projected_pts.resize(frame_count);
   rvecs.clear();
   tvecs.clear();
+
   cam_matrix = cv::Mat::eye(3, 3, CV_64F);
   dist_coeffs = cv::Mat::zeros(5, 1, CV_64F);
 

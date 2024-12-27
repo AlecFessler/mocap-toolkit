@@ -6,7 +6,6 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-constexpr uint32_t EXPECTED_FRAMES = 30;
 constexpr uint32_t MIN_FRAMES = 10;
 constexpr double MIN_ERR = 1.0;
 
