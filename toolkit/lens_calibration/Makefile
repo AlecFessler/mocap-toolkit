@@ -20,7 +20,7 @@ CALIB_SRCS = $(wildcard $(CALIB_SRC_DIR)/*.cpp)
 COMMON_OBJS = $(COMMON_SRCS:$(COMMON_SRC_DIR)/%.cpp=$(COMMON_OBJ_DIR)/%.o)
 CALIB_OBJS = $(CALIB_SRCS:$(CALIB_SRC_DIR)/%.cpp=$(CALIB_OBJ_DIR)/%.o)
 
-LIBS = -lopencv_core -lopencv_imgproc -lopencv_highgui -lrt -lyaml -pthread
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_highgui -lrt -lopencv_calib3d -lyaml -pthread
 INCLUDES = -I$(COMMON_INC_DIR) -I$(CALIB_INC_DIR)
 
 $(shell mkdir -p $(BIN_DIR) $(COMMON_OBJ_DIR) $(CALIB_OBJ_DIR))

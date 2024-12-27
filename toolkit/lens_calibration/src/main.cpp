@@ -8,11 +8,16 @@
 #include <unistd.h>
 
 #include "logging.h"
+#include "lens_calibration.hpp"
 #include "parse_conf.h"
 #include "stream_ctl.h"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/lens_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
+
+constexpr uint32_t BOARD_WIDTH = 9;
+constexpr uint32_t BOARD_HEIGHT = 6;
+constexpr float SQUARE_SIZE = 25.0; // mm
 
 int main(int argc, char* argv[]) {
   int32_t ret = 0;
@@ -84,6 +89,14 @@ int main(int argc, char* argv[]) {
     return -EINVAL;
   }
 
+  LensCalibration calibrator(
+    stream_conf.frame_width,
+    stream_conf.frame_height,
+    BOARD_WIDTH,
+    BOARD_HEIGHT,
+    SQUARE_SIZE
+  );
+
   struct stream_ctx stream_ctx;
   char* target_id = target_cam_id >= 0 ? argv[1] : nullptr;
   ret = start_streams(stream_ctx, cam_count, target_id);
@@ -93,8 +106,11 @@ int main(int argc, char* argv[]) {
     return ret;
   }
 
-  uint32_t received_framesets = 0;
-  while (received_framesets < 1000) {
+  uint32_t cooldown = stream_conf.fps / 3;
+  uint32_t cooldown_counter = 0;
+  bool on_cooldown = false;
+  bool calibration_complete = false;
+  while (!calibration_complete) {
     struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
       spsc_dequeue(stream_ctx.filled_frameset_q)
     );
@@ -103,35 +119,48 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
-    for (int i = 0; i < cam_count; i++) {
-      cv::Mat nv12_frame(
-        stream_conf.frame_height * 3/2,
-        stream_conf.frame_width,
-        CV_8UC1,
-        frameset[i]->frame_buf
-      );
-
-      cv::Mat bgr_frame;
-      cv::cvtColor(
-        nv12_frame,
-        bgr_frame,
-        cv::COLOR_YUV2BGR_NV12
-      );
-
-      char name[9];
-      snprintf(
-        name,
-        sizeof(name),
-        "%s",
-        cam_confs[i].name
-      );
-      cv::imshow(name, bgr_frame);
-      cv::waitKey(1);
+    if (on_cooldown) {
+      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+      if (++cooldown_counter >= cooldown) {
+        on_cooldown = false;
+        cooldown_counter = 0;
+      }
+      continue;
     }
 
-    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+    cv::Mat gray_frame(
+      stream_conf.frame_height,
+      stream_conf.frame_width,
+      CV_8UC1,
+      frameset[0]->frame_buf
+    );
 
-    received_framesets++;
+    bool found_corners = calibrator.try_frame(gray_frame);
+    if (!found_corners) {
+      LOG(DEBUG, "Failed to find corners");
+      continue;
+    }
+    on_cooldown = true;
+
+    cv::Mat nv12_frame(
+      stream_conf.frame_height * 3/2,
+      stream_conf.frame_width,
+      CV_8UC1,
+      frameset[0]->frame_buf
+    );
+
+    cv::Mat bgr_frame;
+    cv::cvtColor(
+      nv12_frame,
+      bgr_frame,
+      cv::COLOR_YUV2BGR_NV12
+    );
+
+    calibrator.display_corners(bgr_frame);
+    calibrator.calibrate();
+    calibration_complete = calibrator.check_status();
+
+    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
   }
 
   cleanup_streams(stream_ctx);
