@@ -113,7 +113,13 @@ int main(int argc, char* argv[]) {
 
   struct stream_ctx stream_ctx;
   char* target_id = target_cam_id >= 0 ? argv[1] : nullptr;
-  ret = start_streams(stream_ctx, cam_count, target_id);
+  ret = start_streams(
+    stream_ctx,
+    stream_conf.frame_width,
+    stream_conf.frame_height,
+    cam_count,
+    target_id
+  );
   if (ret < 0) {
     cleanup_streams(stream_ctx);
     cleanup_logging();

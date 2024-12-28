@@ -13,7 +13,6 @@
 #include "connection.h"
 #include "logging.h"
 
-static const int MAX_RETRIES = 3;
 static constexpr char END_STREAM[] = "EOSTREAM";
 
 connection::connection()
@@ -170,27 +169,12 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
     size
   );
 
-  int retries = 0;
   size_t total_written = 0;
   while (total_written < pkt_size) {
     if (tcpfd < 0) {
-      LOG(WARNING, "Not connected to server, trying to connect");
-      while (tcpfd < 0) {
-        int ret = conn_tcp();
-        if (ret < 0) {
-          if (++retries == MAX_RETRIES) {
-            LOG(WARNING, "No more connection retries");
-            return -ECONNRESET;
-          }
-          LOG(WARNING, "Failed to connect, retrying");
-          struct timespec ts {
-            .tv_sec = 0,
-            .tv_nsec = 1000000
-          };
-          nanosleep(&ts, NULL);
-          continue;
-        }
-      }
+      int ret = conn_tcp();
+      if (ret < 0)
+        return -ECONNRESET;
     }
 
     ssize_t result = write(
@@ -205,7 +189,7 @@ int connection::stream_pkt(const uint8_t* data, uint32_t size) {
         LOG(WARNING, "Server disconnected while streaming a frame packet");
         close(tcpfd);
         tcpfd = -1;
-        continue;
+        return -ECONNRESET;
       }
       snprintf(
         logstr,
@@ -226,27 +210,12 @@ int connection::end_stream() {
   char logstr[128];
   size_t end_stream_size = sizeof(END_STREAM) - 1;
 
-  int retries = 0;
   size_t total_written = 0;
   while (total_written < end_stream_size) {
     if (tcpfd < 0) {
-      LOG(WARNING, "Not connected to server, trying to connect");
-      while (tcpfd < 0) {
-        int ret = conn_tcp();
-        if (ret < 0) {
-          if (++retries == MAX_RETRIES) {
-            LOG(WARNING, "No more connection retries");
-            return -ECONNRESET;
-          }
-          LOG(WARNING, "Failed to connect, retrying");
-          struct timespec ts {
-            .tv_sec = 0,
-            .tv_nsec = 1000000
-          };
-          nanosleep(&ts, NULL);
-          continue;
-        }
-      }
+      int ret = conn_tcp();
+      if (ret < 0)
+        return -ECONNRESET;
     }
 
     ssize_t result = write(
@@ -261,7 +230,7 @@ int connection::end_stream() {
         LOG(WARNING, "Server disconnected while notifying end of stream");
         close(tcpfd);
         tcpfd = -1;
-        continue;
+        return -ECONNRESET;
       }
       snprintf(
         logstr,

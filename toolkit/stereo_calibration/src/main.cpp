@@ -67,7 +67,13 @@ int main() {
   }
 
   struct stream_ctx stream_ctx;
-  ret = start_streams(stream_ctx, cam_count, nullptr);
+  ret = start_streams(
+    stream_ctx,
+    stream_conf.frame_width,
+    stream_conf.frame_height,
+    cam_count,
+    nullptr
+  );
   if (ret < 0) {
     cleanup_streams(stream_ctx);
     cleanup_logging();
@@ -83,24 +89,26 @@ int main() {
       continue;
     }
 
-    cv::Mat nv12_frame(
-      stream_conf.frame_height * 3/2,
-      stream_conf.frame_width,
-      CV_8UC1,
-      frameset[0]->frame_buf
-    );
+    for (int i = 0; i < cam_count; i++) {
+      cv::Mat nv12_frame(
+        stream_conf.frame_height * 3/2,
+        stream_conf.frame_width,
+        CV_8UC1,
+        frameset[i]->frame_buf
+      );
 
-    cv::Mat bgr_frame;
-    cv::cvtColor(
-      nv12_frame,
-      bgr_frame,
-      cv::COLOR_YUV2BGR_NV12
-    );
+      cv::Mat bgr_frame;
+      cv::cvtColor(
+        nv12_frame,
+        bgr_frame,
+        cv::COLOR_YUV2BGR_NV12
+      );
 
-    cv::imshow("stream", bgr_frame);
-    cv::waitKey(1);
+      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
 
-    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+      cv::imshow(cam_confs[i].name, bgr_frame);
+      cv::waitKey(1);
+    }
   }
 
   cleanup_streams(stream_ctx);

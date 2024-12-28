@@ -8,8 +8,6 @@
 #include "parse_conf.h"
 
 #define ENCODED_FRAME_BUF_SIZE 96000
-#define DECODED_FRAME_WIDTH 1280
-#define DECODED_FRAME_HEIGHT 720
 
 struct thread_ctx {
   struct cam_conf* conf;

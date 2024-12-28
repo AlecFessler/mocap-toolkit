@@ -20,6 +20,8 @@ static inline uint64_t alignup(uint64_t offset, uint64_t alignment) {
 
 int32_t start_streams(
   struct stream_ctx& ctx,
+  uint32_t frame_width,
+  uint32_t frame_height,
   uint32_t cam_count,
   char* target_id = nullptr
 ) {
@@ -118,8 +120,9 @@ int32_t start_streams(
   }
 
   // frame buffers
+  uint64_t frame_size = frame_width * frame_height * 3 / 2;
   uint64_t frame_count = cam_count * FRAME_BUFS_PER_THREAD;
-  ctx.shm_size = FRAME_SIZE * frame_count;
+  ctx.shm_size = frame_size * frame_count;
 
   // timestamped structs with frame buffer ptrs
   ctx.shm_size = alignup(ctx.shm_size, alignof(struct ts_frame_buf));

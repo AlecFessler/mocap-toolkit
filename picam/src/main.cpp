@@ -2,9 +2,6 @@
 // MIT License
 // See LICENSE file in the project root for full license information.
 
-#include <atomic>
-#include <arpa/inet.h>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -92,31 +89,34 @@ int main() {
 
       sem_wait(loop_ctl_sem.get());
 
-      if (frame_rdy) {
-        frame_rdy = 0;
-        if (!stream_end) {
-          encoder->encode_frame(cam->frame_buffer);
-          int pkt_size = 0;
-          uint8_t* ptr = encoder->recv_frame(pkt_size);
-          if (ptr) {
-            ret = conn->stream_pkt(ptr, pkt_size);
-            if (ret == -ECONNRESET) {
-              timestamp = 0;
-              frame_counter = 0;
-              stream_end = 0;
-              conn->discon_tcp();
-              encoder = std::make_unique<videnc>(config);
-            }
-          }
-        }
-      }
-
       if (stream_end) {
         stream_end = 0;
+        frame_rdy = 0;
         frame_counter = 0;
         ret = flush_encoder(*encoder, *conn);
         if (ret == 0)
           conn->end_stream();
+        encoder = std::make_unique<videnc>(config);
+        continue;
+      }
+
+      if (frame_rdy) {
+        frame_rdy = 0;
+        encoder->encode_frame(cam->frame_buffer);
+
+        int pkt_size = 0;
+        uint8_t* ptr = encoder->recv_frame(pkt_size);
+        if (ptr == nullptr)
+          continue;
+
+        ret = conn->stream_pkt(ptr, pkt_size);
+        if (ret != -ECONNRESET)
+          continue;
+
+        timestamp = 0;
+        frame_counter = 0;
+        stream_end = 0;
+        conn->discon_tcp();
         encoder = std::make_unique<videnc>(config);
       }
     }

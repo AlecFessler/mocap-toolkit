@@ -12,9 +12,6 @@ constexpr const char* SHM_NAME = "/mocap-toolkit_shm";
 #define SHM_ADDR ((void*)0x7f0000000000)
 constexpr uint32_t FRAME_BUFS_PER_THREAD = 512;
 constexpr uint32_t FRAMESET_SLOTS_PER_THREAD = 8;
-constexpr uint32_t FRAME_WIDTH = 1280;
-constexpr uint32_t FRAME_HEIGHT = 720;
-constexpr uint64_t FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT * 3 / 2; // nv12 fmt
 
 struct stream_ctx {
   pid_t server_pid;
@@ -30,7 +27,13 @@ struct ts_frame_buf {
   uint8_t* frame_buf;
 };
 
-int32_t start_streams(stream_ctx& ctx, uint32_t cam_count, char* target_id);
+int32_t start_streams(
+  stream_ctx& ctx,
+  uint32_t frame_width,
+  uint32_t frame_height,
+  uint32_t cam_count,
+  char* target_id
+);
 void cleanup_streams(stream_ctx& ctx);
 
 #endif // STREAM_CTL_H

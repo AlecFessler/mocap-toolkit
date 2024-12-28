@@ -1,0 +1,16 @@
+%YAML:1.0
+---
+image_width: 1280
+image_height: 720
+cam_matrix: !!opencv-matrix
+   rows: 0
+   cols: 0
+   dt: u
+   data: []
+dist_coeffs: !!opencv-matrix
+   rows: 0
+   cols: 0
+   dt: u
+   data: []
+reproj_err: -1.
+images_used: 0

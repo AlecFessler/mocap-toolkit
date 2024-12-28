@@ -1,5 +1,3 @@
-- Update the stream_ctl.h and .cpp to take the height and width from the stream_conf (in common, but update touches all 3 tools)
-
 - Move the function to load the calibration params into a common/utils.h and .cpp (out of the lens_calibration.h and .cpp)
 
 - Write stereo calibration tool

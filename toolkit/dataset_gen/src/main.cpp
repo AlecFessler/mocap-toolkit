@@ -67,7 +67,13 @@ int main() {
   }
 
   struct stream_ctx stream_ctx;
-  ret = start_streams(stream_ctx, cam_count, nullptr);
+  ret = start_streams(
+    stream_ctx,
+    stream_conf.frame_width,
+    stream_conf.frame_height,
+    cam_count,
+    nullptr
+  );
   if (ret < 0) {
     cleanup_streams(stream_ctx);
     cleanup_logging();
