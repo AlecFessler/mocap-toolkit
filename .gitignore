@@ -1,5 +1,4 @@
 */__pycache__
 /data/
 cams.yaml
-frameset_server/bin
-frameset_server/obj
+calibration_params/
