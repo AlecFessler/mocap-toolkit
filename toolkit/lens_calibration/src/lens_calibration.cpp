@@ -131,3 +131,36 @@ bool LensCalibration::check_status() {
   if (frame_count < MIN_FRAMES) return false;
   return reprojection_err < 1.0;
 }
+
+void LensCalibration::save_params(const std::string& filename) {
+  cv::FileStorage fs(filename, cv::FileStorage::WRITE);
+
+  fs << "image_width" << frame_width;
+  fs << "image_height" << frame_height;
+  fs << "cam_matrix" << cam_matrix;
+  fs << "dist_coeffs" << dist_coeffs;
+
+  fs << "reproj_err" << reprojection_err;
+  fs << "images_used" << frame_count;
+
+  fs.release();
+}
+
+bool load_calibration_params(
+  const std::string& cam_name,
+  struct calibration_params& params
+) {
+  std::string filename = cam_name + "_calibration.yaml";
+  cv::FileStorage fs(filename, cv::FileStorage::READ);
+
+  if (!fs.isOpened())
+    return false;
+
+  fs["cam_matrix"] >> params.cam_matrix;
+  fs["dist_coeffs"] >> params.dist_coeffs;
+  fs["image_width"] >> params.image_width;
+  fs["image_height"] >> params.image_height;
+
+  fs.release();
+  return true;
+}

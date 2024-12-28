@@ -1,23 +1,22 @@
 #ifndef LENS_CALIBRATION_HPP
 #define LENS_CALIBRATION_HPP
 
-#include <cstdint>
 #include <string>
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-constexpr uint32_t MIN_FRAMES = 10;
+constexpr int MIN_FRAMES = 10;
 constexpr double MIN_ERR = 1.0;
 
 class LensCalibration {
 private:
-  int32_t frame_width;
-  int32_t frame_height;
-  int32_t board_width;
-  int32_t board_height;
+  int frame_width;
+  int frame_height;
+  int board_width;
+  int board_height;
   float square_size;
 
-  uint32_t frame_count;
+  int frame_count;
 
   std::vector<cv::Point3f> objp;
   std::vector<cv::Point2f> corners;
@@ -34,17 +33,29 @@ private:
 
 public:
   LensCalibration(
-    int32_t frame_width,
-    int32_t frame_height,
-    int32_t board_width,
-    int32_t board_height,
+    int frame_width,
+    int frame_height,
+    int board_width,
+    int board_height,
     float square_size
   );
   bool try_frame(cv::Mat& gray_frame);
   void display_corners(cv::Mat& bgr_frame);
   double calibrate();
   bool check_status();
-  //std::string final_params();
+  void save_params(const std::string& filename);
 };
+
+struct calibration_params {
+  cv::Mat cam_matrix;
+  cv::Mat dist_coeffs;
+  int image_width;
+  int image_height;
+};
+
+bool load_calibration_params(
+  const std::string& cam_name,
+  struct calibration_params& params
+);
 
 #endif // LENS_CALIBRATION_HPP

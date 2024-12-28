@@ -195,17 +195,11 @@ int main(int argc, char* argv[]) {
     calibrator.display_corners(bgr_frame);
 
     double err = calibrator.calibrate();
-
-    snprintf(
-      logstr,
-      sizeof(logstr),
-      "Current calibration error: %.3f",
-      err
-    );
-    LOG(INFO, logstr);
-
     calibration_complete = calibrator.check_status();
   }
+
+  std::string filename = std::string(cam_confs[0].name) + "_calibration.yaml";
+  calibrator.save_params(filename);
 
   cleanup_streams(stream_ctx);
   cleanup_logging();
