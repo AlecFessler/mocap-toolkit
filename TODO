@@ -1,3 +1,5 @@
+- Move the function to load the calibration params into a common/utils.h and .cpp (out of the lens_calibration.h and .cpp)
+
 - Write stereo calibration tool
 
 - Write preprocessing script
