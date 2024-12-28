@@ -5,10 +5,10 @@
 #include "lens_calibration.hpp"
 
 LensCalibration::LensCalibration(
-  int32_t frame_width,
-  int32_t frame_height,
-  int32_t board_width,
-  int32_t board_height,
+  int frame_width,
+  int frame_height,
+  int board_width,
+  int board_height,
   float square_size
 ) :
   frame_width(frame_width),
