@@ -6,14 +6,22 @@
 #include <spsc_queue.hpp>
 #include <string>
 #include <iostream>
+#include <vector>
 #include <unistd.h>
 
+#include "lens_calibration.hpp"
 #include "logging.h"
 #include "parse_conf.h"
+#include "stereo_calibration.hpp"
 #include "stream_ctl.h"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/stereo_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
+constexpr const char* CALIBRATION_PARAMS_PATH = "/etc/mocap-toolkit/";
+
+constexpr uint32_t BOARD_WIDTH = 9;
+constexpr uint32_t BOARD_HEIGHT = 6;
+constexpr float SQUARE_SIZE = 25.0; // mm
 
 volatile sig_atomic_t stop_flag = 0;
 
@@ -66,6 +74,41 @@ int main() {
     return ret;
   }
 
+  struct calibration_params calib_params[cam_count];
+  for (int i = 0; i < cam_count; i++) {
+    std::string filename =
+      std::string(CALIBRATION_PARAMS_PATH) +
+      std::string(cam_confs[i].name) +
+      "_calibration.yaml";
+
+    bool loaded = load_calibration_params(
+      filename,
+      calib_params[i]
+    );
+
+    if (loaded) continue;
+
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to load %s",
+      filename.c_str()
+    );
+    LOG(ERROR, logstr);
+    cleanup_logging();
+    return -EINVAL;
+  }
+
+  StereoCalibration calibrator{
+    calib_params,
+    cam_count,
+    stream_conf.frame_width,
+    stream_conf.frame_height,
+    BOARD_WIDTH,
+    BOARD_HEIGHT,
+    SQUARE_SIZE
+  };
+
   struct stream_ctx stream_ctx;
   ret = start_streams(
     stream_ctx,
@@ -80,7 +123,14 @@ int main() {
     return ret;
   }
 
-  while (!stop_flag) {
+  const uint32_t cooldown_limit = stream_conf.fps / 3;
+  uint32_t cooldown = 0;
+  uint32_t cooldown_counter = 0;
+
+  bool done_calibrating = false;
+  cv::Mat gray_frames[cam_count];
+  cv::Mat bgr_frames[cam_count];
+  while (!stop_flag && !done_calibrating) {
     struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
       spsc_dequeue(stream_ctx.filled_frameset_q)
     );
@@ -97,19 +147,40 @@ int main() {
         frameset[i]->frame_buf
       );
 
-      cv::Mat bgr_frame;
       cv::cvtColor(
         nv12_frame,
-        bgr_frame,
-        cv::COLOR_YUV2BGR_NV12
+        gray_frames[i],
+        cv::COLOR_YUV2GRAY_NV12
       );
 
-      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+      cv::cvtColor(
+        nv12_frame,
+        bgr_frames[i],
+        cv::COLOR_YUV2BGR_NV12
+      );
+    }
 
-      cv::imshow(cam_confs[i].name, bgr_frame);
+    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+
+    for (int i = 0; i < cam_count; i++) {
+      cv::imshow(cam_confs[i].name, bgr_frames[i]);
       cv::waitKey(1);
     }
+
+    if (cooldown > 0) {
+      if (++cooldown_counter >= cooldown)
+        cooldown = 0;
+      continue;
+    }
+    cooldown = cooldown_limit;
+    cooldown_counter = 0;
+
+    calibrator.try_frames(gray_frames);
+    done_calibrating = calibrator.check_status();
   }
+
+  calibrator.calibrate();
+  calibrator.save_params(cam_confs);
 
   cleanup_streams(stream_ctx);
   cleanup_logging();

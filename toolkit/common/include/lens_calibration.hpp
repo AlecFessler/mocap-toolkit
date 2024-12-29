@@ -54,9 +54,8 @@ struct calibration_params {
 };
 
 bool load_calibration_params(
-  const std::string& cam_name,
+  const std::string& filename,
   struct calibration_params& params
 );
 
 #endif // LENS_CALIBRATION_HPP
-

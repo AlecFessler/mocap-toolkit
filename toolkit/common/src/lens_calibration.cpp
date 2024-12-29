@@ -147,10 +147,9 @@ void LensCalibration::save_params(const std::string& filename) {
 }
 
 bool load_calibration_params(
-  const std::string& cam_name,
+  const std::string& filename,
   struct calibration_params& params
 ) {
-  std::string filename = cam_name + "_calibration.yaml";
   cv::FileStorage fs(filename, cv::FileStorage::READ);
 
   if (!fs.isOpened())
