@@ -126,7 +126,6 @@ int main() {
       continue;
     }
 
-    bgr_frames.clear();
     for (int i = 0; i < cam_count; i++) {
       cv::Mat nv12_frame(
         stream_conf.frame_height * 3/2,
@@ -142,12 +141,21 @@ int main() {
         cv::COLOR_YUV2BGR_NV12
       );
       cv::Mat processed_bgr = wide_to_3_4_ar(unprocessed_bgr);
-      bgr_frames.push_back(processed_bgr);
+      bgr_frames[i] = processed_bgr;
     }
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+    predictor.predict(bgr_frames, keypoints);
 
     for (int i = 0; i < cam_count; i++) {
+      for (int j = 0; j < NUM_KEYPOINTS; j++) {
+        int x = static_cast<int>(keypoints[i].first[j] * bgr_frames[i].cols);
+        int y = static_cast<int>(keypoints[i].second[j] * bgr_frames[i].rows);
+        if (x == -1 || y == -1)
+          continue;
+
+        cv::circle(bgr_frames[i], cv::Point(x, y), 3, cv::Scalar(0, 0, 225), -1);
+      }
       cv::imshow(cam_confs[i].name, bgr_frames[i]);
       cv::waitKey(1);
     }

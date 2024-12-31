@@ -1,6 +1,6 @@
 - Update recording software to just exit and restart instead of try to reset state
 
-- Write dataset gen tool
+- Use a smaller sapiens model and maybe fewer keypoints to try to get real time pose prediction
 
 - Finish writing and updating docstrings
 
