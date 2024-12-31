@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
       "Error getting camera count: %s",
       strerror(cam_count)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return cam_count;
   }
@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
       "Error parsing camera confs %s",
       strerror(ret)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return ret;
   }
@@ -94,12 +94,12 @@ int main(int argc, char* argv[]) {
         "Camera ID %d not found in config",
         target_cam_id
       );
-      LOG(ERROR, logstr);
+      log_write(ERROR, logstr);
       cleanup_logging();
       return -EINVAL;
     }
   } else {
-    LOG(ERROR, "One camera ID required for lens calibration");
+    log_write(ERROR, "One camera ID required for lens calibration");
     cleanup_logging();
     return -EINVAL;
   }

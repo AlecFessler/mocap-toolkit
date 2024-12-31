@@ -1,7 +1,6 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-#include "logging.h"
 #include "lens_calibration.hpp"
 #include "stereo_calibration.hpp"
 

@@ -5,7 +5,7 @@
 #ifndef LOGGING_H
 #define LOGGING_H
 
-#define LOG(lvl, msg) log_msg(lvl, __FILE__, __LINE__, msg)
+#define log_write(lvl, msg) log_msg(lvl, __FILE__, __LINE__, msg)
 
 typedef enum log_level {
   INFO,

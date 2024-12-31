@@ -9,13 +9,17 @@
 #include <vector>
 #include <unistd.h>
 
+#include "img_processing.hpp"
+#include "lens_calibration.hpp"
 #include "logging.h"
 #include "parse_conf.h"
+#include "stereo_calibration.hpp"
 #include "pose_predictor.hpp"
 #include "stream_ctl.h"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/dataset_gen.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
+constexpr const char* CALIBRATION_PARAMS_PATH = "/etc/mocap-toolkit/";
 constexpr const char* MODEL_PATH = "/var/lib/mocap-toolkit/sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2";
 
 volatile sig_atomic_t stop_flag = 0;
@@ -49,7 +53,7 @@ int main() {
       "Error getting camera count: %s",
       strerror(cam_count)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return cam_count;
   }
@@ -64,13 +68,39 @@ int main() {
       "Error parsing camera confs %s",
       strerror(ret)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return ret;
   }
 
+  struct calibration_params calib_params[cam_count];
+  for (int i = 0; i < cam_count; i++) {
+    std::string filename =
+      std::string(CALIBRATION_PARAMS_PATH) +
+      std::string(cam_confs[i].name) +
+      "_calibration.yaml";
+
+    bool loaded = load_calibration_params(
+      filename,
+      calib_params[i]
+    );
+
+    if (loaded) continue;
+
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to load %s",
+      filename.c_str()
+    );
+    log_write(ERROR, logstr);
+    cleanup_logging();
+    return -EINVAL;
+  }
+
   PosePredictor predictor{std::string(MODEL_PATH)};
   std::vector<cv::Mat> bgr_frames;
+  bgr_frames.resize(cam_count);
   std::vector<std::pair<std::vector<float>, std::vector<float>>> keypoints;
 
   struct stream_ctx stream_ctx;
@@ -96,24 +126,31 @@ int main() {
       continue;
     }
 
-    cv::Mat nv12_frame(
-      stream_conf.frame_height * 3/2,
-      stream_conf.frame_width,
-      CV_8UC1,
-      frameset[0]->frame_buf
-    );
+    bgr_frames.clear();
+    for (int i = 0; i < cam_count; i++) {
+      cv::Mat nv12_frame(
+        stream_conf.frame_height * 3/2,
+        stream_conf.frame_width,
+        CV_8UC1,
+        frameset[i]->frame_buf
+      );
 
-    cv::Mat bgr_frame;
-    cv::cvtColor(
-      nv12_frame,
-      bgr_frame,
-      cv::COLOR_YUV2BGR_NV12
-    );
-
-    cv::imshow("stream", bgr_frame);
-    cv::waitKey(1);
+      cv::Mat unprocessed_bgr;
+      cv::cvtColor(
+        nv12_frame,
+        unprocessed_bgr,
+        cv::COLOR_YUV2BGR_NV12
+      );
+      cv::Mat processed_bgr = wide_to_3_4_ar(unprocessed_bgr);
+      bgr_frames.push_back(processed_bgr);
+    }
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+
+    for (int i = 0; i < cam_count; i++) {
+      cv::imshow(cam_confs[i].name, bgr_frames[i]);
+      cv::waitKey(1);
+    }
   }
 
   cleanup_streams(stream_ctx);

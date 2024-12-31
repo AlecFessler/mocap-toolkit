@@ -1,5 +1,3 @@
-- Resolve the LOG macro name conflict with torch in the dataset gen tool
-
 - Update recording software to just exit and restart instead of try to reset state
 
 - Write dataset gen tool

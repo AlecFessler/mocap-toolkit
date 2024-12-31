@@ -37,9 +37,9 @@ DATASET_GEN_OBJS = $(DATASET_GEN_SRCS:$(DATASET_GEN_SRC_DIR)/%.cpp=$(DATASET_GEN
 
 $(shell mkdir -p $(BIN_DIR) $(COMMON_OBJ_DIR) $(DATASET_GEN_OBJ_DIR))
 
-all: $(BIN_DIR)/dataset_gen
+all: $(BIN_DIR)/mocap_dataset_gen
 
-$(BIN_DIR)/dataset_gen: $(COMMON_OBJS) $(DATASET_GEN_OBJS)
+$(BIN_DIR)/mocap_dataset_gen: $(COMMON_OBJS) $(DATASET_GEN_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
 
 $(COMMON_OBJ_DIR)/%.o: $(COMMON_SRC_DIR)/%.cpp

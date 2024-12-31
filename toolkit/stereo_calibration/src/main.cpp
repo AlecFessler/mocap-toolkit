@@ -55,7 +55,7 @@ int main() {
       "Error getting camera count: %s",
       strerror(cam_count)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return cam_count;
   }
@@ -70,7 +70,7 @@ int main() {
       "Error parsing camera confs %s",
       strerror(ret)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return ret;
   }
@@ -95,7 +95,7 @@ int main() {
       "Failed to load %s",
       filename.c_str()
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_logging();
     return -EINVAL;
   }

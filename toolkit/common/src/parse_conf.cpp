@@ -43,14 +43,14 @@ int count_cameras(const char* fpath) {
       "Error opening file: %s",
       strerror(errno)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     ret = -errno;
     goto err_cleanup;
   }
 
   ret = yaml_parser_initialize(&parser);
   if (ret == 0) {
-    LOG(ERROR, "Error initializing yaml parser");
+    log_write(ERROR, "Error initializing yaml parser");
     ret = -ENOMEM;
     goto err_cleanup;
   }
@@ -59,14 +59,14 @@ int count_cameras(const char* fpath) {
   while (true) {
     ret = yaml_parser_parse(&parser, &event);
     if (ret == 0) {
-      LOG(ERROR, "Error parsing yaml file");
+      log_write(ERROR, "Error parsing yaml file");
       ret = -EINVAL;
       goto err_cleanup;
     }
 
     if (event.type == YAML_STREAM_END_EVENT) {
       if (count == 0) {
-        LOG(ERROR, "Found no cameras list");
+        log_write(ERROR, "Found no cameras list");
         ret = -EINVAL;
         goto err_cleanup;
       }
@@ -167,14 +167,14 @@ static int parse_stream_params(struct stream_conf* stream_conf) {
   bool in_stream_params = false;
 
   if (!infile) {
-    LOG(ERROR, "File not opened, call count_cameras first");
+    log_write(ERROR, "File not opened, call count_cameras first");
     ret = -ENODATA;
     goto cleanup;
   }
 
   ret = yaml_parser_initialize(&parser);
   if (ret == 0) {
-    LOG(ERROR, "Error initializing yaml parser");
+    log_write(ERROR, "Error initializing yaml parser");
     ret = -ENOMEM;
     goto cleanup;
   }
@@ -183,13 +183,13 @@ static int parse_stream_params(struct stream_conf* stream_conf) {
   while (true) {
     ret = yaml_parser_parse(&parser, &event);
     if (ret == 0) {
-      LOG(ERROR, "Error parsing yaml file");
+      log_write(ERROR, "Error parsing yaml file");
       ret = -EINVAL;
       goto cleanup;
     }
 
     if (event.type == YAML_STREAM_END_EVENT) {
-      LOG(ERROR, "Reached end of file before finding all stream parameters");
+      log_write(ERROR, "Reached end of file before finding all stream parameters");
       ret = -EINVAL;
       goto cleanup;
     }
@@ -209,7 +209,7 @@ static int parse_stream_params(struct stream_conf* stream_conf) {
 
     if (strcmp((char*)event.data.scalar.value, "cameras") == 0) {
       if (fields_parsed < fields_total) {
-        LOG(ERROR, "Missing required stream parameters");
+        log_write(ERROR, "Missing required stream parameters");
         ret = -EINVAL;
         goto cleanup;
       }
@@ -224,7 +224,7 @@ static int parse_stream_params(struct stream_conf* stream_conf) {
 
       ret = yaml_parser_parse(&parser, &event);
       if (ret == 0) {
-        LOG(ERROR, "Error parsing yaml file");
+        log_write(ERROR, "Error parsing yaml file");
         ret = -EINVAL;
         goto cleanup;
       }
@@ -238,7 +238,7 @@ static int parse_stream_params(struct stream_conf* stream_conf) {
           "Failed to parse %s",
           stream_fields[i].name
         );
-        LOG(ERROR, logstr);
+        log_write(ERROR, logstr);
         ret = -EINVAL;
         goto cleanup;
       }
@@ -295,7 +295,7 @@ int parse_conf(
   const int fields_total = sizeof(fields)/sizeof(fields[0]);
 
   if (!infile) {
-    LOG(ERROR, "File not opened, call count_cameras first");
+    log_write(ERROR, "File not opened, call count_cameras first");
     ret = -ENODATA;
     goto cleanup;
   }
@@ -306,7 +306,7 @@ int parse_conf(
 
   ret = yaml_parser_initialize(&parser);
   if (ret == 0) {
-    LOG(ERROR, "Error initializing yaml parser");
+    log_write(ERROR, "Error initializing yaml parser");
     ret = -ENOMEM;
     goto cleanup;
   }
@@ -315,7 +315,7 @@ int parse_conf(
   while (confs_parsed < count) {
     ret = yaml_parser_parse(&parser, &event);
     if (ret == 0) {
-      LOG(ERROR, "Error parsing yaml file");
+      log_write(ERROR, "Error parsing yaml file");
       ret = -EINVAL;
       goto cleanup;
     }
@@ -328,7 +328,7 @@ int parse_conf(
         count,
         confs_parsed
       );
-      LOG(ERROR, logstr);
+      log_write(ERROR, logstr);
       ret = -EINVAL;
       goto cleanup;
     }
@@ -346,7 +346,7 @@ int parse_conf(
 
       ret = yaml_parser_parse(&parser, &event);
       if (ret == 0) {
-        LOG(ERROR, "Error parsing yaml file");
+        log_write(ERROR, "Error parsing yaml file");
         ret = -EINVAL;
         goto cleanup;
       }
@@ -361,7 +361,7 @@ int parse_conf(
           "Failed to parse %s",
           fields[i].name
         );
-        LOG(ERROR, logstr);
+        log_write(ERROR, logstr);
         ret = -EINVAL;
         goto cleanup;
       }

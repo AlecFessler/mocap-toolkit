@@ -42,7 +42,7 @@ int32_t start_streams(
       "Failed to fork process: %s",
       strerror(errno)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_streams(ctx);
     return -errno;
   }
@@ -85,7 +85,7 @@ int32_t start_streams(
       "Error creating shared memory: %s",
       strerror(errno)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_streams(ctx);
     return -errno;
   }
@@ -101,7 +101,7 @@ int32_t start_streams(
         "Error checking shared memory size: %s",
         strerror(errno)
       );
-      LOG(ERROR, logstr);
+      log_write(ERROR, logstr);
       cleanup_streams(ctx);
       return -errno;
     }
@@ -114,7 +114,7 @@ int32_t start_streams(
   }
 
   if (sb.st_size == 0) {
-    LOG(ERROR, "Timeout waiting for shared memory initialization");
+    log_write(ERROR, "Timeout waiting for shared memory initialization");
     cleanup_streams(ctx);
     return -ETIMEDOUT;
   }
@@ -166,7 +166,7 @@ int32_t start_streams(
       ctx.shm_size,
       sb.st_size
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_streams(ctx);
     return -EINVAL;
   }
@@ -186,7 +186,7 @@ int32_t start_streams(
       "Error mapping shared memory: %s",
       strerror(errno)
     );
-    LOG(ERROR, logstr);
+    log_write(ERROR, logstr);
     cleanup_streams(ctx);
     return -errno;
   }
