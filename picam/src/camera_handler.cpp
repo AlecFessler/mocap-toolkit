@@ -8,7 +8,6 @@
 #include "config.h"
 #include "logging.h"
 
-
 camera_handler_t::camera_handler_t(
   config& config,
   sem_t& loop_ctl_sem,
@@ -214,40 +213,12 @@ void camera_handler_t::init_dma_buffer() {
 }
 
 void camera_handler_t::init_camera_controls(config& config) {
-  /**
-   * Configures camera settings for consistent, high-quality video capture.
-   *
-   * Following cinematography best practices, this method:
-   * 1. Sets exposure time to half the frame interval (180° shutter rule)
-   *    This prevents motion blur while maintaining natural motion appearance
-   *
-   * 2. Disables automatic controls that could cause frame timing variation:
-   *    - Auto exposure (AE)
-   *    - Auto white balance (AWB)
-   *    - Auto focus (AF)
-   *    - HDR mode
-   *
-   * 3. Fixes focus at ~12 inches (lens position 3.33)
-   *    The lens position is the reciprocal of the focus distance in meters
-   *
-   * 4. Sets gain to 1.0 (equivalent to ISO 100) for minimal noise
-   *
-   * Parameters:
-   *   config: Contains frame timing constraints (duration_min/max)
-   *
-   * Throws:
-   *   std::runtime_error if camera fails to start with these settings
-   *
-   * Note:
-   *   These parameters will change, but are fine for development
-   */
+  */
   unsigned int frame_duration_min = config.frame_duration_min;
   unsigned int frame_duration_max = config.frame_duration_max;
 
   controls_ = std::make_unique<libcamera::ControlList>();
 
-  // Fix exposure time to half the time between frames
-  // May be able to remove frame duration limit control since we are setting exposure
   controls_->set(libcamera::controls::FrameDurationLimits, libcamera::Span<const std::int64_t, 2>({ frame_duration_min, frame_duration_max }));
   controls_->set(libcamera::controls::AeEnable, false);
   controls_->set(libcamera::controls::ExposureTime, frame_duration_min);

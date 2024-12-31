@@ -9,6 +9,7 @@
 #include <vector>
 #include <unistd.h>
 
+#include "img_processing.hpp"
 #include "lens_calibration.hpp"
 #include "logging.h"
 #include "parse_conf.h"
@@ -102,8 +103,8 @@ int main() {
   StereoCalibration calibrator{
     calib_params,
     cam_count,
-    stream_conf.frame_width,
-    stream_conf.frame_height,
+    PROCESSED_WIDTH,
+    PROCESSED_HEIGHT,
     BOARD_WIDTH,
     BOARD_HEIGHT,
     SQUARE_SIZE
@@ -147,17 +148,21 @@ int main() {
         frameset[i]->frame_buf
       );
 
+      cv::Mat unprocessed_gray;
       cv::cvtColor(
         nv12_frame,
-        gray_frames[i],
+        unprocessed_gray,
         cv::COLOR_YUV2GRAY_NV12
       );
+      gray_frames[i] = wide_to_3_4_ar(unprocessed_gray);
 
+      cv::Mat unprocessed_bgr;
       cv::cvtColor(
         nv12_frame,
-        bgr_frames[i],
+        unprocessed_bgr,
         cv::COLOR_YUV2BGR_NV12
       );
+      bgr_frames[i] = wide_to_3_4_ar(unprocessed_bgr);
     }
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);

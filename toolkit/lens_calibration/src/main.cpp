@@ -8,6 +8,7 @@
 #include <iostream>
 #include <unistd.h>
 
+#include "img_processing.hpp"
 #include "logging.h"
 #include "lens_calibration.hpp"
 #include "parse_conf.h"
@@ -104,8 +105,8 @@ int main(int argc, char* argv[]) {
   }
 
   LensCalibration calibrator(
-    stream_conf.frame_width,
-    stream_conf.frame_height,
+    PROCESSED_WIDTH,
+    PROCESSED_HEIGHT,
     BOARD_WIDTH,
     BOARD_HEIGHT,
     SQUARE_SIZE
@@ -159,12 +160,13 @@ int main(int argc, char* argv[]) {
       frameset[0]->frame_buf
     );
 
-    cv::Mat bgr_frame;
+    cv::Mat unprocessed_bgr;
     cv::cvtColor(
       nv12_frame,
-      bgr_frame,
+      unprocessed_bgr,
       cv::COLOR_YUV2BGR_NV12
     );
+    cv::Mat bgr_frame = wide_to_3_4_ar(unprocessed_bgr);
 
     if (cooldown > 0) {
       spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
@@ -180,12 +182,13 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
-    cv::Mat gray_frame;
+    cv::Mat unprocessed_gray;
     cv::cvtColor(
       nv12_frame,
-      gray_frame,
+      unprocessed_gray,
       cv::COLOR_YUV2GRAY_NV12
     );
+    cv::Mat gray_frame = wide_to_3_4_ar(unprocessed_gray);
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
 

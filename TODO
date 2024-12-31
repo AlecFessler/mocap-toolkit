@@ -1,7 +1,5 @@
 - Resolve the LOG macro name conflict with torch in the dataset gen tool
 
-- Set things up (whatever that entails) so that the cameras default is sideways now so we're closer to the models native resolution of 768x1024
-
 - Update recording software to just exit and restart instead of try to reset state
 
 - Write dataset gen tool
