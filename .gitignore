@@ -2,3 +2,4 @@
 data/
 cams.yaml
 calibration_params/
+pose_predictor/
