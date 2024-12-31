@@ -102,6 +102,7 @@ int main() {
   std::vector<cv::Mat> bgr_frames;
   bgr_frames.resize(cam_count);
   std::vector<std::pair<std::vector<float>, std::vector<float>>> keypoints;
+  std::vector<std::vector<float>> confidence_scores;
 
   struct stream_ctx stream_ctx;
   ret = start_streams(
@@ -145,14 +146,15 @@ int main() {
     }
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
-    predictor.predict(bgr_frames, keypoints);
+    predictor.predict(bgr_frames, keypoints, confidence_scores);
 
     for (int i = 0; i < cam_count; i++) {
       for (int j = 0; j < NUM_KEYPOINTS; j++) {
+        if (confidence_scores[i][j] < 0.5)
+          continue;
+
         int x = static_cast<int>(keypoints[i].first[j] * bgr_frames[i].cols);
         int y = static_cast<int>(keypoints[i].second[j] * bgr_frames[i].rows);
-        if (x == -1 || y == -1)
-          continue;
 
         cv::circle(bgr_frames[i], cv::Point(x, y), 3, cv::Scalar(0, 0, 225), -1);
       }

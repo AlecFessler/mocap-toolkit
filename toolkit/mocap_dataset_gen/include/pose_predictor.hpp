@@ -25,15 +25,16 @@ private:
 
   void postprocess(
     const torch::Tensor& predicted_keypoints,
-    std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints
+    std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints,
+    std::vector<std::vector<float>>& confidence_scores
   );
 
 public:
   PosePredictor(const std::string& model_path);
-
   void predict(
     const std::vector<cv::Mat>& bgr_frames,
-    std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints
+    std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints,
+    std::vector<std::vector<float>>& confidence_scores
   );
 };
 

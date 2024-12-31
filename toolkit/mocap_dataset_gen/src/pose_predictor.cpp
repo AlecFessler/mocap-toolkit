@@ -233,38 +233,49 @@ static torch::Tensor refine_keypoints(
 
 void PosePredictor::postprocess(
   const torch::Tensor& predicted_keypoints,
-  std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints
+  std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints,
+  std::vector<std::vector<float>>& confidence_scores
 ) {
   auto [coords, vals] = get_heatmap_max(predicted_keypoints);
   torch::Tensor refined_coords = refine_keypoints(coords, predicted_keypoints);
   refined_coords = refined_coords.div(torch::tensor({191.0, 255.0}, refined_coords.device())); // heatmap size, img size / 4
 
   torch::Tensor coords_cpu = refined_coords.to(torch::kCPU);
+  torch::Tensor vals_cpu = vals.to(torch::kCPU);
+
   int64_t batch_size = coords_cpu.size(0);
   keypoints.resize(batch_size);
+  confidence_scores.resize(batch_size);
 
   for (int64_t n = 0; n < batch_size; n++) {
-    torch::Tensor batch_tensor = coords_cpu[n];
-    auto accessor = batch_tensor.accessor<float,2>();
+    torch::Tensor coords_tensor = coords_cpu[n];
+    torch::Tensor vals_tensor = vals_cpu[n];
+
+    auto coords_accessor = coords_tensor.accessor<float,2>();
+    auto vals_accessor = vals_tensor.accessor<float,1>();
 
     std::vector<float> x_vec(NUM_KEYPOINTS);
     std::vector<float> y_vec(NUM_KEYPOINTS);
+    std::vector<float> conf_vec(NUM_KEYPOINTS);
 
     for (int64_t i = 0; i < NUM_KEYPOINTS; i++) {
-      x_vec[i] = accessor[i][0];
-      y_vec[i] = accessor[i][1];
+      x_vec[i] = coords_accessor[i][0];
+      y_vec[i] = coords_accessor[i][1];
+      conf_vec[i] = vals_accessor[i];
     }
 
     keypoints[n] = std::make_pair(x_vec, y_vec);
+    confidence_scores[n] = conf_vec;
   }
 }
 
 void PosePredictor::predict(
   const std::vector<cv::Mat>& bgr_frames,
-  std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints
+  std::vector<std::pair<std::vector<float>, std::vector<float>>>& keypoints,
+  std::vector<std::vector<float>>& confidence_scores
 ) {
   torch::Tensor rgb_tensors;
   preprocess(bgr_frames, rgb_tensors);
   torch::Tensor predicted_keypoints = infer(rgb_tensors);
-  postprocess(predicted_keypoints, keypoints);
+  postprocess(predicted_keypoints, keypoints, confidence_scores);
 }
