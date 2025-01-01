@@ -1,8 +1,6 @@
-- Update recording software to just exit and restart instead of try to reset state
-
 - Add a retry count on empty frames and frameset retry loops in the frameset server so it doesn't get stuck running forever
 
-- Use a smaller sapiens model and maybe fewer keypoints to try to get real time pose prediction
+- Come up with a design for the dataset gen tool so it can display the video stream for the user, and run inference and transcoding in the background for actual dataset creation
 
 - Finish writing and updating docstrings
 

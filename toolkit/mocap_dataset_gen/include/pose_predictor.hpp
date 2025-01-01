@@ -6,7 +6,7 @@
 #include <torch/script.h>
 #include <vector>
 
-constexpr int NUM_KEYPOINTS = 308;
+constexpr int NUM_KEYPOINTS = 133;
 constexpr int INPUT_HEIGHT = 1024;
 constexpr int INPUT_WIDTH = 768;
 constexpr float MEAN[3] = {123.675f/255.0f, 116.28f/255.0f, 103.53f/255.0f};

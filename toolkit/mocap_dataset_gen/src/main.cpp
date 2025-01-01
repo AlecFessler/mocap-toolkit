@@ -20,7 +20,7 @@
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/dataset_gen.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 constexpr const char* CALIBRATION_PARAMS_PATH = "/etc/mocap-toolkit/";
-constexpr const char* MODEL_PATH = "/var/lib/mocap-toolkit/sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2";
+constexpr const char* MODEL_PATH = "/var/lib/mocap-toolkit/sapiens_1b_coco_wholebody_best_coco_wholebody_AP_727_torchscript.pt2";
 
 volatile sig_atomic_t stop_flag = 0;
 

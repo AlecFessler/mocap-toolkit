@@ -90,14 +90,11 @@ int main() {
       sem_wait(loop_ctl_sem.get());
 
       if (stream_end) {
-        stream_end = 0;
-        frame_rdy = 0;
-        frame_counter = 0;
         ret = flush_encoder(*encoder, *conn);
         if (ret == 0)
           conn->end_stream();
-        encoder = std::make_unique<videnc>(config);
-        continue;
+        cleanup_logging();
+        return 0;
       }
 
       if (frame_rdy) {
@@ -113,17 +110,10 @@ int main() {
         if (ret != -ECONNRESET)
           continue;
 
-        timestamp = 0;
-        frame_counter = 0;
-        stream_end = 0;
-        conn->discon_tcp();
-        encoder = std::make_unique<videnc>(config);
+        cleanup_logging();
+        return EXIT_FAILURE;
       }
     }
-
-    flush_encoder(*encoder, *conn);
-    cleanup_logging();
-
   } catch (const std::exception& e) {
     char logstr[128];
     snprintf(
@@ -157,19 +147,19 @@ void io_signal_handler(int signo, siginfo_t* info, void* context) {
 
   // 8 bytes is our timestamp
   if (size == 8) {
-      uint64_t network_timestamp;
-      memcpy(&network_timestamp, buf, sizeof(network_timestamp));
-      timestamp = network_timestamp;
-      sem_post(loop_ctl_sem.get());
-      return;
+    uint64_t network_timestamp;
+    memcpy(&network_timestamp, buf, sizeof(network_timestamp));
+    timestamp = network_timestamp;
+    sem_post(loop_ctl_sem.get());
+    return;
   }
 
   if (size == 4 && strncmp(buf, "STOP", 4) == 0) {
-      LOG(INFO, "Received stop signal, ending stream...");
-      timestamp = 0;
-      stream_end = 1;
-      sem_post(loop_ctl_sem.get());
-      return;
+    LOG(INFO, "Received stop signal, ending stream...");
+    timestamp = 0;
+    stream_end = 1;
+    sem_post(loop_ctl_sem.get());
+    return;
   }
 
   LOG(ERROR, "Unexpected udp message size");
