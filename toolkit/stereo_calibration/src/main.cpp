@@ -24,6 +24,8 @@ constexpr uint32_t BOARD_WIDTH = 9;
 constexpr uint32_t BOARD_HEIGHT = 6;
 constexpr float SQUARE_SIZE = 25.0; // mm
 
+constexpr uint32_t CORES_PER_CCD = 8;
+
 volatile sig_atomic_t stop_flag = 0;
 
 void stop_handler(int signum) {
@@ -74,6 +76,16 @@ int main() {
     cleanup_logging();
     return ret;
   }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cam_count % CORES_PER_CCD, &cpuset);
+  pid_t pid = getpid();
+  sched_setaffinity(
+    pid,
+    sizeof(cpu_set_t),
+    &cpuset
+  );
 
   struct calibration_params calib_params[cam_count];
   for (int i = 0; i < cam_count; i++) {

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <errno.h>
 #include <opencv2/opencv.hpp>
+#include <sched.h>
 #include <spsc_queue.hpp>
 #include <string>
 #include <iostream>
@@ -20,6 +21,8 @@ constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 constexpr uint32_t BOARD_WIDTH = 9;
 constexpr uint32_t BOARD_HEIGHT = 6;
 constexpr float SQUARE_SIZE = 25.0; // mm
+
+constexpr uint32_t CORES_PER_CCD = 8;
 
 volatile sig_atomic_t stop_flag = 0;
 
@@ -71,6 +74,16 @@ int main(int argc, char* argv[]) {
     cleanup_logging();
     return ret;
   }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cam_count % CORES_PER_CCD, &cpuset);
+  pid_t pid = getpid();
+  sched_setaffinity(
+    pid,
+    sizeof(cpu_set_t),
+    &cpuset
+  );
 
   int target_cam_id = -1;
   if (argc == 2) {
