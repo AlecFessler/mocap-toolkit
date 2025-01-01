@@ -100,6 +100,7 @@ void* stream_mgr_fn(void* ptr) {
 
   struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
 
+  uint32_t dequeue_retry_counter = 0;
   bool incoming_stream = true;
   while (running && ctx->main_running) {
     if (incoming_stream) {
@@ -217,6 +218,11 @@ void* stream_mgr_fn(void* ptr) {
 
       current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       while (!current_buf && running) {
+        if (++dequeue_retry_counter >= ctx->stream_conf->fps) {
+          log(ERROR, "Worker thread ran out of empty frame dequeue retries");
+          running = 0;
+          goto err_cleanup;
+        }
         struct timespec ts = {
           .tv_sec = 0,
           .tv_nsec = EMPTY_Q_WAIT
@@ -224,6 +230,8 @@ void* stream_mgr_fn(void* ptr) {
         nanosleep(&ts, NULL);
         current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
       }
+
+      dequeue_retry_counter = 0;
     }
   }
 

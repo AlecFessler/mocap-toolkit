@@ -207,8 +207,10 @@ int main(int argc, char* argv[]) {
     calibration_complete = calibrator.check_status();
   }
 
-  std::string filename = std::string(cam_confs[0].name) + "_calibration.yaml";
-  calibrator.save_params(filename);
+  if (calibration_complete) {
+    std::string filename = std::string(cam_confs[0].name) + "_calibration.yaml";
+    calibrator.save_params(filename);
+  }
 
   cleanup_streams(stream_ctx);
   cleanup_logging();

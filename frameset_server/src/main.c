@@ -376,7 +376,10 @@ int main(int argc, char* argv[]) {
   ts.tv_sec = 0;
   ts.tv_nsec = EMPTY_QS_WAIT;
 
+  uint32_t dequeue_retry_counter = 0;
+
   uint32_t dequeued_framesets = 0;
+
   while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread
     bool full_set = true;
@@ -419,9 +422,16 @@ int main(int argc, char* argv[]) {
 
     struct ts_frame_buf** frameset = spsc_dequeue(empty_frameset_consumer_q);
     while (!frameset) {
+      if (++dequeue_retry_counter >= stream_conf.fps) {
+        log(ERROR, "Main thread ran out of empty frameset dequeue retries");
+        running = 0;
+        break;
+      }
       nanosleep(&ts, NULL);
       frameset = spsc_dequeue(empty_frameset_consumer_q);
     }
+
+    dequeue_retry_counter = 0;
 
     if (dequeued_framesets >= FRAMESET_SLOTS_PER_THREAD) {
       for (int i = 0; i < cam_count; i++) {

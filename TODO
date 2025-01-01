@@ -1,4 +1,4 @@
-- Add a retry count on empty frames and frameset retry loops in the frameset server so it doesn't get stuck running forever
+- Make all tools pin themselves to cam_count core % CORES_PER_CCD
 
 - Come up with a design for the dataset gen tool so it can display the video stream for the user, and run inference and transcoding in the background for actual dataset creation
 
