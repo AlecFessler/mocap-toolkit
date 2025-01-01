@@ -213,7 +213,6 @@ void camera_handler_t::init_dma_buffer() {
 }
 
 void camera_handler_t::init_camera_controls(config& config) {
-  */
   unsigned int frame_duration_min = config.frame_duration_min;
   unsigned int frame_duration_max = config.frame_duration_max;
 
