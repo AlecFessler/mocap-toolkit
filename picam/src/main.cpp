@@ -310,11 +310,11 @@ inline void arm_timer(timer_t timerid, uint64_t frame_duration, uint64_t& frame_
     uint64_t ns_until_target = target - current_real_ns;
 
     if (ns_until_target <= 0) {
-        uint32_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
-        uint64_t ns_elapsed = frames_elapsed * frame_duration;
-        ns_until_target += ns_elapsed;             // adjust ns_until_target for setting this current timer
-        frame_counter += frames_elapsed;           // adjust counter so we're caught up for future frames
-        target += frame_duration * frames_elapsed; // adjust the target for the connections timestamp queue
+      uint32_t frames_elapsed = (-ns_until_target / frame_duration) + 1;
+      uint64_t ns_elapsed = frames_elapsed * frame_duration;
+      ns_until_target += ns_elapsed;             // adjust ns_until_target for setting this current timer
+      frame_counter += frames_elapsed;           // adjust counter so we're caught up for future frames
+      target += frame_duration * frames_elapsed; // adjust the target for the connections timestamp queue
     }
 
     conn->frame_timestamps.push(target);

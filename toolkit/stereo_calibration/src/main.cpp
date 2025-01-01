@@ -15,6 +15,7 @@
 #include "parse_conf.h"
 #include "stereo_calibration.hpp"
 #include "stream_ctl.h"
+#include "vid_player.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/stereo_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
@@ -24,6 +25,7 @@ constexpr uint32_t BOARD_WIDTH = 9;
 constexpr uint32_t BOARD_HEIGHT = 6;
 constexpr float SQUARE_SIZE = 25.0; // mm
 
+constexpr uint32_t DISPLAY_Q_SIZE = 8;
 constexpr uint32_t CORES_PER_CCD = 8;
 
 volatile sig_atomic_t stop_flag = 0;
@@ -136,6 +138,60 @@ int main() {
     return ret;
   }
 
+  struct producer_q filled_display_producer_q;
+  struct consumer_q filled_display_consumer_q;
+  void* filled_display_q_buf[DISPLAY_Q_SIZE];
+  spsc_queue_init(
+    &filled_display_producer_q,
+    &filled_display_consumer_q,
+    filled_display_q_buf,
+    DISPLAY_Q_SIZE
+  );
+
+  struct producer_q empty_display_producer_q;
+  struct consumer_q empty_display_consumer_q;
+  void* empty_display_q_buf[DISPLAY_Q_SIZE];
+  spsc_queue_init(
+    &empty_display_producer_q,
+    &empty_display_consumer_q,
+    empty_display_q_buf,
+    DISPLAY_Q_SIZE
+  );
+
+  cv::Mat display_frames[DISPLAY_Q_SIZE * cam_count];
+  for (uint32_t i = 0; i < DISPLAY_Q_SIZE; i++) {
+    uint32_t offset = i * cam_count;
+    spsc_enqueue(
+      &empty_display_producer_q,
+      &display_frames[offset]
+    );
+  }
+
+  pthread_t display_thread;
+  struct display_thread_ctx display_thread_ctx = {
+    .filled_frameset_q = &filled_display_consumer_q,
+    .empty_frameset_q = &empty_display_producer_q,
+    .stream_conf = &stream_conf,
+    .num_frames = static_cast<uint32_t>(cam_count),
+    .core = static_cast<uint32_t>((cam_count - 1) % CORES_PER_CCD)
+  };
+
+  ret = pthread_create(
+    &display_thread,
+    nullptr,
+    display_thread_fn,
+    static_cast<void*>(&display_thread_ctx)
+  );
+  if (ret == -1) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Error spawning thread: %s",
+      strerror(errno)
+    );
+    log_write(ERROR, logstr);
+  }
+
   const uint32_t cooldown_limit = stream_conf.fps / 3;
   uint32_t cooldown = 0;
   uint32_t cooldown_counter = 0;
@@ -179,10 +235,24 @@ int main() {
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
 
-    for (int i = 0; i < cam_count; i++) {
-      cv::imshow(cam_confs[i].name, bgr_frames[i]);
-      cv::waitKey(1);
+    cv::Mat* empty_display_frames = static_cast<cv::Mat*>(
+      spsc_dequeue(&empty_display_consumer_q)
+    );
+    while (empty_display_frames == nullptr) {
+      usleep(100); // 0.1ms
+      empty_display_frames = static_cast<cv::Mat*>(
+        spsc_dequeue(&empty_display_consumer_q)
+      );
     }
+
+    for (int i = 0; i < cam_count; i++) {
+      empty_display_frames[i] = bgr_frames[i].clone();
+    }
+
+    spsc_enqueue(
+      &filled_display_producer_q,
+      empty_display_frames
+    );
 
     if (cooldown > 0) {
       if (++cooldown_counter >= cooldown)
