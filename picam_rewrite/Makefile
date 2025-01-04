@@ -1,13 +1,13 @@
 CC=g++
+CXXFLAGS=-std=c++20
+
 PKG_CAMERA=$(shell pkg-config --cflags libcamera)
 PKG_AVCODEC=$(shell pkg-config --cflags libavcodec libavutil)
 INCLUDES=-I./include $(PKG_CAMERA) $(PKG_AVCODEC)
-CFLAGS=-Wall -Wextra -g $(INCLUDES)
-
+CFLAGS=$(CXXFLAGS) -Wall -Wextra -g $(INCLUDES)
 PKG_LIBS_CAMERA=$(shell pkg-config --libs libcamera)
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
 LDFLAGS=-pthread $(PKG_LIBS_CAMERA) $(PKG_LIBS_AVCODEC) -lrt -latomic
-
 CPPFILES=$(wildcard src/*.cpp)
 OBJFILES=$(CPPFILES:src/%.cpp=obj/%.o)
 BINARY=bin/framecap

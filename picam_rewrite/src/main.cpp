@@ -11,11 +11,14 @@
 #include "logging.hpp"
 #include "sigsets.hpp"
 #include "stop_watchdog.hpp"
+#include "tcp_socket.hpp"
 #include "udp_socket.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 
 // NOTE: TEMPORARY UNTIL CONFIG PARSER IS BUILT
+constexpr const char* IP = "192.168.86.100";
+constexpr uint16_t TCP_PORT = 12345;
 constexpr uint16_t UDP_PORT = 22345;
 constexpr uint32_t FPS = 30;
 
@@ -30,8 +33,7 @@ int main() {
   setup_sig_handler(SIGTERM, stop_handler);
   setup_sig_handler(SIGRTMIN, SIG_IGN);
   UdpSocket udpsock{UDP_PORT};
-
-  // setup tcpsock - server ip and port
+  TcpSocket tcpsock{TCP_PORT, std::string_view(IP)};
 
   // setup camera - resolution and fps
 
@@ -40,7 +42,6 @@ int main() {
   // launch worker threads 2x - share ptr to encoder
   // and to tcpsock, have locks to sync access
 
-  
   sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
   std::chrono::nanoseconds initial_timestamp{0};
 

@@ -145,8 +145,10 @@ std::chrono::nanoseconds UdpSocket::recv_stream_ctl() {
     uint64_t timestamp;
     std::memcpy(&timestamp, buffer.data(), sizeof(timestamp));
     return std::chrono::nanoseconds{timestamp};
+
   } else if (size == 4 && std::string_view(buffer.data(), 4) == "STOP") {
     return std::chrono::nanoseconds{0};
+
   } else {
     std::string err_msg =
       "Unexpected stream control received of size: "
