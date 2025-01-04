@@ -31,7 +31,6 @@ connection::connection()
   tcp_port("UNSET_PORT"),
   udp_port("UNSET_PORT") {}
 
-
 connection::connection(
   config& config
 ) noexcept :
