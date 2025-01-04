@@ -40,12 +40,12 @@ int main() {
   // launch worker threads 2x - share ptr to encoder
   // and to tcpsock, have locks to sync access
 
-  int signal;
-  sigset_t sigset;
+  
+  sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
   std::chrono::nanoseconds initial_timestamp{0};
 
   while (initial_timestamp == std::chrono::nanoseconds{0} && !stop_flag) {
-    sigset = setup_sigwait({SIGIO, SIGTERM});
+    int signal;
     sigwait(&sigset, &signal);
     if (signal == SIGTERM)
       break;
