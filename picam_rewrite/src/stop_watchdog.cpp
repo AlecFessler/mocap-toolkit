@@ -57,12 +57,12 @@ void* stop_watchdog_fn(void* ptr) {
 StopWatchdog::StopWatchdog(
   pthread_t main_thread,
   UdpSocket&& udpsock
-) : ctx{main_thread, std::move(udpsock)} {
+) : m_ctx{main_thread, std::move(udpsock)} {
   int status = pthread_create(
-    &tid,
+    &m_tid,
     nullptr,
     stop_watchdog_fn,
-    (void*)&ctx
+    (void*)&m_ctx
   );
   if (status != 0) {
     std::string err_msg =
@@ -84,6 +84,6 @@ void StopWatchdog::launch_watchdog(
 }
 
 StopWatchdog::~StopWatchdog() {
-  pthread_kill(tid, WATCHDOG_THREAD_STOP_SIGNAL);
-  pthread_join(tid, nullptr);
+  pthread_kill(m_tid, WATCHDOG_THREAD_STOP_SIGNAL);
+  pthread_join(m_tid, nullptr);
 }

@@ -21,19 +21,19 @@ TcpSocket::TcpSocket(
   uint16_t port,
   std::string_view ip
 ) :
-  fd(-1),
-  port(port),
-  ip(ip),
-  send_buffer(PKT_MAX_SIZE) {}
+  m_fd(-1),
+  m_port(port),
+  m_ip(ip),
+  m_send_buffer(PKT_MAX_SIZE) {}
 
 TcpSocket::~TcpSocket() noexcept {
-  if (fd >= 0)
-    close(fd);
+  if (m_fd >= 0)
+    close(m_fd);
 }
 
 void TcpSocket::make_connection() {
-  fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd == -1) {
+  m_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (m_fd == -1) {
     std::string err_msg =
       "Failed to create TCP socket: "
       + std::string(strerror(errno));
@@ -43,10 +43,10 @@ void TcpSocket::make_connection() {
 
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
+  server_addr.sin_port = htons(m_port);
   int status = inet_pton(
     AF_INET,
-    ip.data(),
+    m_ip.data(),
     &server_addr.sin_addr
   );
   if (status == -1) {
@@ -58,7 +58,7 @@ void TcpSocket::make_connection() {
   }
 
   status = connect(
-    fd,
+    m_fd,
     reinterpret_cast<struct sockaddr*>(&server_addr),
     sizeof(server_addr)
   );
@@ -77,7 +77,7 @@ void TcpSocket::stream_pkt(
   std::chrono::nanoseconds timestamp,
   std::span<uint8_t> data
 ) {
-  if (fd == -1)
+  if (m_fd == -1)
     make_connection();
 
   constexpr uint32_t HEADER_SIZE = 12; // bytes
@@ -90,23 +90,23 @@ void TcpSocket::stream_pkt(
     throw std::runtime_error(err_msg);
   }
 
-  send_buffer.clear();
+  m_send_buffer.clear();
 
   uint64_t pkt_timestamp = timestamp.count();
   uint32_t pkt_size = data.size();
 
   std::memcpy( // timestamp
-    send_buffer.data(),
+    m_send_buffer.data(),
     &pkt_timestamp,
     sizeof(pkt_timestamp)
   );
   std::memcpy( // packet size
-    send_buffer.data() + sizeof(pkt_timestamp),
+    m_send_buffer.data() + sizeof(pkt_timestamp),
     &pkt_size,
     sizeof(pkt_size)
   );
   std::memcpy( // packet data
-    send_buffer.data() + HEADER_SIZE,
+    m_send_buffer.data() + HEADER_SIZE,
     data.data(),
     pkt_size
   );
@@ -115,8 +115,8 @@ void TcpSocket::stream_pkt(
   uint64_t bytes_written = 0;
   while (bytes_written < total_bytes) {
     int64_t result = write(
-      fd,
-      send_buffer.data() + bytes_written,
+      m_fd,
+      m_send_buffer.data() + bytes_written,
       total_bytes - bytes_written
     );
     if (result == -1) {

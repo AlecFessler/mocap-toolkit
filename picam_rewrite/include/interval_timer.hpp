@@ -11,10 +11,10 @@
 
 class IntervalTimer {
 private:
-  timer_t timerid;
-  std::chrono::nanoseconds initial_timestamp;
-  std::chrono::nanoseconds interval;
-  uint32_t counter;
+  timer_t m_timerid;
+  std::chrono::nanoseconds m_initial_timestamp;
+  std::chrono::nanoseconds m_interval;
+  uint32_t m_counter;
 
 public:
   IntervalTimer(

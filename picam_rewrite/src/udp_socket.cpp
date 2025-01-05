@@ -23,8 +23,8 @@ UdpSocket::UdpSocket(uint16_t port) {
    * SIGIO included if they with to handle
    * this event.
    */
-  fd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (fd == -1) {
+  m_fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (m_fd == -1) {
     std::string err_msg =
       "Failed to create UDP socket: "
       + std::string(strerror(errno));
@@ -39,12 +39,12 @@ UdpSocket::UdpSocket(uint16_t port) {
   addr.sin_port = htons(port);
 
   int status = bind(
-    fd,
+    m_fd,
     (struct sockaddr*)&addr,
     sizeof(addr)
   );
   if (status == -1) {
-    close(fd);
+    close(m_fd);
     std::string err_msg =
       "Failed to bind UDP socket: "
       + std::string(strerror(errno));
@@ -53,12 +53,12 @@ UdpSocket::UdpSocket(uint16_t port) {
   }
 
   status = fcntl(
-    fd,
+    m_fd,
     F_SETFL,
     O_NONBLOCK | O_ASYNC
   );
   if (status == -1) {
-    close(fd);
+    close(m_fd);
     std::string err_msg =
       "Failed to set properties for UDP socket: "
       + std::string(strerror(errno));
@@ -67,12 +67,12 @@ UdpSocket::UdpSocket(uint16_t port) {
   }
 
   status = fcntl(
-    fd,
+    m_fd,
     F_SETOWN,
     getpid()
   );
   if (status == -1) {
-    close(fd);
+    close(m_fd);
     std::string err_msg =
       "Failed to set owner process for SIGIO: "
       + std::string(strerror(errno));
@@ -81,26 +81,26 @@ UdpSocket::UdpSocket(uint16_t port) {
   }
 }
 
-UdpSocket::UdpSocket(UdpSocket&& other) noexcept : fd(other.fd) {
-  other.fd = -1;
+UdpSocket::UdpSocket(UdpSocket&& other) noexcept : m_fd(other.m_fd) {
+  other.m_fd = -1;
 }
 
 UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
   if (this == &other)
     return *this;
 
-  if (fd >= 0)
-    close(fd);
+  if (m_fd >= 0)
+    close(m_fd);
 
-  fd = other.fd;
-  other.fd = -1;
+  m_fd = other.m_fd;
+  other.m_fd = -1;
 
   return *this;
 }
 
 UdpSocket::~UdpSocket() {
-  if (fd >= 0)
-    close(fd);
+  if (m_fd >= 0)
+    close(m_fd);
 }
 
 std::chrono::nanoseconds UdpSocket::recv_stream_ctl() {
@@ -126,7 +126,7 @@ std::chrono::nanoseconds UdpSocket::recv_stream_ctl() {
   constexpr uint32_t MAX_SIZE = 8; // bytes
   std::array<char, MAX_SIZE> buffer{};
   int32_t size = recvfrom(
-    fd,
+    m_fd,
     buffer.data(),
     MAX_SIZE,
     0,

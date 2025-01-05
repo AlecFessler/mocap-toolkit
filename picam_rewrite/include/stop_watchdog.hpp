@@ -17,8 +17,8 @@ struct stop_watchdog_ctx {
 
 class StopWatchdog{
 private:
-  pthread_t tid;
-  stop_watchdog_ctx ctx;
+  pthread_t m_tid;
+  stop_watchdog_ctx m_ctx;
 
   StopWatchdog(
     pthread_t main_thread,

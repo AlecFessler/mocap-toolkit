@@ -19,9 +19,9 @@ IntervalTimer::IntervalTimer(
   std::chrono::nanoseconds interval,
   int signum
 ) :
-  initial_timestamp(initial_timestamp),
-  interval(interval),
-  counter(0) {
+  m_initial_timestamp(initial_timestamp),
+  m_interval(interval),
+  m_counter(0) {
   /**
    * Initializes a posix timer that emits a specified signal
    * on a specified interval. The timer requires the caller
@@ -45,7 +45,7 @@ IntervalTimer::IntervalTimer(
   int status = timer_create(
     CLOCK_MONOTONIC,
     &sev,
-    &timerid
+    &m_timerid
   );
   if (status == -1) {
     std::string err_msg =
@@ -57,7 +57,7 @@ IntervalTimer::IntervalTimer(
 }
 
 IntervalTimer::~IntervalTimer() {
-  timer_delete(timerid);
+  timer_delete(m_timerid);
 }
 
 std::chrono::nanoseconds IntervalTimer::arm_timer() {
@@ -82,14 +82,14 @@ std::chrono::nanoseconds IntervalTimer::arm_timer() {
   auto real_ns = std::chrono::seconds{realtime.tv_sec} + std::chrono::nanoseconds{realtime.tv_nsec};
   auto mono_ns = std::chrono::seconds{monotime.tv_sec} + std::chrono::nanoseconds{monotime.tv_nsec};
 
-  auto target = initial_timestamp + (counter++ * interval);
+  auto target = m_initial_timestamp + (m_counter++ * m_interval);
   auto ns_til_target = target - real_ns;
 
   if (ns_til_target <= std::chrono::nanoseconds{0}) {
-    uint32_t intervals_elapsed = -ns_til_target / interval + 1;
-    auto ns_elapsed = intervals_elapsed * interval;
+    uint32_t intervals_elapsed = -ns_til_target / m_interval + 1;
+    auto ns_elapsed = intervals_elapsed * m_interval;
     ns_til_target += ns_elapsed;  // adjust ns till target for arming this timer
-    counter += intervals_elapsed; // adjust counter for future timers
+    m_counter += intervals_elapsed; // adjust counter for future timers
     target += ns_elapsed;         // adjust target for return value
   }
 
@@ -101,7 +101,7 @@ std::chrono::nanoseconds IntervalTimer::arm_timer() {
   its.it_interval.tv_sec = 0;
   its.it_interval.tv_nsec = 0;
 
-  timer_settime(timerid, TIMER_ABSTIME, &its, nullptr);
+  timer_settime(m_timerid, TIMER_ABSTIME, &its, nullptr);
 
   return target;
 }

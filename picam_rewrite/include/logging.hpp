@@ -7,13 +7,14 @@
 
 enum log_level {
   INFO,
+  BENCHMARK,
   DEBUG,
   WARNING,
   ERROR,
   NUM_LOG_LEVELS
 };
 
-constexpr log_level LOG_LEVEL = INFO;
+constexpr log_level LOG_LEVEL = BENCHMARK;
 
 struct Logging {
 private:

@@ -11,10 +11,10 @@ constexpr uint32_t PKT_MAX_SIZE = 262144; // 256KB
 
 class TcpSocket {
 private:
-  int fd;
-  uint16_t port;
-  std::string_view ip;
-  std::vector<uint8_t> send_buffer;
+  int m_fd;
+  uint16_t m_port;
+  std::string_view m_ip;
+  std::vector<uint8_t> m_send_buffer;
 
   void make_connection();
 

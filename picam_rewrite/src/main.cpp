@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "camera.hpp"
+#include "encoder.hpp"
 #include "interval_timer.hpp"
 #include "logging.hpp"
 #include "sigsets.hpp"
@@ -20,7 +22,8 @@ constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 constexpr const char* IP = "192.168.86.100";
 constexpr uint16_t TCP_PORT = 12345;
 constexpr uint16_t UDP_PORT = 22345;
-constexpr uint32_t FPS = 30;
+constexpr uint32_t FPS = 50;
+constexpr std::pair<uint64_t, uint64_t> RESOLUTION = {1920, 1080};
 
 static volatile sig_atomic_t stop_flag = 0;
 static void stop_handler(int signum) {
@@ -30,21 +33,19 @@ static void stop_handler(int signum) {
 
 int main() {
   Logging::setup_logging(LOG_PATH);
-  setup_sig_handler(SIGTERM, stop_handler);
-  setup_sig_handler(SIGRTMIN, SIG_IGN);
+  Camera cam{RESOLUTION, FPS};
+  Encoder encoder{RESOLUTION, FPS};
   UdpSocket udpsock{UDP_PORT};
   TcpSocket tcpsock{TCP_PORT, std::string_view(IP)};
-
-  // setup camera - resolution and fps
-
-  // setup encoder - zerolatency and ultrafast
 
   // launch worker threads 2x - share ptr to encoder
   // and to tcpsock, have locks to sync access
 
+  setup_sig_handler(SIGTERM, stop_handler);
+  setup_sig_handler(SIGRTMIN, SIG_IGN);
   sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
-  std::chrono::nanoseconds initial_timestamp{0};
 
+  std::chrono::nanoseconds initial_timestamp{0};
   while (initial_timestamp == std::chrono::nanoseconds{0} && !stop_flag) {
     int signal;
     sigwait(&sigset, &signal);
@@ -88,7 +89,7 @@ int main() {
       if (signal == SIGTERM)
         break;
 
-      // queue capture request to camera
+      cam.capture_frame();
 
       next_capture = timer.arm_timer();
       armed_timer_msg =
