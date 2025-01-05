@@ -16,16 +16,14 @@
 
 constexpr int MAIN_THREAD_STOP_SIGNAL = SIGTERM;
 constexpr int WATCHDOG_THREAD_STOP_SIGNAL = SIGUSR1;
-
 static volatile sig_atomic_t stop_flag = 0;
-
 static void stop_handler(int signum) {
   (void)signum;
   stop_flag = 1;
 }
 
 void* stop_watchdog_fn(void* ptr) {
-  struct stop_watchdog_ctx* ctx = static_cast<struct stop_watchdog_ctx*>(ptr);
+  auto ctx = static_cast<struct stop_watchdog_ctx*>(ptr);
   setup_sig_handler(WATCHDOG_THREAD_STOP_SIGNAL, stop_handler);
 
   int signal;
@@ -47,7 +45,7 @@ void* stop_watchdog_fn(void* ptr) {
     std::string info_msg = "Received stop signal, killing main thread";
     log_(INFO, info_msg.c_str());
 
-    pthread_kill(ctx->main_thread, MAIN_THREAD_STOP_SIGNAL);
+    //pthread_kill(ctx->main_thread, MAIN_THREAD_STOP_SIGNAL);
     break;
   }
 
@@ -62,7 +60,7 @@ StopWatchdog::StopWatchdog(
     &m_tid,
     nullptr,
     stop_watchdog_fn,
-    (void*)&m_ctx
+    static_cast<void*>(&m_ctx)
   );
   if (status != 0) {
     std::string err_msg =

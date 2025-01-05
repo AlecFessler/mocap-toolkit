@@ -94,6 +94,19 @@ Encoder::Encoder(
   }
 }
 
+Encoder::Encoder(Encoder&& other) noexcept :
+  m_resolution(other.m_resolution),
+  m_pts(other.m_pts),
+  m_codec(other.m_codec),
+  m_ctx(other.m_ctx),
+  m_frame(other.m_frame),
+  m_pkt(other.m_pkt) {
+
+  other.m_ctx = nullptr;
+  other.m_frame = nullptr;
+  other.m_pkt = nullptr;
+}
+
 Encoder::~Encoder() {
   if (m_pkt != nullptr)
     av_packet_free(&m_pkt);
@@ -120,7 +133,7 @@ std::span<uint8_t> Encoder::encode(const std::span<uint8_t>& frame) {
   m_frame->data[2] = frame.data() + y_plane_size + uv_plane_size;
   m_frame->pts = m_pts++;
 
-  log_(BENCHMARK, "Starting encoding...");
+  //log_(BENCHMARK, "Starting encoding...");
 
   status = avcodec_send_frame(m_ctx, m_frame);
   if (status < 0) {
@@ -140,7 +153,7 @@ std::span<uint8_t> Encoder::encode(const std::span<uint8_t>& frame) {
     throw std::runtime_error(err_msg);
   }
 
-  log_(BENCHMARK, "Encoded frame");
+  //log_(BENCHMARK, "Encoded frame");
 
   return std::span(m_pkt->data, m_pkt->size);
 }

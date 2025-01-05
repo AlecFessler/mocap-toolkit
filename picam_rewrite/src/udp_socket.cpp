@@ -81,21 +81,9 @@ UdpSocket::UdpSocket(uint16_t port) {
   }
 }
 
-UdpSocket::UdpSocket(UdpSocket&& other) noexcept : m_fd(other.m_fd) {
+UdpSocket::UdpSocket(UdpSocket&& other) noexcept :
+  m_fd(other.m_fd) {
   other.m_fd = -1;
-}
-
-UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
-  if (this == &other)
-    return *this;
-
-  if (m_fd >= 0)
-    close(m_fd);
-
-  m_fd = other.m_fd;
-  other.m_fd = -1;
-
-  return *this;
 }
 
 UdpSocket::~UdpSocket() {

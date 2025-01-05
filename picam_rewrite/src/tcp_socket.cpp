@@ -26,6 +26,15 @@ TcpSocket::TcpSocket(
   m_ip(ip),
   m_send_buffer(PKT_MAX_SIZE) {}
 
+TcpSocket::TcpSocket(TcpSocket&& other) noexcept :
+  m_fd(other.m_fd),
+  m_port(other.m_port),
+  m_ip(other.m_ip),
+  m_send_buffer(std::move(other.m_send_buffer)) {
+
+  other.m_fd = -1;
+}
+
 TcpSocket::~TcpSocket() noexcept {
   if (m_fd >= 0)
     close(m_fd);

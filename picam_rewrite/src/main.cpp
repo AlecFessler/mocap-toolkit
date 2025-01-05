@@ -11,10 +11,12 @@
 #include "encoder.hpp"
 #include "interval_timer.hpp"
 #include "logging.hpp"
+#include "scheduling.hpp"
 #include "sigsets.hpp"
 #include "stop_watchdog.hpp"
 #include "tcp_socket.hpp"
 #include "udp_socket.hpp"
+#include "worker_threads.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 
@@ -22,8 +24,8 @@ constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 constexpr const char* IP = "192.168.86.100";
 constexpr uint16_t TCP_PORT = 12345;
 constexpr uint16_t UDP_PORT = 22345;
-constexpr uint32_t FPS = 50;
-constexpr std::pair<uint64_t, uint64_t> RESOLUTION = {1920, 1080};
+constexpr uint32_t FPS = 30;
+constexpr std::pair<uint64_t, uint64_t> RESOLUTION = {1280, 720};
 
 static volatile sig_atomic_t stop_flag = 0;
 static void stop_handler(int signum) {
@@ -33,14 +35,14 @@ static void stop_handler(int signum) {
 
 int main() {
   Logging::setup_logging(LOG_PATH);
-  Camera cam{RESOLUTION, FPS};
   Encoder encoder{RESOLUTION, FPS};
-  UdpSocket udpsock{UDP_PORT};
   TcpSocket tcpsock{TCP_PORT, std::string_view(IP)};
+  WorkerThreads workers{std::move(encoder), std::move(tcpsock)};
+  Camera cam{RESOLUTION, FPS, std::move(workers)};
+  UdpSocket udpsock{UDP_PORT};
 
-  // launch worker threads 2x - share ptr to encoder
-  // and to tcpsock, have locks to sync access
-
+  pin_to_core(0);
+  set_scheduling_prio(99);
   setup_sig_handler(SIGTERM, stop_handler);
   setup_sig_handler(SIGRTMIN, SIG_IGN);
   sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
@@ -59,11 +61,6 @@ int main() {
       continue;
     }
 
-    std::string recvd_timestamp_msg =
-      "Received timestamp "
-      + std::to_string(initial_timestamp.count());
-    log_(INFO, recvd_timestamp_msg.c_str());
-
     StopWatchdog::launch_watchdog(
       pthread_self(),
       std::move(udpsock)
@@ -75,12 +72,8 @@ int main() {
       interval,
       SIGRTMIN
     };
-    std::chrono::nanoseconds next_capture = timer.arm_timer();
 
-    std::string armed_timer_msg =
-      "Armed timer for "
-      + std::to_string(next_capture.count());
-    log_(INFO, armed_timer_msg.c_str());
+    std::chrono::nanoseconds next_capture = timer.arm_timer();
 
     sigset = setup_sigwait({SIGRTMIN, SIGTERM});
 
@@ -89,13 +82,8 @@ int main() {
       if (signal == SIGTERM)
         break;
 
-      cam.capture_frame();
-
+      cam.capture_frame(next_capture);
       next_capture = timer.arm_timer();
-      armed_timer_msg =
-        "Armed timer for "
-        + std::to_string(next_capture.count());
-      log_(INFO, armed_timer_msg.c_str());
     }
   }
 

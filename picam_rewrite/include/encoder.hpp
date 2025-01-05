@@ -25,6 +25,7 @@ public:
     std::pair<uint32_t, uint32_t> resolution,
     uint32_t fps
   );
+  Encoder(Encoder&& other) noexcept;
   ~Encoder();
 
   std::span<uint8_t> encode(const std::span<uint8_t>& frame);

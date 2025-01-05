@@ -13,28 +13,6 @@ videnc::videnc(const config& config)
   : width(config.frame_width),
     height(config.frame_height),
     pts_counter(0) {
-  /**
-   * Initializes an H.264 video encoder using libavcodec.
-   *
-   * Creates a complete encoding pipeline with these steps:
-   * 1. Locates the x264 encoder
-   * 2. Allocates and configures encoding context
-   * 3. Sets up frame format for YUV420 input
-   * 4. Initializes encoder with quality/speed settings
-   *
-   * The encoder is configured for streaming:
-   * - YUV420 pixel format matches camera output
-   * - Time base and framerate from config ensure proper timing
-   * - CRF (Constant Rate Factor) for quality-based bitrate
-   * - Preset controls encoding speed/compression tradeoff
-   *
-   * Parameters:
-   *   config: Contains resolution, framerate, and encoding settings
-   *
-   * Throws:
-   *   std::runtime_error: On any initialization failure, with cleanup
-   *                      of previously allocated resources
-   */
   codec = avcodec_find_encoder_by_name("libx264");
   if (!codec) {
     const char* err = "Could not find libx264 encoder";
@@ -101,17 +79,6 @@ videnc::videnc(const config& config)
 }
 
 videnc::~videnc() {
-  /**
-   * Releases encoder resources in correct order.
-   *
-   * Cleanup sequence:
-   * 1. Free packet buffer
-   * 2. Free frame buffer
-   * 3. Free encoder context
-   *
-   * Note: Each step checks for null before freeing,
-   * allowing partial cleanup if constructor fails
-   */
   if (pkt) av_packet_free(&pkt);
   if (frame) av_frame_free(&frame);
   if (ctx) avcodec_free_context(&ctx);

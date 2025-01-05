@@ -13,11 +13,17 @@
 
 #include "camera.hpp"
 #include "logging.hpp"
+#include "scheduling.hpp"
+#include "worker_threads.hpp"
 
 Camera::Camera(
   std::pair<uint32_t, uint32_t> resolution,
-  uint32_t fps
-) {
+  uint32_t fps,
+  WorkerThreads&& workers
+) :
+  m_workers(std::move(workers)),
+  m_thread_setup(false) {
+
   m_cam_mgr = std::make_unique<libcamera::CameraManager>();
   int status = m_cam_mgr->start();
   if (status < 0) {
@@ -128,6 +134,7 @@ Camera::Camera(
 
     struct req_buffer req_buf{
       std::move(req),
+      std::chrono::nanoseconds{0},
       std::span<uint8_t>(
         static_cast<uint8_t*>(dma_buffer),
         frame_bytes
@@ -163,6 +170,8 @@ Camera::Camera(
     log_(ERROR, err_msg.c_str());
     throw std::runtime_error(err_msg);
   }
+
+  m_workers.launch_workers();
 }
 
 Camera::~Camera() {
@@ -180,7 +189,8 @@ Camera::~Camera() {
   m_cam_mgr->stop();
 }
 
-void Camera::capture_frame() {
+void Camera::capture_frame(std::chrono::nanoseconds timestamp) {
+  m_buffers[0].timestamp = timestamp;
   int status = m_cam->queueRequest(m_buffers[0].request.get());
   if (status < 0) {
     std::string err_msg =
@@ -190,7 +200,7 @@ void Camera::capture_frame() {
     throw std::runtime_error(err_msg);
   }
 
-  log_(BENCHMARK, "Queued capture request");
+  //log_(BENCHMARK, "Queued capture request");
 
   std::swap(
     m_buffers[0],
@@ -199,10 +209,23 @@ void Camera::capture_frame() {
 }
 
 void Camera::request_complete(libcamera::Request* request) {
+  if (!m_thread_setup) {
+    // maybe a little hacky, but we're using the callback
+    // to pin the libcamera camera manager thread to a specific
+    // core and set it's scheduling priority. This is because
+    // the initial image preprocessing stages run in this thread
+    m_thread_setup = true;
+    pin_to_core(0);
+    set_scheduling_prio(98);
+  }
+
   if (request->status() == libcamera::Request::RequestCancelled)
     return;
-
   request->reuse(libcamera::Request::ReuseBuffers);
-  struct req_buffer& req_buf = m_buffers[1];
-  log_(BENCHMARK, "Received frame buffer");
+
+  //log_(BENCHMARK, "Capture request complete");
+
+  std::chrono::nanoseconds timestamp = m_buffers[1].timestamp;
+  std::span<uint8_t> frame = m_buffers[1].buffer;
+  m_workers.start_task(timestamp, frame);
 }
