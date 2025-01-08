@@ -10,6 +10,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 #include <span>
+#include <vector>
 
 class Encoder {
 private:
@@ -18,17 +19,16 @@ private:
   const AVCodec* m_codec;
   AVCodecContext* m_ctx;
   AVFrame* m_frame;
-  AVPacket* m_pkt;
 
 public:
   Encoder(
     std::pair<uint32_t, uint32_t> resolution,
-    uint32_t fps
+    uint32_t fps,
+    std::vector<AVPacket*>& packets
   );
-  Encoder(Encoder&& other) noexcept;
   ~Encoder();
 
-  std::span<uint8_t> encode(const std::span<uint8_t>& frame);
+  void encode(const std::span<uint8_t> frame, AVPacket* packet);
 };
 
 #endif // ENCODER_HPP

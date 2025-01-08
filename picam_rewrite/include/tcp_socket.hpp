@@ -23,7 +23,6 @@ public:
     uint16_t port,
     std::string_view ip
   );
-  TcpSocket(TcpSocket&& other) noexcept;
   ~TcpSocket() noexcept;
   void stream_pkt(
     std::chrono::nanoseconds timestamp,

@@ -5,32 +5,21 @@
 #ifndef STOP_WATCHDOG_HPP
 #define STOP_WATCHDOG_HPP
 
+#include <atomic>
 #include <pthread.h>
-#include <sys/types.h>
 
 #include "udp_socket.hpp"
 
-struct stop_watchdog_ctx {
-  pthread_t main_thread;
-  UdpSocket udpsock;
-};
-
 class StopWatchdog{
 private:
-  pthread_t m_tid;
-  stop_watchdog_ctx m_ctx;
-
-  StopWatchdog(
-    pthread_t main_thread,
-    UdpSocket&& udpsock
-  );
+  std::atomic<bool>& m_main_stop_flag;
+  pthread_t m_this_thread;
+  UdpSocket m_udpsock;
 
 public:
+  StopWatchdog(std::atomic<bool>& main_stop_flag);
   ~StopWatchdog();
-  static void launch_watchdog(
-    pthread_t main_thread,
-    UdpSocket&& udpsock
-  );
+  void launch(UdpSocket&& udpsock);
 };
 
 #endif // STOP_WATCHDOG_HPP

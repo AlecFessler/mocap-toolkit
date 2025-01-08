@@ -2,8 +2,8 @@
 // MIT License
 // See LICENSE file in the project root for full license information.
 
+#include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstring>
 #include <pthread.h>
 #include <stdexcept>
@@ -14,8 +14,6 @@
 #include "stop_watchdog.hpp"
 #include "udp_socket.hpp"
 
-constexpr int MAIN_THREAD_STOP_SIGNAL = SIGTERM;
-constexpr int WATCHDOG_THREAD_STOP_SIGNAL = SIGUSR1;
 static volatile sig_atomic_t stop_flag = 0;
 static void stop_handler(int signum) {
   (void)signum;
@@ -23,44 +21,50 @@ static void stop_handler(int signum) {
 }
 
 void* stop_watchdog_fn(void* ptr) {
-  auto ctx = static_cast<struct stop_watchdog_ctx*>(ptr);
-  setup_sig_handler(WATCHDOG_THREAD_STOP_SIGNAL, stop_handler);
+  auto this = static_cast<StopWatchdog*>(ptr);
+  setup_sig_handler(SIGTERM, stop_handler);
 
   int signal;
   sigset_t sigset;
-  sigset = setup_sigwait({SIGIO, WATCHDOG_THREAD_STOP_SIGNAL});
+  sigset = setup_sigwait({SIGIO, SIGTERM});
 
   while (!stop_flag) {
     sigwait(&sigset, &signal);
-    if (signal == WATCHDOG_THREAD_STOP_SIGNAL)
+    if (signal == SIGTERM)
       break;
 
-    std::chrono::nanoseconds stream_ctl = ctx->udpsock.recv_stream_ctl();
+    std::chrono::nanoseconds stream_ctl = this->m_udpsock.recv_stream_ctl();
     if (stream_ctl != std::chrono::nanoseconds{0}) {
       std::string warning_msg = "Received unexpected stream control while waiting for stop sentinel";
       log_(WARNING, warning_msg.c_str());
       continue;
     }
 
-    std::string info_msg = "Received stop signal, killing main thread";
+    std::string info_msg = "Received stop signal, stopping main thread";
     log_(INFO, info_msg.c_str());
 
-    //pthread_kill(ctx->main_thread, MAIN_THREAD_STOP_SIGNAL);
+    this->m_main_stop_flag.store(1, std::memory_order_relaxed);
     break;
   }
 
   return nullptr;
 }
 
-StopWatchdog::StopWatchdog(
-  pthread_t main_thread,
-  UdpSocket&& udpsock
-) : m_ctx{main_thread, std::move(udpsock)} {
+StopWatchdog::StopWatchdog(std::atomic<bool>& main_stop_flag) :
+  m_main_stop_flag(main_stop_flag) {}
+
+StopWatchdog::~StopWatchdog() {
+  pthread_kill(m_this_thread, SIGTERM);
+  pthread_join(m_this_thread, nullptr);
+}
+
+void StopWatchdog::launch(UdpSocket&& udpsock) {
+  m_udpsock = std::move(udpsock);
   int status = pthread_create(
-    &m_tid,
+    &m_this_thread,
     nullptr,
     stop_watchdog_fn,
-    static_cast<void*>(&m_ctx)
+    static_cast<void*>(this)
   );
   if (status != 0) {
     std::string err_msg =
@@ -69,19 +73,4 @@ StopWatchdog::StopWatchdog(
     log_(ERROR, err_msg.c_str());
     throw std::runtime_error(err_msg);
   }
-}
-
-void StopWatchdog::launch_watchdog(
-  pthread_t main_thread,
-  UdpSocket&& udpsock
-) {
-  static StopWatchdog instance{
-    main_thread,
-    std::move(udpsock)
-  };
-}
-
-StopWatchdog::~StopWatchdog() {
-  pthread_kill(m_tid, WATCHDOG_THREAD_STOP_SIGNAL);
-  pthread_join(m_tid, nullptr);
 }

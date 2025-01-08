@@ -11,15 +11,9 @@
 #include <memory>
 #include <span>
 
+#include "frame_buffer.hpp"
+#include "spsc_queue_wrapper.hpp"
 #include "worker_threads.hpp"
-
-constexpr uint32_t NUM_DMA_BUFS = 2;
-
-struct req_buffer {
-  std::unique_ptr<libcamera::Request> request;
-  std::chrono::nanoseconds timestamp;
-  std::span<uint8_t> buffer;
-};
 
 class Camera {
 private:
@@ -27,15 +21,20 @@ private:
   std::shared_ptr<libcamera::Camera> m_cam;
   std::unique_ptr<libcamera::FrameBufferAllocator> m_alloc;
   libcamera::Stream* m_stream;
-  std::array<req_buffer, NUM_DMA_BUFS> m_buffers;
-  WorkerThreads m_workers;
+  std::vector<std::unique_ptr<libcamera::Request>> m_reqs;
+
+  uint32_t m_next_buffer;
+  std::vector<struct frame> m_buffers;
+  SPSCQueue<struct frame>& m_frame_queue;
+
   bool m_thread_setup;
 
 public:
   Camera(
     std::pair<uint32_t, uint32_t> resolution,
     uint32_t fps,
-    WorkerThreads&& workers
+    uint32_t num_dma_buffers,
+    SPSCQueue<struct frame>& frame_queue
   );
   ~Camera();
   void capture_frame(std::chrono::nanoseconds timestamp);

@@ -12,16 +12,19 @@
 #include <memory>
 
 #include "camera.hpp"
+#include "frame_buffer.hpp"
 #include "logging.hpp"
 #include "scheduling.hpp"
-#include "worker_threads.hpp"
+#include "spsc_queue_wrapper.hpp"
 
 Camera::Camera(
   std::pair<uint32_t, uint32_t> resolution,
   uint32_t fps,
-  WorkerThreads&& workers
+  uint32_t num_dma_buffers,
+  SPSCQueue<struct frame>& frame_queue
 ) :
-  m_workers(std::move(workers)),
+  m_next_buffer(0),
+  m_frame_queue(frame_queue),
   m_thread_setup(false) {
 
   m_cam_mgr = std::make_unique<libcamera::CameraManager>();
@@ -64,7 +67,7 @@ Camera::Camera(
   libcamera::StreamConfiguration& stream_conf = conf->at(0);
   stream_conf.pixelFormat = libcamera::formats::YUV420;
   stream_conf.size = {resolution.first, resolution.second};
-  stream_conf.bufferCount = NUM_DMA_BUFS;
+  stream_conf.bufferCount = num_dma_buffers;
 
   auto validation_result = conf->validate();
   if (
@@ -96,14 +99,18 @@ Camera::Camera(
     throw std::runtime_error(err_msg);
   }
 
-  for (uint32_t i = 0; i < NUM_DMA_BUFS; i++) {
+  m_reqs.reserve(num_dma_buffers);
+  m_buffers.reserve(num_dma_buffers);
+  for (uint32_t i = 0; i < num_dma_buffers; i++) {
     const std::unique_ptr<libcamera::FrameBuffer>& buffer = m_alloc->buffers(m_stream)[i];
-    std::unique_ptr<libcamera::Request> req = m_cam->createRequest();
+    std::unique_ptr<libcamera::Request> req = m_cam->createRequest(i);
     if (req == nullptr) {
       std::string err_msg = "Failed to create request";
       log_(ERROR, err_msg.c_str());
       throw std::runtime_error(err_msg);
     }
+
+    m_reqs.push_back(std::move(req));
 
     status = req->addBuffer(m_stream, buffer.get());
     if (status < 0) {
@@ -132,15 +139,14 @@ Camera::Camera(
       throw std::runtime_error(err_msg);
     }
 
-    struct req_buffer req_buf{
-      std::move(req),
+    struct frame frame_buffer{
       std::chrono::nanoseconds{0},
       std::span<uint8_t>(
         static_cast<uint8_t*>(dma_buffer),
         frame_bytes
       )
     };
-    m_buffers[i] = std::move(req_buf);
+    m_buffers.push_back(frame_buffer);
   }
 
   m_cam->requestCompleted.connect(this, &Camera::request_complete);
@@ -170,8 +176,6 @@ Camera::Camera(
     log_(ERROR, err_msg.c_str());
     throw std::runtime_error(err_msg);
   }
-
-  m_workers.launch_workers();
 }
 
 Camera::~Camera() {
@@ -190,8 +194,8 @@ Camera::~Camera() {
 }
 
 void Camera::capture_frame(std::chrono::nanoseconds timestamp) {
-  m_buffers[0].timestamp = timestamp;
-  int status = m_cam->queueRequest(m_buffers[0].request.get());
+  m_buffers[m_next_buffer].timestamp = timestamp;
+  int status = m_cam->queueRequest(m_reqs[m_next_buffer].get());
   if (status < 0) {
     std::string err_msg =
       "Failed to queue request: "
@@ -200,12 +204,10 @@ void Camera::capture_frame(std::chrono::nanoseconds timestamp) {
     throw std::runtime_error(err_msg);
   }
 
-  //log_(BENCHMARK, "Queued capture request");
+  if (++m_next_buffer == m_buffers.capacity())
+      m_next_buffer = 0;
 
-  std::swap(
-    m_buffers[0],
-    m_buffers[1]
-  );
+  //log_(BENCHMARK, "Queued capture request");
 }
 
 void Camera::request_complete(libcamera::Request* request) {
@@ -223,9 +225,9 @@ void Camera::request_complete(libcamera::Request* request) {
     return;
   request->reuse(libcamera::Request::ReuseBuffers);
 
-  //log_(BENCHMARK, "Capture request complete");
+  bool enqueued = m_frame_queue.try_enqueue(m_buffers[request->cookie()]);
+  if (!enqueued)
+    log_(WARNING, "Dropped a frame in transit to the encoder");
 
-  std::chrono::nanoseconds timestamp = m_buffers[1].timestamp;
-  std::span<uint8_t> frame = m_buffers[1].buffer;
-  m_workers.start_task(timestamp, frame);
+  //log_(BENCHMARK, "Capture request complete");
 }

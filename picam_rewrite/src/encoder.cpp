@@ -14,7 +14,8 @@
 
 Encoder::Encoder(
   std::pair<uint32_t, uint32_t> resolution,
-  uint32_t fps
+  uint32_t fps,
+  std::vector<AVPacket*>& packets
 ) :
   m_resolution(resolution),
   m_pts(0) {
@@ -84,39 +85,26 @@ Encoder::Encoder(
     throw std::runtime_error(err_msg);
   }
 
-  m_pkt = av_packet_alloc();
-  if (m_pkt == nullptr) {
-    av_frame_free(&m_frame);
-    avcodec_free_context(&m_ctx);
-    std::string err_msg = "Failed to allocate packet for encoder";
-    log_(ERROR, err_msg.c_str());
-    throw std::runtime_error(err_msg);
+  for (auto* packet : packets) {
+    packet = av_packet_alloc();
+    if (packet == nullptr) {
+      av_frame_free(&m_frame);
+      avcodec_free_context(&m_ctx);
+      std::string err_msg = "Failed to allocate packet for encoder";
+      log_(ERROR, err_msg.c_str());
+      throw std::runtime_error(err_msg);
+    }
   }
 }
 
-Encoder::Encoder(Encoder&& other) noexcept :
-  m_resolution(other.m_resolution),
-  m_pts(other.m_pts),
-  m_codec(other.m_codec),
-  m_ctx(other.m_ctx),
-  m_frame(other.m_frame),
-  m_pkt(other.m_pkt) {
-
-  other.m_ctx = nullptr;
-  other.m_frame = nullptr;
-  other.m_pkt = nullptr;
-}
-
 Encoder::~Encoder() {
-  if (m_pkt != nullptr)
-    av_packet_free(&m_pkt);
   if (m_frame != nullptr)
     av_frame_free(&m_frame);
   if (m_ctx != nullptr)
     avcodec_free_context(&m_ctx);
 }
 
-std::span<uint8_t> Encoder::encode(const std::span<uint8_t>& frame) {
+void Encoder::encode(const std::span<uint8_t> frame, AVPacket* packet) {
   int status = av_frame_make_writable(m_frame);
   if (status < 0) {
     std::string err_msg =
@@ -144,7 +132,7 @@ std::span<uint8_t> Encoder::encode(const std::span<uint8_t>& frame) {
     throw std::runtime_error(err_msg);
   }
 
-  status = avcodec_receive_packet(m_ctx, m_pkt);
+  status = avcodec_receive_packet(m_ctx, packet);
   if (status < 0) {
     std::string err_msg =
       "Error receiving encoder packet: "
@@ -154,6 +142,4 @@ std::span<uint8_t> Encoder::encode(const std::span<uint8_t>& frame) {
   }
 
   //log_(BENCHMARK, "Encoded frame");
-
-  return std::span(m_pkt->data, m_pkt->size);
 }
