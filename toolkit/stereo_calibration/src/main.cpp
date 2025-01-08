@@ -15,7 +15,6 @@
 #include "parse_conf.h"
 #include "stereo_calibration.hpp"
 #include "stream_ctl.h"
-#include "vid_player.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/stereo_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
@@ -29,7 +28,10 @@ constexpr uint32_t CORES_PER_CCD = 8;
 
 volatile sig_atomic_t stop_flag = 0;
 
-void stop_handler(int signum);
+void stop_handler(int signum) {
+  (void)signum;
+  stop_flag = 1;
+}
 
 int main() {
   int32_t ret = 0;
@@ -74,8 +76,6 @@ int main() {
     cleanup_logging();
     return ret;
   }
-
-  VidPlayer vid_player{stream_conf.fps};
 
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
@@ -179,7 +179,10 @@ int main() {
 
     spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
 
-    vid_player.offer_frame(bgr_frames[0]);
+    for (int i = 0; i < cam_count; i++) {
+      cv::imshow(cam_confs[i].name, bgr_frames[i]);
+      cv::waitKey(1);
+    }
 
     if (cooldown > 0) {
       if (++cooldown_counter >= cooldown)
@@ -199,9 +202,4 @@ int main() {
   cleanup_streams(stream_ctx);
   cleanup_logging();
   return 0;
-}
-
-void stop_handler(int signum) {
-  (void)signum;
-  stop_flag = 1;
 }

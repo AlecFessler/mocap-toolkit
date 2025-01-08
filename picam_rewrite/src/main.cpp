@@ -14,6 +14,7 @@
 #include "interval_timer.hpp"
 #include "logging.hpp"
 #include "packet_buffer.hpp"
+#include "parse_config.hpp"
 #include "scheduling.hpp"
 #include "sigsets.hpp"
 #include "spsc_queue_wrapper.hpp"
@@ -22,14 +23,8 @@
 #include "udp_socket.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
+constexpr const char* CONFIG_PATH = "/etc/picam/cam_config.txt";
 constexpr uint32_t QUEUE_SLOTS = 8;
-
-// NOTE: TEMPORARY UNTIL CONFIG PARSER IS BUILT
-constexpr const char* IP = "192.168.86.100";
-constexpr uint16_t TCP_PORT = 12345;
-constexpr uint16_t UDP_PORT = 22345;
-constexpr uint32_t FPS = 30;
-constexpr std::pair<uint32_t, uint32_t> RESOLUTION = {1280, 720};
 
 static std::atomic<bool> stop_flag = 0;
 static void stop_handler(int signum) {
@@ -39,29 +34,30 @@ static void stop_handler(int signum) {
 
 int main() {
   Logging::setup_logging(LOG_PATH);
+  struct config config = parse_config(CONFIG_PATH);
   SPSCQueue<struct frame> frame_queue{QUEUE_SLOTS};
   SPSCQueue<struct packet> packet_queue{QUEUE_SLOTS};
   Camera cam{
-    RESOLUTION,
-    FPS,
+    config.resolution,
+    config.fps,
     QUEUE_SLOTS + 2, // num frames
     frame_queue
   };
   EncoderThread encoder_thread{
-    RESOLUTION,
-    FPS,
+    config.resolution,
+    config.fps,
     QUEUE_SLOTS + 2, // num packets
     frame_queue,
     packet_queue,
     stop_flag
   };
   StreamThread stream_thread{
-    TCP_PORT,
-    std::string_view(IP),
+    config.tcp_port,
+    std::string_view(config.server_ip),
     packet_queue,
     stop_flag
   };
-  UdpSocket udpsock{UDP_PORT};
+  UdpSocket udpsock{config.udp_port};
   StopWatchdog stop_watcher_thread{stop_flag, udpsock};
 
   pin_to_core(0);
@@ -87,7 +83,7 @@ int main() {
       continue;
     }
 
-    auto interval = std::chrono::nanoseconds{std::chrono::seconds{1}} / FPS;
+    auto interval = std::chrono::nanoseconds{std::chrono::seconds{1}} / config.fps;
     IntervalTimer timer{
       initial_timestamp,
       interval,
