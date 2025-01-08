@@ -2,7 +2,6 @@
 // MIT License
 // See LICENSE file in the project root for full license information.
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -59,10 +58,11 @@ int main() {
   StreamThread stream_thread{
     TCP_PORT,
     std::string_view(IP),
-    packet_queue
+    packet_queue,
+    stop_flag
   };
-  StopWatchdog stop_watcher_thread{stop_flag};
   UdpSocket udpsock{UDP_PORT};
+  StopWatchdog stop_watcher_thread{stop_flag, udpsock};
 
   pin_to_core(0);
   set_scheduling_prio(99);
@@ -94,7 +94,7 @@ int main() {
       SIGRTMIN
     };
 
-    stop_watcher_thread.launch(std::move(udpsock));
+    stop_watcher_thread.launch();
     encoder_thread.launch();
     stream_thread.launch();
 

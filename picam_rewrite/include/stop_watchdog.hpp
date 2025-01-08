@@ -11,15 +11,18 @@
 #include "udp_socket.hpp"
 
 class StopWatchdog{
-private:
+public:
+  // everything is public for the stop watchdog function to access
   std::atomic<bool>& m_main_stop_flag;
   pthread_t m_this_thread;
-  UdpSocket m_udpsock;
+  UdpSocket& m_udpsock;
 
-public:
-  StopWatchdog(std::atomic<bool>& main_stop_flag);
+  StopWatchdog(
+    std::atomic<bool>& main_stop_flag,
+    UdpSocket& udpsock
+  );
   ~StopWatchdog();
-  void launch(UdpSocket&& udpsock);
+  void launch();
 };
 
 #endif // STOP_WATCHDOG_HPP

@@ -13,7 +13,6 @@
 
 #include "frame_buffer.hpp"
 #include "spsc_queue_wrapper.hpp"
-#include "worker_threads.hpp"
 
 class Camera {
 private:

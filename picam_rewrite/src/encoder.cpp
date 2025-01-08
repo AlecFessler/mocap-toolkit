@@ -85,15 +85,19 @@ Encoder::Encoder(
     throw std::runtime_error(err_msg);
   }
 
-  for (auto* packet : packets) {
-    packet = av_packet_alloc();
-    if (packet == nullptr) {
-      av_frame_free(&m_frame);
-      avcodec_free_context(&m_ctx);
-      std::string err_msg = "Failed to allocate packet for encoder";
-      log_(ERROR, err_msg.c_str());
-      throw std::runtime_error(err_msg);
+  for (size_t i = 0; i < packets.size(); i++) {
+    packets[i] = av_packet_alloc();
+    if (packets[i] != nullptr)
+      continue;
+
+    for (size_t j = 0; j < i; j++) {
+      av_packet_free(&packets[j]);
     }
+    av_frame_free(&m_frame);
+    avcodec_free_context(&m_ctx);
+    std::string err_msg = "Failed to allocate packet for encoder";
+    log_(ERROR, err_msg.c_str());
+    throw std::runtime_error(err_msg);
   }
 }
 
@@ -121,8 +125,6 @@ void Encoder::encode(const std::span<uint8_t> frame, AVPacket* packet) {
   m_frame->data[2] = frame.data() + y_plane_size + uv_plane_size;
   m_frame->pts = m_pts++;
 
-  //log_(BENCHMARK, "Starting encoding...");
-
   status = avcodec_send_frame(m_ctx, m_frame);
   if (status < 0) {
     std::string err_msg =
@@ -140,6 +142,4 @@ void Encoder::encode(const std::span<uint8_t> frame, AVPacket* packet) {
     log_(ERROR, err_msg.c_str());
     throw std::runtime_error(err_msg);
   }
-
-  //log_(BENCHMARK, "Encoded frame");
 }

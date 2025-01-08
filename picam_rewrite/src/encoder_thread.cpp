@@ -3,19 +3,24 @@
 // See LICENSE file in the project root for full license information.
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
+#include <optional>
 #include <pthread.h>
 #include <thread>
+#include <stdexcept>
+#include <string>
 
 #include "frame_buffer.hpp"
 #include "encoder.hpp"
 #include "encoder_thread.hpp"
 #include "logging.hpp"
 #include "packet_buffer.hpp"
+#include "scheduling.hpp"
 #include "sigsets.hpp"
 #include "spsc_queue_wrapper.hpp"
 
@@ -28,48 +33,50 @@ static void stop_handler(int signum) {
 }
 
 void* encoder_thread_fn(void* ptr) {
-  auto this = static_cast<EncoderThread*>(ptr);
+  auto instance = static_cast<EncoderThread*>(ptr);
   try{
+    pin_to_core(1);
+    set_scheduling_prio(99);
     setup_sig_handler(SIGTERM, stop_handler);
     while (!stop_flag) {
-      std::optional<struct frame> frame = this->m_frame_queue.try_dequeue();
+      std::optional<struct frame> frame = instance->m_frame_queue.try_dequeue();
       while (!frame.has_value() && !stop_flag) {
         std::this_thread::sleep_for(SLEEP_DURATION);
-        frame = this->m_frame_queue.try_dequeue();
+        frame = instance->m_frame_queue.try_dequeue();
       }
       if (stop_flag) break;
 
-      this->m_encoder.encode(
-        frame.buffer,
-        this->m_avpackets[this->m_next_buffer]
+      instance->m_encoder.encode(
+        frame.value().buffer,
+        instance->m_avpackets[instance->m_next_buffer]
       );
       std::span<uint8_t> packet_buffer{
-        this->m_avpackets[this->m_next_buffer]->data,
-        this->m_avpackets[this->m_next_buffer]->size
+        instance->m_avpackets[instance->m_next_buffer]->data,
+        static_cast<size_t>(instance->m_avpackets[instance->m_next_buffer]->size)
       };
-      this->m_packet_buffers[this->m_next_buffer].buffer = packet_buffer;
-      this->m_packet_buffers[this->m_next_buffer].timestamp = frame.timestamp;
+      instance->m_packet_buffers[instance->m_next_buffer].buffer = packet_buffer;
+      instance->m_packet_buffers[instance->m_next_buffer].timestamp = frame.value().timestamp;
 
-      bool enqueued = this->m_packet_queue.try_enqueue(
-        this->m_packet_buffers[this->m_next_buffer]
+      bool enqueued = instance->m_packet_queue.try_enqueue(
+        instance->m_packet_buffers[instance->m_next_buffer]
       );
       while (!enqueued && !stop_flag) {
         std::this_thread::sleep_for(SLEEP_DURATION);
-        enqueued = this->m_packet_queue.try_enqueue(
-          this->m_packet_buffers[this->m_next_buffer]
+        enqueued = instance->m_packet_queue.try_enqueue(
+          instance->m_packet_buffers[instance->m_next_buffer]
         );
       }
       if (stop_flag) break;
 
-      if (++this->m_next_buffer == this->m_packet_buffers.capacity())
-        this->m_next_buffer = 0;
+      if (++instance->m_next_buffer == instance->m_packet_buffers.capacity())
+        instance->m_next_buffer = 0;
     }
 
     return nullptr;
   } catch (...) {
     // any exception will have already been logged, so we don't need to read the exception
     // but the system only throws for critical errors, so we do need to shutdown the system
-    this->m_main_stop_flag.store(1, std::memory_order_release);
+    instance->m_main_stop_flag.store(1, std::memory_order_release);
     return nullptr;
   }
 }
@@ -82,15 +89,13 @@ EncoderThread::EncoderThread(
   SPSCQueue<struct packet>& packet_queue,
   std::atomic<bool>& main_stop_flag
 ) :
+  m_next_buffer(0),
+  m_avpackets(num_packets),
+  m_packet_buffers(num_packets),
+  m_encoder(resolution, fps, m_avpackets),
   m_frame_queue(frame_queue),
   m_packet_queue(packet_queue),
-  m_next_buffer(0),
-  m_main_stop_flag(main_stop_flag) {
-
-  m_avpackets.resize(num_packets);
-  m_packet_buffers.resize(num_packets);
-  m_encoder{resolution, fps, m_avpackets};
-}
+  m_main_stop_flag(main_stop_flag) {}
 
 EncoderThread::~EncoderThread() {
   pthread_kill(m_this_thread, SIGTERM);

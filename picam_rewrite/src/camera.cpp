@@ -110,8 +110,6 @@ Camera::Camera(
       throw std::runtime_error(err_msg);
     }
 
-    m_reqs.push_back(std::move(req));
-
     status = req->addBuffer(m_stream, buffer.get());
     if (status < 0) {
       std::string err_msg =
@@ -120,6 +118,8 @@ Camera::Camera(
       log_(ERROR, err_msg.c_str());
       throw std::runtime_error(err_msg);
     }
+
+    m_reqs.push_back(std::move(req));
 
     uint64_t frame_bytes = resolution.first * resolution.second * 3 / 2;
     const libcamera::FrameBuffer::Plane& y_plane = buffer->planes()[0];
@@ -206,8 +206,6 @@ void Camera::capture_frame(std::chrono::nanoseconds timestamp) {
 
   if (++m_next_buffer == m_buffers.capacity())
       m_next_buffer = 0;
-
-  //log_(BENCHMARK, "Queued capture request");
 }
 
 void Camera::request_complete(libcamera::Request* request) {
@@ -228,6 +226,4 @@ void Camera::request_complete(libcamera::Request* request) {
   bool enqueued = m_frame_queue.try_enqueue(m_buffers[request->cookie()]);
   if (!enqueued)
     log_(WARNING, "Dropped a frame in transit to the encoder");
-
-  //log_(BENCHMARK, "Capture request complete");
 }

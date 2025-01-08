@@ -1,3 +1,7 @@
+// © 2025 Alec Fessler
+// MIT License
+// See LICENSE file in the project root for full license information.
+
 #ifndef TCP_SOCKET_HPP
 #define TCP_SOCKET_HPP
 
@@ -24,7 +28,7 @@ public:
     std::string_view ip
   );
   ~TcpSocket() noexcept;
-  void stream_pkt(
+  void stream_packet(
     std::chrono::nanoseconds timestamp,
     std::span<uint8_t> data
   );

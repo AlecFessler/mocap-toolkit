@@ -21,7 +21,7 @@ static void stop_handler(int signum) {
 }
 
 void* stop_watchdog_fn(void* ptr) {
-  auto this = static_cast<StopWatchdog*>(ptr);
+  auto instance = static_cast<StopWatchdog*>(ptr);
   setup_sig_handler(SIGTERM, stop_handler);
 
   int signal;
@@ -33,7 +33,7 @@ void* stop_watchdog_fn(void* ptr) {
     if (signal == SIGTERM)
       break;
 
-    std::chrono::nanoseconds stream_ctl = this->m_udpsock.recv_stream_ctl();
+    std::chrono::nanoseconds stream_ctl = instance->m_udpsock.recv_stream_ctl();
     if (stream_ctl != std::chrono::nanoseconds{0}) {
       std::string warning_msg = "Received unexpected stream control while waiting for stop sentinel";
       log_(WARNING, warning_msg.c_str());
@@ -43,23 +43,26 @@ void* stop_watchdog_fn(void* ptr) {
     std::string info_msg = "Received stop signal, stopping main thread";
     log_(INFO, info_msg.c_str());
 
-    this->m_main_stop_flag.store(1, std::memory_order_relaxed);
+    instance->m_main_stop_flag.store(1, std::memory_order_relaxed);
     break;
   }
 
   return nullptr;
 }
 
-StopWatchdog::StopWatchdog(std::atomic<bool>& main_stop_flag) :
-  m_main_stop_flag(main_stop_flag) {}
+StopWatchdog::StopWatchdog(
+  std::atomic<bool>& main_stop_flag,
+  UdpSocket& udpsock
+) :
+  m_main_stop_flag(main_stop_flag),
+  m_udpsock(udpsock) {}
 
 StopWatchdog::~StopWatchdog() {
   pthread_kill(m_this_thread, SIGTERM);
   pthread_join(m_this_thread, nullptr);
 }
 
-void StopWatchdog::launch(UdpSocket&& udpsock) {
-  m_udpsock = std::move(udpsock);
+void StopWatchdog::launch() {
   int status = pthread_create(
     &m_this_thread,
     nullptr,

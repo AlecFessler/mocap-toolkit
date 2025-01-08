@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "spsc_queue.hpp"
@@ -29,7 +30,7 @@ public:
     );
   }
 
-  bool try_enqueue(const T& item) {
+  bool try_enqueue(T& item) {
     int status = spsc_enqueue(
       &pq,
       static_cast<void*>(&item)
@@ -37,7 +38,7 @@ public:
     return status != -EAGAIN;
   }
 
-  std::optional<T&> try_dequeue() {
+  std::optional<T> try_dequeue() {
     void* ptr = spsc_dequeue(&cq);
     if (ptr == nullptr)
       return std::nullopt;

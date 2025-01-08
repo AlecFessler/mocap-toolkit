@@ -73,7 +73,7 @@ void TcpSocket::make_connection() {
   log_(INFO, "Connected to the server");
 }
 
-void TcpSocket::stream_pkt(
+void TcpSocket::stream_packet(
   std::chrono::nanoseconds timestamp,
   std::span<uint8_t> data
 ) {
@@ -92,26 +92,26 @@ void TcpSocket::stream_pkt(
 
   m_send_buffer.clear();
 
-  uint64_t pkt_timestamp = timestamp.count();
-  uint32_t pkt_size = data.size();
+  uint64_t packet_timestamp = timestamp.count();
+  uint32_t packet_size = data.size();
 
   std::memcpy( // timestamp
     m_send_buffer.data(),
-    &pkt_timestamp,
-    sizeof(pkt_timestamp)
+    &packet_timestamp,
+    sizeof(packet_timestamp)
   );
   std::memcpy( // packet size
-    m_send_buffer.data() + sizeof(pkt_timestamp),
-    &pkt_size,
-    sizeof(pkt_size)
+    m_send_buffer.data() + sizeof(packet_timestamp),
+    &packet_size,
+    sizeof(packet_size)
   );
   std::memcpy( // packet data
     m_send_buffer.data() + HEADER_SIZE,
     data.data(),
-    pkt_size
+    packet_size
   );
 
-  const uint64_t total_bytes = pkt_size + HEADER_SIZE;
+  const uint64_t total_bytes = packet_size + HEADER_SIZE;
   uint64_t bytes_written = 0;
   while (bytes_written < total_bytes) {
     int64_t result = write(
