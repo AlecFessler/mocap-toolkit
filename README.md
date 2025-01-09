@@ -63,14 +63,14 @@ The system's tight frame synchronization emerges from the combination of hardwar
 The Raspberry Pi 5's ethernet ports include dedicated hardware timestamping support, enabling PTP to achieve sub-microsecond clock synchronization across the camera network. While NTP typically achieves millisecond-level synchronization, PTP takes advantage of hardware timestamping to measure and compensate for network delays with much greater precision, making it ideal for creating a shared time reference across cameras.
 
 #### The Problem with Real Time
-Trying to capture frames at specific timestamps using the system clock (CLOCK_REALTIME) leads to a fatal flaw: while the clock steadily moves forward in time, PTP is constantly making tiny adjustments forward and backward to keep it synchronized. This means when you target a specific nanosecond timestamp, that exact number might literally never appear in the clock's sequence of values. The clock could jump right over it during an adjustment, going from slightly before your target to slightly after it. This isn't a theoretical problem - it caused a complete deadlock every single time before switching to monotonic clock timing. The process would get stuck waiting on the semaphore forever because it was waiting for a precise nanosecond value that the realtime clock would simply never reach.
+Trying to capture frames at specific timestamps using the system clock (CLOCK_REALTIME) leads to a fatal flaw: while the clock steadily moves forward in time, PTP is constantly making tiny adjustments forward and backward to keep it synchronized. This means when you target a specific nanosecond timestamp, that exact number might literally never appear in the clock's sequence of values. The clock could jump right over it during an adjustment, going from slightly before your target to slightly after it. This isn't a theoretical problem - it caused a complete deadlock every single time before switching to monotonic clock timing. The process would get stuck waiting on the signal forever because it was waiting for a precise nanosecond value that the realtime clock would simply never reach.
 
 #### The Solution: Monotonic Timing
 The system converts between realtime and monotonic clock domains to ensure precise timing. For each frame, it:
 
 1. Calculates the target capture time using a simple formula:
    ```cpp
-   auto target = initial_timestamp + (counter * interval);
+   std::chrono::nanoseconds target = initial_timestamp + (counter * interval);
    ```
    This gives us an absolute timestamp in the realtime clock domain, which is synchronized across cameras via PTP. However, we can't directly use this timestamp due to PTP's continuous clock adjustments.
 
@@ -81,8 +81,8 @@ The system converts between realtime and monotonic clock domains to ensure preci
    clock_gettime(CLOCK_MONOTONIC, &monotime);    // Steadily increasing time
 
    // Convert time delta from realtime to monotonic domain
-   auto ns_til_target = target - real_ns;
-   auto mono_target_ns = mono_ns + ns_til_target;
+   std::chrono::nanoseconds ns_til_target = target - real_ns;
+   std::chrono::nanoseconds mono_target_ns = mono_ns + ns_til_target;
    ```
 
 3. If we've fallen behind schedule (ns_til_target is negative), we adjust forward by the necessary number of intervals:
@@ -91,7 +91,6 @@ The system converts between realtime and monotonic clock domains to ensure preci
        uint32_t intervals_elapsed = -ns_til_target / interval + 1;
        ns_til_target += intervals_elapsed * interval;
        counter += intervals_elapsed;
-       target += intervals_elapsed * interval;
    }
    ```
 

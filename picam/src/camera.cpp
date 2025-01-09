@@ -216,7 +216,8 @@ void Camera::request_complete(libcamera::Request* request) {
     // the initial image preprocessing stages run in this thread
     m_thread_setup = true;
     pin_to_core(0);
-    set_scheduling_prio(98);
+    set_scheduling_prio(99); // one more than timer thread for immediate
+                             // preemption upon a capture request queue
   }
 
   if (request->status() == libcamera::Request::RequestCancelled)

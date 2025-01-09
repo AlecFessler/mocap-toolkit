@@ -61,7 +61,7 @@ int main() {
   StopWatchdog stop_watcher_thread{stop_flag, udpsock};
 
   pin_to_core(0);
-  set_scheduling_prio(99);
+  set_scheduling_prio(98); // one less than camera thread for immediate preemption
   setup_sig_handler(SIGTERM, stop_handler);
   setup_sig_handler(SIGRTMIN, SIG_IGN);
   sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
