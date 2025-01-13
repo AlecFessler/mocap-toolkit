@@ -16,7 +16,7 @@ The toolkit consists of two main components:
 - 3D pose reconstruction capabilities (**under development**)
 
 ## System Architecture
-The system is built around a distributed capture network and a centralized processing server. At every stage of the pipeline, including both the server and toolkit components, threads communicate through a highly optimized [single producer single consumer queue](https://github.com/AlecFessler/libspscq). This design choice ensures the entire system is both [lock-free and wait-free](https://en.wikipedia.org/wiki/Non-blocking_algorithm), enabling consistent low-latency performance from capture through display/processing with minimal synchronization overhead.
+The system is built around a distributed capture network and a centralized processing server. At every stage of the pipeline, including both the server and toolkit components, threads communicate through a highly optimized [single producer single consumer queue](https://github.com/AlecFessler/libspscq). This design choice ensures the entire system end-to-end is both [lock-free and wait-free](https://en.wikipedia.org/wiki/Non-blocking_algorithm), enabling consistent low-latency performance from capture through display/processing with minimal synchronization overhead.
 
 ### Capture Network
 - Multiple Raspberry Pi 5 nodes running custom network clock sync aware video capture software included in the repo
@@ -30,7 +30,7 @@ The system is built around a distributed capture network and a centralized proce
 - Receives and manages synchronized video streams from all cameras
 - Hardware accelerated video decoding using Nvidia's NVCUVID
 - Bundles incoming frames based on matching timestamps
-- Wait-free, zero-copy, FIFO IPC protocol using shared memory for downstream tools
+- Custom Wait-free, zero-copy, FIFO IPC protocol using shared memory for downstream tools
 
 ### Processing Toolkit
 - **Lens Calibration**: Real-time camera matrix and distortion coefficient computation directly from live video stream
@@ -72,7 +72,7 @@ The system is built around a distributed capture network and a centralized proce
 - libavcodec 61.27.101
 - libavutil 59.51.100
 
-**Note**: The FFmpeg install is a little tricky to get right, see details in the "Server" heading in the "Installation" section of this Readme below
+**Note**: The FFmpeg install is a little tricky to get right, see details [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#server-2)
 
 #### Toolkit
 - Linux distribution of choice (tested on Fedora 41)
@@ -115,7 +115,7 @@ sudo apt install libcamera-dev
 
 ### Server
 
-**Note**: The installation guide is Fedora-centric and assume a fresh install, some details may differ for your machine
+**Note**: The installation guide is Fedora-based and assumes a fresh install, some details may differ for your machine
 
 #### Network Time Service
 ```bash
@@ -168,19 +168,18 @@ sudo make install
 
 **Note**: I had to use gcc 14 specifically to get FFmpeg to compile
 
-#### libyaml
+#### LibYaml
 ```bash
 sudo dnf install libyaml-devel
 ```
 
 ### Toolkit
-
 **Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the installation for the server you'll already have it installed, otherwise see the instructions above
 
 #### LibTorch
-Install Libtorch with Linux, C++/Java, and CUDA 12.1 selected from this link: https://pytorch.org/get-started/locally/
+Install LibTorch with Linux, C++/Java, and CUDA 12.1 selected from this link: https://pytorch.org/get-started/locally/
 
-**Note**: There is no libtorch for cuda 12.3 like we're using, but the version compiled for 12.1 is compatible based on my testing
+**Note**: There is no LibTorch for cuda 12.3 like we're using, but the version compiled for 12.1 is compatible based on my testing
 
 #### OpenCV
 ```bash
@@ -188,8 +187,113 @@ sudo dnf install opencv opencv-devel
 ```
 
 ## Configuration
+The system requires configuration files and services to be setup on both the camera nodes and the server. Before proceeding, ensure you have established static IP addresses for all devices in your network, as these will be needed in the configuration files.
+
+### Camera Nodes
+The camera nodes require several components to be configured: the time synchronization services, the recording service, and the camera configuration file.
+
+#### Time Synchronization Setup
+After installing chrony and linuxptp as described in the Installation section, run the provided setup script:
+
+```bash
+sudo ./setup_time.sh
+```
+
+This script configures both NTP synchronization with the server and PTP synchronization between the cameras. It creates and enables the necessary systemd services for reliable operation.
+
+#### Recording Service Setup
+Create the framecap service file at
+`/etc/systemd/system/framecap.service`:
+
+```bash
+[Unit]
+Description=Frame Capture Service
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/usr/local/bin/framecap
+WorkingDirectory=/usr/local/bin
+Restart=always
+RestartSec=1
+KillSignal=SIGINT
+User=$USER
+Environment=PATH=/usr/bin:/usr/local/bin
+
+[Install]
+WantedBy=multi-user.target
+```
+
+After creating the service file, enable and start it:
+
+```bash
+sudo systemctl enable framecap
+sudo systemctl start framecap
+```
+
+#### Camera Configuration
+First, create the necessary directory with appropriate permissions:
+
+```bash
+sudo mkdir -p /etc/picam
+sudo mkdir -p /var/log/picam
+sudo chown $USER:$USER /etc/picam /var/log/picam
+```
+
+Create the camera configuration file at `/etc/picam/cam_config.txt`:
+
+```bash
+FRAME_WIDTH=1280
+FRAME_HEIGHT=720
+FPS=30
+SERVER_IP=192.168.86.100  # Replace with your server's static IP
+TCP_PORT=12347            # Must match port in server config
+UDP_PORT=22347            # Must match port in server config
+```
+
+**Note**: Changing the resolution and fps from 720p30 is not recommended, but should work within some reasonable range. You need to change this in the server config as well if doing so.
+
+### Server
+
+#### NTP Server Setup
+Add the following line to `/etc/chrony.conf` to allow NTP client access from cameras:
+
+```bash
+# Allow NTP client access from local network
+allow 192.168.86.0/24  # Adjust subnet to match your network
+```
+
+Restart the chrony service to apply changes:
+
+```bash
+sudo systemctl restart chronyd
+```
+
+#### Server Configuration
+Create the necessary directories with appropriate permissions:
+
+```bash
+sudo mkdir -p /etc/mocap-toolkit
+sudo mkdir -p /var/log/mocap-toolkit
+sudo chown $USER:$USER /etc/mocap-toolkit /var/log/mocap-toolkit
+```
+
+Create the server configuration file at `/etc/mocap-toolkit/cams.yaml`:
+
+```yaml
+stream_params:
+  frame_width: 1280   # Must match camera settings
+  frame_height: 720   # Must match camera settings
+  fps: 30             # Must match camera settings
+
+cameras:
+  - name: rpicam01          # Must follow this naming convention (rpicamXX)
+    id: 0                   # Must increment by 1 for each camera
+    eth_ip: 192.168.1.102   # Camera's ethernet IP
+    wifi_ip: 192.168.86.79  # Camera's wifi IP (if used, otherwise put a placeholder IP)
+    tcp_port: 12345         # Must be unique
+    udp_port: 22345         # Must be unique
+  # Add additional cameras as needed
+```
 
 ## Usage
-
-## References
-- https://en.wikipedia.org/wiki/Non-blocking_algorithm
