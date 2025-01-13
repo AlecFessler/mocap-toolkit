@@ -174,7 +174,7 @@ sudo dnf install libyaml-devel
 ```
 
 ### Toolkit
-**Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the [installation for the server](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#libyaml) you'll already have it installed, otherwise see the instructions above
+**Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the installation for the server you'll already have it installed, otherwise see the instructions [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#libyaml)
 
 #### LibTorch
 Install LibTorch with Linux, C++/Java, and CUDA 12.1 selected from this link: https://pytorch.org/get-started/locally/
@@ -297,3 +297,62 @@ cameras:
 ```
 
 ## Usage
+
+The toolkit provides a sequence of tools that must be used in a specific order to set up and operate the motion capture system. This guide will walk you through the process from initial calibration pattern generation through system operation.
+
+### Starting the Frame Server
+
+The frame server must be built and installed before anything else, but execution is handled by whatever tool is currently running. The server handles communication with the cameras, and their service handles their execution ensuring they're always ready for the servers start signal.
+
+```bash
+cd mocap-toolkit/frameset_server/
+make
+sudo make install
+```
+
+### Calibration Pattern Generation
+
+Before calibrating your cameras, you'll need to generate a chessboard calibration pattern:
+
+```bash
+cd mocap-toolkit/toolkit/
+python3 gen_chessboard_pattern.py
+```
+
+This will generate a pattern that you can print and mount on a rigid backing like cardboard. The pattern should be kept flat for accurate calibration.
+
+### Camera Calibration Process
+
+The system requires two types of calibration: individual lens calibration for each camera, and stereo calibration to establish spatial relationships between cameras.
+
+#### Lens Calibration
+
+Each camera must first be calibrated individually to determine its intrinsic parameters. To build and run the lens calibration tool:
+
+```bash
+cd mocap-toolkit/toolkit/lens_calibration/
+make
+cd bin
+./lens_calibration [camera_id]
+```
+
+Move the chessboard pattern through different positions and orientations in front of the camera. The tool will automatically capture calibration data and exit when sufficient samples have been collected. The process generates a .yaml file containing the camera matrix and distortion coefficients. This takes about 3-4 seconds to complete.
+
+This process must be repeated for each camera in your setup, using the appropriate camera_id for each.
+
+#### Stereo Calibration
+
+After completing lens calibration for all cameras, you can establish the geometric relationships between them using the stereo calibration tool:
+
+```bash
+cd mocap-toolkit/toolkit/stereo_calibration/
+make
+cd bin
+./stereo_calibration
+```
+
+When running stereo calibration, move the chessboard pattern through positions visible to multiple cameras simultaneously. The tool will automatically identify valid camera pairs and compute their relative positions and orientations. For each identified camera pair, the tool generates a .yaml file containing the translation and rotation vectors needed for 3D reconstruction. The duration for this depends on how many cameras you have and their particular setup in the scene, but should only take several seconds to complete.
+
+### 3D Reconstruction Tool
+
+The 3D reconstruction tool for generating motion capture data is currently under development. You can find the work-in-progress implementation in the `toolkit/mocap_dataset_gen/` directory.
