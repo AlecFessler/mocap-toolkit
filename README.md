@@ -122,7 +122,7 @@ sudo apt install libcamera-dev
 sudo dnf install chrony
 ```
 
-**Note**: Details on how to configure this are shown in the "Server" header in the "Configuration" section of the Readme
+**Note**: Details on the time service configuration are shown [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#server-3)
 
 #### CUDA
 Install the 12.3 CUDA Toolkit from this link: https://developer.nvidia.com/cuda-12-3-0-download-archive
@@ -174,7 +174,7 @@ sudo dnf install libyaml-devel
 ```
 
 ### Toolkit
-**Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the installation for the server you'll already have it installed, otherwise see the instructions above
+**Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the [installation for the server](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#libyaml) you'll already have it installed, otherwise see the instructions above
 
 #### LibTorch
 Install LibTorch with Linux, C++/Java, and CUDA 12.1 selected from this link: https://pytorch.org/get-started/locally/
@@ -193,7 +193,7 @@ The system requires configuration files and services to be setup on both the cam
 The camera nodes require several components to be configured: the time synchronization services, the recording service, and the camera configuration file.
 
 #### Time Synchronization Setup
-After installing chrony and linuxptp as described in the Installation section, run the provided setup script:
+After installing chrony and linuxptp as described in the [Installation section](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#installation), run the provided setup script:
 
 ```bash
 sudo ./setup_time.sh
