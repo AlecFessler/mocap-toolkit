@@ -1,21 +1,21 @@
-# © 2024 Alec Fessler
+# © 2025 Alec Fessler
 # MIT License
 # See LICENSE file in the project root for full license information.
 
 # This file needs to be relocated to the directory below for use
 
-# /etc/systemd/system/framecap.service
+# /etc/systemd/system/picam.service
+
 [Unit]
 Description=Frame Capture Service
 After=network.target
 Wants=network.target
 
 [Service]
-ExecStart=/home/alecfessler/Documents/vidcap/bin/framecap
-WorkingDirectory=/home/alecfessler/Documents/vidcap
+ExecStart=/usr/local/bin/picam
 Restart=always
 RestartSec=1
-KillSignal=SIGINT
+KillSignal=SIGTERM
 User=alecfessler
 Environment=PATH=/usr/bin:/usr/local/bin
 
