@@ -1,2 +1,4 @@
-*/__pycache__
 cams.yaml
+**/__pycache__/
+**/bin/
+**/obj/
