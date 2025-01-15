@@ -46,6 +46,8 @@ void* encoder_thread_fn(void* ptr) {
       }
       if (stop_flag) break;
 
+      log_(BENCHMARK, "Started encoding frame");
+
       instance->m_encoder.encode(
         frame.value().buffer,
         instance->m_avpackets[instance->m_next_buffer]
@@ -56,6 +58,8 @@ void* encoder_thread_fn(void* ptr) {
       };
       instance->m_packet_buffers[instance->m_next_buffer].buffer = packet_buffer;
       instance->m_packet_buffers[instance->m_next_buffer].timestamp = frame.value().timestamp;
+
+      log_(BENCHMARK, "Finished encoding frame");
 
       bool enqueued = instance->m_packet_queue.try_enqueue(
         instance->m_packet_buffers[instance->m_next_buffer]

@@ -420,6 +420,8 @@ int main(int argc, char* argv[]) {
     if (!all_equal)
       continue;
 
+    log(BENCHMARK, "Received full frameset");
+
     struct ts_frame_buf** frameset = spsc_dequeue(empty_frameset_consumer_q);
     while (!frameset) {
       if (++dequeue_retry_counter >= stream_conf.fps) {

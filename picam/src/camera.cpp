@@ -204,6 +204,8 @@ void Camera::capture_frame(std::chrono::nanoseconds timestamp) {
     throw std::runtime_error(err_msg);
   }
 
+  log_(BENCHMARK, "Queued capture request");
+
   if (++m_next_buffer == m_buffers.capacity())
       m_next_buffer = 0;
 }
@@ -223,6 +225,8 @@ void Camera::request_complete(libcamera::Request* request) {
   if (request->status() == libcamera::Request::RequestCancelled)
     return;
   request->reuse(libcamera::Request::ReuseBuffers);
+
+  log_(BENCHMARK, "Completed capture request");
 
   bool enqueued = m_frame_queue.try_enqueue(m_buffers[request->cookie()]);
   if (!enqueued)

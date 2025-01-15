@@ -198,6 +198,7 @@ static void timestamp(char* buffer, size_t* offset) {
 
 static const char* log_levels[] = {
   "[INFO]",
+  "[BENCHMARK]",
   "[DEBUG]",
   "[WARNING]",
   "[ERROR]",

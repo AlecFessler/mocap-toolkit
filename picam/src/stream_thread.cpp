@@ -43,10 +43,14 @@ void* stream_thread_fn(void* ptr) {
       }
       if (stop_flag) break;
 
+      log_(BENCHMARK, "Started streaming packet");
+
       instance->m_tcpsock.stream_packet(
         packet.value().timestamp,
         packet.value().buffer
       );
+
+      log_(BENCHMARK, "Finished streaming packet");
     }
 
     return nullptr;

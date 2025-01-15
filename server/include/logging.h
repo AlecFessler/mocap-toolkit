@@ -5,9 +5,11 @@
 
 typedef enum log_level {
   INFO,
+  BENCHMARK,
   DEBUG,
   WARNING,
-  ERROR
+  ERROR,
+  NUM_LOG_LEVELS
 } log_level;
 
 int setup_logging(const char* fpath);

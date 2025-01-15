@@ -135,6 +135,8 @@ void* stream_mgr_fn(void* ptr) {
         continue;
       }
 
+      log(BENCHMARK, "Received packet header");
+
       ret = enqueue(&timestamp_queue, (void*)&timestamp);
       if (ret)
         goto err_cleanup;
@@ -194,6 +196,9 @@ void* stream_mgr_fn(void* ptr) {
         goto err_cleanup;
       }
 
+      log(BENCHMARK, "Received full packet");
+      log(BENCHMARK, "Started decoding packet");
+
       ret = decode_packet(
         &viddec,
         enc_frame_buf,
@@ -201,6 +206,8 @@ void* stream_mgr_fn(void* ptr) {
       );
       if (ret)
         goto err_cleanup;
+
+      log(BENCHMARK, "Finished decoding packet");
     }
 
     ret = recv_frame(
