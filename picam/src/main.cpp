@@ -33,6 +33,8 @@ static void stop_handler(int signum) {
 }
 
 int main() {
+try {
+
   Logging::setup_logging(LOG_PATH);
   struct config config = parse_config(CONFIG_PATH);
   SPSCQueue<struct frame> frame_queue{QUEUE_SLOTS};
@@ -107,4 +109,9 @@ int main() {
   }
 
   return 0;
+
+} catch (const std::exception& e) {
+  log_(ERROR, e.what());
+  return -1;
+}
 }

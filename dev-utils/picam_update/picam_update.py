@@ -49,7 +49,8 @@ def main():
     conn.run(f"tar zxf {TAR_NAME} && rm {TAR_NAME}")
     conn.sudo("bash -c 'cd picam && make install'")
     conn.sudo(f"cp picam/{SERVICE_NAME} {SERVICE_PATH}{SERVICE_NAME}")
-    conn.sudo(f"systemctl daemon-reload")
+    conn.sudo("systemctl daemon-reload")
+    conn.sudo(f"systemctl enable {SERVICE_NAME}")
     conn.sudo(f"systemctl restart {SERVICE_NAME}")
 
 if __name__ == "__main__":
