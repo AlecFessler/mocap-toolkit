@@ -2,12 +2,11 @@ import getpass
 import io
 import os
 import tarfile
+import yaml
+
 from fabric import Connection, Config
 
-from config_parser import parse_config
-
 USERNAME = "alecfessler"
-SSH_PUB_KEY = "~/.ssh/id_rsa"
 
 CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml"
 CAM_SOFTWARE_PATH = "~/Documents/mocap-toolkit/picam"
@@ -17,6 +16,11 @@ SERVICE_NAME = "picam.service"
 
 TAR_NAME = "temp.tar.gz"
 
+def parse_config(fpath):
+  with open(fpath, 'r') as f:
+    config = yaml.load(f, Loader=yaml.SafeLoader)
+  return config
+
 def compress_dir(dirname):
   tar_stream = io.BytesIO()
   with tarfile.open(fileobj=tar_stream, mode="w:gz") as tar:
@@ -25,7 +29,6 @@ def compress_dir(dirname):
 
 def main():
   config = parse_config(CAM_CONF_PATH)
-  key_path = os.path.expanduser(SSH_PUB_KEY)
   cam_software_path = os.path.expanduser(CAM_SOFTWARE_PATH)
 
   payload = compress_dir(cam_software_path)
@@ -36,10 +39,7 @@ def main():
     conn = Connection(
       host=camera["wifi_ip"],
       user=USERNAME,
-      config=ssh_config,
-      connect_kwargs={
-        "key_filename": key_path
-      }
+      config=ssh_config
     )
 
     sftp = conn.sftp()
