@@ -3,11 +3,10 @@
 # See LICENSE file in the project root for full license information.
 
 # This file needs to be relocated to the directory below for use
-
 # /etc/systemd/system/picam.service
 
 [Unit]
-Description=Frame Capture Service
+Description=Picam Recording Service
 After=network.target
 Wants=network.target
 

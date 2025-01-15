@@ -9,7 +9,7 @@ PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
 LDFLAGS=-pthread $(PKG_LIBS_CAMERA) $(PKG_LIBS_AVCODEC) -lrt -latomic
 CPPFILES=$(wildcard src/*.cpp)
 OBJFILES=$(CPPFILES:src/%.cpp=obj/%.o)
-BINARY=bin/framecap
+BINARY=bin/picam
 PREFIX=/usr/local
 
 .PHONY: all clean install uninstall
@@ -27,11 +27,11 @@ obj/%.o: src/%.cpp
 
 install: $(BINARY)
 	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 $(BINARY) $(DESTDIR)$(PREFIX)/bin/framecap
-	sudo setcap cap_sys_nice+ep $(DESTDIR)$(PREFIX)/bin/framecap
+	install -m 755 $(BINARY) $(DESTDIR)$(PREFIX)/bin/picam
+	sudo setcap cap_sys_nice+ep $(DESTDIR)$(PREFIX)/bin/picam
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/framecap
+	rm -f $(DESTDIR)$(PREFIX)/bin/picam
 
 clean:
 	rm -f $(OBJFILES) $(BINARY)
