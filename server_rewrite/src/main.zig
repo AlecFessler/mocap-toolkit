@@ -7,5 +7,5 @@ pub fn main() !void {
     try log.setup(LOG_PATH);
     defer log.cleanup();
 
-    try log.write("Hello world\n");
+    try log.write(.INFO, "Hello world\n", @src());
 }
