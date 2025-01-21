@@ -1,47 +1,62 @@
+//! Parses the mocap-toolkit config yaml file format
+//! Not a general purpose yaml parser
+
 const std = @import("std");
+
+const SectionHashes = struct {
+    const stream_params = std.hash.Fnv1a_64.hash("stream_params:");
+    const cameras = std.hash.Fnv1a_64.hash("cameras:");
+    const new_camera = std.hash.Fnv1a_64.hash("- ");
+};
 
 const NoDelimiter = error{NoDelimiter};
 
-fn read_until(src: []const u8, dest: []u8, delimiter: u8) NoDelimiter!u64 {
-    for (src, 0..) |char, i| {
-        dest[i] = char;
-        if (char == delimiter) return i + 1;
+/// Reads from a string until a specified delimiter is reached
+/// then returns a slice from start to the delimiter or returns NoDelimiter
+fn read_until(buffer: []const u8, delimiter: u8) NoDelimiter![]const u8 {
+    for (buffer, 0..) |char, i| {
+        if (char == delimiter) return buffer[0 .. i + 1];
     }
     return error.NoDelimiter;
 }
 
-fn trim(slice: []const u8) []const u8 {
-    var start: usize = 0;
-    var end: usize = slice.len;
+/// Trims any leading or trailing whitespace from a string slice
+fn trim(buffer: []const u8) []const u8 {
+    var start: u64 = 0;
+    var end: u64 = buffer.len;
 
-    // Trim start
-    while (start < end and (slice[start] == ' ' or slice[start] == '\n')) : (start += 1) {}
+    while (start < end and (buffer[start] == ' ' or buffer[start] == '\n')) : (start += 1) {}
+    while (end > start and (buffer[end - 1] == ' ' or buffer[end - 1] == '\n')) : (end -= 1) {}
 
-    // Trim end
-    while (end > start and (slice[end - 1] == ' ' or slice[end - 1] == '\n')) : (end -= 1) {}
-
-    return slice[start..end];
+    return buffer[start..end];
 }
 
-fn count_cameras(file_buffer: []const u8) u64 {
-    var offset: u64 = 0;
-    var temp_buffer: [64]u8 = undefined;
-
+/// Counts the cameras in a first pass parse to determine
+/// how much memory the parse fn needs to allocate for the config
+fn count_cameras(file_buffer: []const u8) NoDelimiter!u64 {
     var camera_count: u64 = 0;
     var in_cameras_list: bool = false;
-    const section_name: []const u8 = "cameras:";
 
+    var offset: u64 = 0;
     while (offset < file_buffer.len) {
-        const len = read_until(file_buffer[offset..file_buffer.len], &temp_buffer, '\n') catch return 0;
-        const line = trim(temp_buffer[0..len]);
-        offset += len;
+        const line = try read_until(file_buffer[offset..file_buffer.len], '\n');
+        offset += line.len;
 
-        if (line.len >= section_name.len and std.mem.eql(u8, line, section_name)) {
+        const trimmed = trim(line);
+        const hash = std.hash.Fnv1a_64.hash(trimmed);
+
+        // look for 'cameras:' section header
+        if (hash == SectionHashes.cameras) {
             in_cameras_list = true;
             continue;
         }
 
-        if (in_cameras_list and line.len >= 2 and std.mem.eql(u8, line[0..2], "- ")) {
+        // ensure trimmed len is long enough to check the leading 2 chars hash
+        if (trimmed.len < 2 or !in_cameras_list) continue;
+
+        // check if the leading 2 chars indicate a new camera
+        const leading_hash = std.hash.Fnv1a_64.hash(trimmed[0..2]);
+        if (leading_hash == SectionHashes.new_camera) {
             camera_count += 1;
         }
     }
@@ -51,80 +66,55 @@ fn count_cameras(file_buffer: []const u8) u64 {
 
 const ParseError = NoDelimiter || std.fs.File.OpenError || std.fs.File.ReadError;
 
+/// Parses the camera config yaml file
 pub fn parse(filepath: []const u8) ParseError!void {
     const file = try std.fs.openFileAbsolute(filepath, .{ .mode = .read_only });
-
     var file_buffer: [1024]u8 = undefined; // may need to increase if cam_count grows larger, for now, at 3 cameras the file is ~500 bytes
     const bytes_read = try file.readAll(&file_buffer);
 
-    const camera_count = count_cameras(file_buffer[0..bytes_read]);
+    const camera_count = try count_cameras(file_buffer[0..bytes_read]);
     std.debug.print("Camera count {}\n", .{camera_count});
-
-    var offset: u64 = 0;
-    var temp_buffer: [64]u8 = undefined;
 
     const ConfigSection = enum { stream_params, cameras, none };
     var section: ConfigSection = .none;
+    var offset: u64 = 0;
 
     while (offset < bytes_read) {
+        const line = try read_until(file_buffer[offset..bytes_read], '\n');
+        offset += line.len;
+        const trimmed = trim(line);
+
         switch (section) {
             .none => {
-                // read line
-                const len = try read_until(file_buffer[offset..bytes_read], &temp_buffer, '\n');
-                const line = trim(temp_buffer[0..len]);
-                offset += len;
-
-                // entering stream params section
-                if (std.mem.eql(u8, line, "stream_params:")) {
-                    section = .stream_params;
-                }
-
-                // entering cameras list section
-                if (std.mem.eql(u8, line, "cameras:")) {
-                    section = .cameras;
-                }
+                const hash = std.hash.Fnv1a_64.hash(trimmed);
+                section = switch (hash) {
+                    SectionHashes.stream_params => .stream_params,
+                    SectionHashes.cameras => .cameras,
+                    else => .none,
+                };
             },
-
             .stream_params => {
-                // read key
-                var len = try read_until(file_buffer[offset..bytes_read], &temp_buffer, ':');
-                const key = trim(temp_buffer[0..len]);
-
-                // check for end of section
-                if (temp_buffer[0] == '\n') {
+                if (trimmed.len == 0) { // end of section
                     section = .none;
                     continue;
                 }
 
-                std.debug.print("key {s}\n", .{key});
-                offset += len;
-
-                // read val
-                len = try read_until(file_buffer[offset..bytes_read], &temp_buffer, '\n');
-                const val = trim(temp_buffer[0..len]);
-                std.debug.print("val {s}\n", .{val});
-                offset += len;
+                const key = try read_until(trimmed, ':');
+                const val = trimmed[key.len..];
+                std.debug.print("Key {s}: Val {s}\n", .{ key, val });
             },
-
             .cameras => {
-                // read key
-                var len = try read_until(file_buffer[offset..bytes_read], &temp_buffer, ':');
-                var key = trim(temp_buffer[0..len]);
-
-                // check for new camera start
-                if (key.len >= 2 and std.mem.eql(u8, key[0..2], "- ")) {
-                    std.debug.print("Found next camera\n", .{});
-                    key = key[2..];
+                if (trimmed.len == 0) { // end of single camera config
+                    continue;
                 }
 
-                std.debug.print("key {s}\n", .{key});
-                offset += len;
+                var key = try read_until(trimmed, ':');
+                const val = trimmed[key.len..];
 
-                // read val
-                len = try read_until(file_buffer[offset..bytes_read], &temp_buffer, '\n');
-                const val = trim(temp_buffer[0..len]);
-                std.debug.print("val {s}\n", .{val});
-                offset += len;
+                const leading_hash = std.hash.Fnv1a_64.hash(key[0..2]);
+                if (leading_hash == SectionHashes.new_camera) key = key[2..];
+
+                std.debug.print("Key {s}: Val {s}\n", .{ key, val });
             },
         }
     }
