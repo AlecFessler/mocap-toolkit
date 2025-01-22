@@ -1,6 +1,8 @@
 const std = @import("std");
-const log = @import("log.zig");
 const config_parser = @import("config_parser.zig");
+const log = @import("log.zig");
+const sched = @import("sched.zig");
+const spscq = @import("spsc_queue.zig");
 
 const LOG_PATH: []const u8 = "/var/log/mocap-toolkit/server.log";
 const CAM_CONFIG_PATH: []const u8 = "/etc/mocap-toolkit/cams.yaml";
@@ -8,6 +10,9 @@ const CAM_CONFIG_PATH: []const u8 = "/etc/mocap-toolkit/cams.yaml";
 pub fn main() !void {
     try log.setup(LOG_PATH);
     defer log.cleanup();
+
+    try sched.pin_to_core(0);
+    try sched.set_sched_priority(99);
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -27,6 +32,14 @@ pub fn main() !void {
             camera_config.udp_port,
         });
     }
+
+    const buffer = try allocator.alloc(i32, 10);
+    const SPSCQueue = spscq.Queue(i32);
+    var queue = SPSCQueue.create(buffer);
+
+    _ = queue.enqueue(1);
+    const val = queue.dequeue().?;
+    std.debug.print("Val {}", .{val});
 
     try log.write(.INFO, "Hello world\n", @src());
 }

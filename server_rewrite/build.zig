@@ -12,4 +12,14 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(exe);
+
+    const set_caps = b.addSystemCommand(&.{
+        "sudo",
+        "setcap",
+        "cap_sys_nice=+ep",
+        b.getInstallPath(.bin, exe.out_filename),
+    });
+
+    set_caps.step.dependOn(&exe.step);
+    b.getInstallStep().dependOn(&set_caps.step);
 }
