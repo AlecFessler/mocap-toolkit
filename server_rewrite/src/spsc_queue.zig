@@ -16,7 +16,7 @@ pub fn Queue(comptime T: type) type {
         buffer2: [*]T,
         padding2: [cache_line_size]u8 align(cache_line_size),
 
-        pub fn create(buffer: []T) Self {
+        pub fn init(buffer: []T) Self {
             return .{
                 .head = 0,
                 .cached_tail = 0,
@@ -34,9 +34,8 @@ pub fn Queue(comptime T: type) type {
         /// Enqueue operation strictly reads from the top half of the struct
         /// except for checking if the queue is full
         pub fn enqueue(self: *Self, data: T) bool {
-            const head = @atomicLoad(usize, &self.head, .unordered);
-
-            var next = head + 1;
+            // can safely read head without atomic load
+            var next = self.head + 1;
             if (next == self.capacity1) next = 0;
 
             if (next == self.cached_tail) { // check if queue appears full
@@ -44,7 +43,7 @@ pub fn Queue(comptime T: type) type {
                 if (next == self.cached_tail) return false; // queue full
             }
 
-            self.buffer1[head] = data;
+            self.buffer1[self.head] = data;
             @atomicStore(usize, &self.head, next, .release);
 
             return true;
@@ -53,16 +52,15 @@ pub fn Queue(comptime T: type) type {
         // Dequeue operation strictly reads from the bottom half of the struct
         // except for checking if the queue is empty
         pub fn dequeue(self: *Self) ?T {
-            const tail = @atomicLoad(usize, &self.tail, .unordered);
-
-            if (tail == self.cached_head) { // check if the queue appears empty
+            // can safely read tail without atomic load
+            if (self.tail == self.cached_head) { // check if the queue appears empty
                 self.cached_head = @atomicLoad(usize, &self.head, .acquire);
-                if (tail == self.cached_head) return null; // queue empty
+                if (self.tail == self.cached_head) return null; // queue empty
             }
 
-            const data = self.buffer2[tail];
+            const data = self.buffer2[self.tail];
 
-            var next = tail + 1;
+            var next = self.tail + 1;
             if (next == self.capacity2) next = 0;
 
             @atomicStore(usize, &self.tail, next, .release);

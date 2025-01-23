@@ -1,11 +1,15 @@
 const std = @import("std");
 const config_parser = @import("config_parser.zig");
 const log = @import("log.zig");
+const ring_alloc = @import("ring_allocator.zig");
 const sched = @import("sched.zig");
 const spscq = @import("spsc_queue.zig");
 
 const LOG_PATH: []const u8 = "/var/log/mocap-toolkit/server.log";
 const CAM_CONFIG_PATH: []const u8 = "/etc/mocap-toolkit/cams.yaml";
+
+const RingAllocator = ring_alloc.RingAllocator(i32);
+const SPSCQueue = spscq.Queue(*i32);
 
 pub fn main() !void {
     try log.setup(LOG_PATH);
@@ -33,12 +37,16 @@ pub fn main() !void {
         });
     }
 
-    const buffer = try allocator.alloc(i32, 10);
-    const SPSCQueue = spscq.Queue(i32);
-    var queue = SPSCQueue.create(buffer);
+    const item_buffer = try allocator.alloc(i32, 12);
+    var ring_allocator = RingAllocator.init(item_buffer);
+    const slot = ring_allocator.next();
+    slot.* = 1;
 
-    _ = queue.enqueue(1);
-    const val = queue.dequeue().?;
+    const queue_buffer = try allocator.alloc(*i32, 10);
+    var queue = SPSCQueue.init(queue_buffer);
+
+    _ = queue.enqueue(slot);
+    const val = queue.dequeue().?.*;
     std.debug.print("Val {}", .{val});
 
     try log.write(.INFO, "Hello world\n", @src());
