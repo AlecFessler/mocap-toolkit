@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe.linkLibC();
+
     b.installArtifact(exe);
 
     const set_caps = b.addSystemCommand(&.{

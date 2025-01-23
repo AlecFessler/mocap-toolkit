@@ -9,7 +9,8 @@ var fd_handle: ?std.posix.fd_t = null;
 /// Creates the file if it doesn't already exist
 pub fn setup(path: []const u8) std.posix.OpenError!void {
     const flags: std.posix.O = .{ .ACCMODE = std.posix.ACCMODE.WRONLY, .CREAT = true, .APPEND = true };
-    fd_handle = try std.posix.open(path, flags, 0o664);
+    const permissions: std.posix.mode_t = 0o664;
+    fd_handle = try std.posix.open(path, flags, permissions);
 }
 
 /// Closes the file descriptor
