@@ -10,8 +10,6 @@ fn cpy_w_padding(dest: []u8, src: []const u8) void {
     @memcpy(dest[0..src.len], src);
 }
 
-const FieldAssignError = error{InvalidField} || std.fmt.ParseIntError;
-
 const StreamParams = struct {
     const Self = @This();
     const KeyHashes = struct {
@@ -20,23 +18,23 @@ const StreamParams = struct {
         const fps = hash("fps:");
     };
 
-    frame_width: u16,
-    frame_height: u16,
-    fps: u8,
+    frame_width: u32,
+    frame_height: u32,
+    fps: u32,
 
-    fn assign(self: *Self, key: []const u8, val: []const u8) FieldAssignError!void {
+    fn assign(self: *Self, key: []const u8, val: []const u8) void {
         const hashed = hash(key);
         switch (hashed) {
             KeyHashes.frame_width => {
-                self.frame_width = try std.fmt.parseInt(u16, val, 10);
+                self.frame_width = std.fmt.parseInt(u16, val, 10) catch @compileError("Invalid frame_width in config");
             },
             KeyHashes.frame_height => {
-                self.frame_height = try std.fmt.parseInt(u16, val, 10);
+                self.frame_height = std.fmt.parseInt(u16, val, 10) catch @compileError("Invalid frame_height in config");
             },
             KeyHashes.fps => {
-                self.fps = try std.fmt.parseInt(u8, val, 10);
+                self.fps = std.fmt.parseInt(u8, val, 10) catch @compileError("Invalid fps in config");
             },
-            else => return error.InvalidField,
+            else => @compileError("Invalid field in stream_params in config"),
         }
     }
 };
@@ -52,48 +50,37 @@ const CameraConfig = struct {
         const udp_port = hash("udp_port:");
     };
 
-    name: [8]u8, // name is always exactly 8 bytes
-    id: u8,
-    eth_ip_array: [16]u8, // size of ips may vary
-    eth_ip: []const u8,
-    wifi_ip_array: [16]u8,
-    wifi_ip: []const u8,
+    name: [8]u8,
+    id: u32,
+    eth_ip: [16]u8,
+    wifi_ip: [16]u8,
     tcp_port: u16,
     udp_port: u16,
 
-    fn assign(self: *Self, key: []const u8, val: []const u8) FieldAssignError!void {
+    fn assign(self: *Self, key: []const u8, val: []const u8) void {
         const hashed = hash(key);
         switch (hashed) {
             KeyHashes.name => {
                 cpy_w_padding(&self.name, val);
             },
             KeyHashes.id => {
-                self.id = try std.fmt.parseInt(u8, val, 10);
+                self.id = std.fmt.parseInt(u8, val, 10) catch @compileError("Invalid id in camera config");
             },
             KeyHashes.eth_ip => {
-                cpy_w_padding(&self.eth_ip_array, val);
-                self.eth_ip = self.eth_ip_array[0..val.len];
+                cpy_w_padding(&self.eth_ip, val);
             },
             KeyHashes.wifi_ip => {
-                cpy_w_padding(&self.wifi_ip_array, val);
-                self.wifi_ip = self.wifi_ip_array[0..val.len];
+                cpy_w_padding(&self.wifi_ip, val);
             },
             KeyHashes.tcp_port => {
-                self.tcp_port = try std.fmt.parseInt(u16, val, 10);
+                self.tcp_port = std.fmt.parseInt(u16, val, 10) catch @compileError("Invalid tcp port in camera config");
             },
             KeyHashes.udp_port => {
-                self.udp_port = try std.fmt.parseInt(u16, val, 10);
+                self.udp_port = std.fmt.parseInt(u16, val, 10) catch @compileError("Invalid udp port in camera config");
             },
-            else => {
-                return error.InvalidField;
-            },
+            else => @compileError("Invalid field in camera config"),
         }
     }
-};
-
-const Config = struct {
-    stream_params: StreamParams,
-    camera_configs: []CameraConfig,
 };
 
 const SectionHashes = struct {
@@ -102,15 +89,14 @@ const SectionHashes = struct {
     const new_camera = hash("- ");
 };
 
-const NoDelimiter = error{NoDelimiter};
-
 /// Reads from a string until a specified delimiter is reached
 /// then returns a slice from start to the delimiter or returns NoDelimiter
-fn read_until(buffer: []const u8, delimiter: u8) NoDelimiter![]const u8 {
+fn read_until(buffer: []const u8, delimiter: u8) []const u8 {
+    @setEvalBranchQuota(3000);
     for (buffer, 0..) |char, i| {
         if (char == delimiter) return buffer[0 .. i + 1];
     }
-    return error.NoDelimiter;
+    @compileError("Failed to find delimiter parsing config");
 }
 
 /// Trims any leading or trailing whitespace from a string slice
@@ -126,13 +112,13 @@ fn trim(buffer: []const u8) []const u8 {
 
 /// Counts the cameras in a first pass parse to determine
 /// how much memory the parse fn needs to allocate for the config
-fn count_cameras(file_buffer: []const u8) NoDelimiter!u64 {
+fn count_cameras(config_bytes: []const u8) u64 {
     var camera_count: u64 = 0;
     var in_cameras_list: bool = false;
 
     var offset: u64 = 0;
-    while (offset < file_buffer.len) {
-        const line = try read_until(file_buffer[offset..file_buffer.len], '\n');
+    while (offset < config_bytes.len) {
+        const line = read_until(config_bytes[offset..config_bytes.len], '\n');
         offset += line.len;
 
         const trimmed = trim(line);
@@ -157,31 +143,29 @@ fn count_cameras(file_buffer: []const u8) NoDelimiter!u64 {
     return camera_count;
 }
 
-const ParseError = NoDelimiter || FieldAssignError || std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError;
+pub fn Config(config_bytes: []const u8) type {
+    const camera_count = count_cameras(config_bytes);
+    return struct {
+        stream_params: StreamParams,
+        camera_configs: [camera_count]CameraConfig,
+    };
+}
 
 /// Parses the camera config yaml file
-pub fn parse(allocator: std.mem.Allocator, filepath: []const u8) ParseError!Config {
-    const file = try std.fs.openFileAbsolute(filepath, .{ .mode = .read_only });
-    defer file.close();
-
-    var file_buffer: [1024]u8 = undefined; // may need to increase if cam_count grows larger, for now, at 3 cameras the file is ~500 bytes
-    const bytes_read = try file.readAll(&file_buffer);
-
-    const camera_count = try count_cameras(file_buffer[0..bytes_read]);
+pub fn parse(T: type, config_bytes: []const u8) T {
     var cameras_parsed: u64 = 0;
 
-    var config = Config{
+    var config = T{
         .stream_params = undefined,
-        .camera_configs = try allocator.alloc(CameraConfig, camera_count),
+        .camera_configs = undefined,
     };
-    errdefer allocator.free(config.camera_configs);
 
     const ConfigSection = enum { stream_params, cameras, none };
     var section: ConfigSection = .none;
     var offset: u64 = 0;
 
-    while (offset < bytes_read) {
-        const line = try read_until(file_buffer[offset..bytes_read], '\n');
+    while (offset < config_bytes.len) {
+        const line = read_until(config_bytes[offset..config_bytes.len], '\n');
         offset += line.len;
         const trimmed = trim(line);
 
@@ -200,9 +184,9 @@ pub fn parse(allocator: std.mem.Allocator, filepath: []const u8) ParseError!Conf
                     continue;
                 }
 
-                const key = try read_until(trimmed, ':');
+                const key = read_until(trimmed, ':');
                 const val = trim(trimmed[key.len..]);
-                try config.stream_params.assign(key, val);
+                config.stream_params.assign(key, val);
             },
             .cameras => {
                 if (trimmed.len == 0) { // end of single camera config
@@ -210,13 +194,13 @@ pub fn parse(allocator: std.mem.Allocator, filepath: []const u8) ParseError!Conf
                     continue;
                 }
 
-                var key = try read_until(trimmed, ':');
+                var key = read_until(trimmed, ':');
                 const val = trim(trimmed[key.len..]);
 
                 const leading_hash = hash(key[0..2]);
                 if (leading_hash == SectionHashes.new_camera) key = key[2..];
 
-                try config.camera_configs[cameras_parsed].assign(key, val);
+                config.camera_configs[cameras_parsed].assign(key, val);
             },
         }
     }
