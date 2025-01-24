@@ -1,5 +1,6 @@
 const std = @import("std");
 const config_parser = @import("config_parser.zig");
+const frame = @import("frame.zig");
 const log = @import("log.zig");
 const ring_alloc = @import("ring_allocator.zig");
 const sched = @import("sched.zig");
@@ -14,9 +15,18 @@ const SHM_NAME: [*:0]const u8 = "/mocap-toolkit_shm";
 // many-item ptr for matching type of std.posix.mmap's first arg
 const SHM_ADDR: [*]align(std.mem.page_size) u8 = @ptrFromInt(0x7f0000000000);
 
+// frame resolution is compiled into the executable because
+// it allows for the SharedMemBuilder and RingAllocator to
+// know exact offsets of frames at comptime, which in turn
+// enables cleaner declaration of memory layout
+const frame_width: u64 = 1280;
+const frame_height: u64 = 720;
+const yuv_size: u64 = frame_width * frame_height * 3 / 2;
+
+const Frame = frame.Frame(yuv_size);
+const RingAllocator = ring_alloc.RingAllocator(Frame);
 const SharedMemBuilder = shared_mem_builder.SharedMemBuilder;
-const RingAllocator = ring_alloc.RingAllocator(i32);
-const SPSCQueue = spscq.Queue(*i32);
+const SPSCQueue = spscq.Queue(*Frame);
 
 pub fn main() !void {
     try log.setup(LOG_PATH);
@@ -25,44 +35,39 @@ pub fn main() !void {
     try sched.pin_to_core(0);
     try sched.set_sched_priority(99);
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    //var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    //defer arena.deinit();
+    //const allocator = arena.allocator();
 
-    const config = try config_parser.parse(allocator, CAM_CONFIG_PATH);
-
-    std.debug.print("frame_width: {}\nframe_height: {}\nfps: {}\n\n", .{ config.stream_params.frame_width, config.stream_params.frame_height, config.stream_params.fps });
-
-    for (config.camera_configs) |camera_config| {
-        std.debug.print("name: {s}\nid: {}\neth_ip: {s}\nwifi_ip: {s}\ntcp_port: {}\nudp_port: {}\n\n", .{
-            camera_config.name,
-            camera_config.id,
-            camera_config.eth_ip,
-            camera_config.wifi_ip,
-            camera_config.tcp_port,
-            camera_config.udp_port,
-        });
-    }
+    //const config = try config_parser.parse(allocator, CAM_CONFIG_PATH);
 
     var shm_builder = SharedMemBuilder.init();
     defer shm_builder.deinit();
 
-    const int_array_offset = shm_builder.reserve(i32, 10);
+    const num_frames: u64 = 12;
+    const num_queue_slots: u64 = num_frames - 2;
+
+    const frames_offset = shm_builder.reserve(Frame, num_frames);
+    const queue_slots_offset = shm_builder.reserve(*Frame, num_queue_slots);
+    const queue_offset = shm_builder.reserve(SPSCQueue, 1);
 
     try shm_builder.allocate(SHM_NAME, SHM_ADDR);
 
-    const int_slice = shm_builder.get_slice(i32, int_array_offset, 10);
+    const frames_slice = shm_builder.get_slice(Frame, frames_offset, num_frames);
+    const queue_slots = shm_builder.get_slice(*Frame, queue_slots_offset, num_queue_slots);
+    var queue = shm_builder.get_slice(SPSCQueue, queue_offset, 1)[0];
 
-    var ring_allocator = RingAllocator.init(int_slice);
-    const slot = ring_allocator.next();
-    slot.* = 1;
+    queue.init(queue_slots);
+    var ring_allocator = RingAllocator.init(frames_slice);
 
-    const queue_buffer = try allocator.alloc(*i32, 10);
-    var queue = SPSCQueue.init(queue_buffer);
+    // temporary single threaded/single process test
+    var count: i32 = 0;
+    while (count < 100) : (count += 1) {
+        const slot = ring_allocator.next();
+        slot.timestamp = @intCast(count);
 
-    _ = queue.enqueue(slot);
-    const val = queue.dequeue().?.*;
-    std.debug.print("Val {}", .{val});
-
-    try log.write(.INFO, "Hello world\n", @src());
+        _ = queue.enqueue(slot);
+        const val = queue.dequeue().?;
+        std.debug.print("Val {}\n", .{val.timestamp});
+    }
 }

@@ -16,19 +16,18 @@ pub fn Queue(comptime T: type) type {
         buffer2: [*]T,
         padding2: [cache_line_size]u8 align(cache_line_size),
 
-        pub fn init(buffer: []T) Self {
-            return .{
-                .head = 0,
-                .cached_tail = 0,
-                .capacity1 = buffer.len,
-                .buffer1 = buffer.ptr,
-                .padding1 = undefined,
-                .tail = 0,
-                .cached_head = 0,
-                .capacity2 = buffer.len,
-                .buffer2 = buffer.ptr,
-                .padding2 = undefined,
-            };
+        pub fn init(self: *Self, buffer: []T) void {
+            self.head = 0;
+            self.cached_tail = 0;
+            self.capacity1 = buffer.len;
+            self.buffer1 = buffer.ptr;
+            self.padding1 = undefined;
+
+            self.tail = 0;
+            self.cached_head = 0;
+            self.capacity2 = buffer.len;
+            self.buffer2 = buffer.ptr;
+            self.padding2 = undefined;
         }
 
         /// Enqueue operation strictly reads from the top half of the struct
