@@ -12,6 +12,8 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.linkLibC();
+    exe.linkSystemLibrary("avcodec");
+    exe.linkSystemLibrary("avutil");
 
     b.installArtifact(exe);
 
