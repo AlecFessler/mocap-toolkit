@@ -5,9 +5,11 @@ const std = @import("std");
 const hash = std.hash.Fnv1a_64.hash;
 
 /// Copy from src to dest with 0 padding at the end of dest
-fn cpy_w_padding(dest: []u8, src: []const u8) void {
+/// and return the amount of 0 padding added
+fn cpy_w_padding(dest: []u8, src: []const u8) u32 {
     @memset(dest, 0);
     @memcpy(dest[0..src.len], src);
+    return dest.len - src.len;
 }
 
 const StreamParams = struct {
@@ -39,7 +41,13 @@ const StreamParams = struct {
     }
 };
 
-const CameraConfig = struct {
+/// The len of the eth and wifi ips are stored individually
+/// because we need a matching array length to so all camera
+/// configs have the same type definition, but the std lib
+/// ipv4 parsing function will fail if it's passed the 0 padding
+/// at the end of the arrays. So, we store the length, and then at
+/// runtime the ipv4 parser caller can use the length for a slice
+pub const CameraConfig = struct {
     const Self = @This();
     const KeyHashes = struct {
         const name = hash("name:");
@@ -53,7 +61,9 @@ const CameraConfig = struct {
     name: [8]u8,
     id: u32,
     eth_ip: [16]u8,
+    eth_ip_len: u32,
     wifi_ip: [16]u8,
+    wifi_ip_len: u32,
     tcp_port: u16,
     udp_port: u16,
 
@@ -61,16 +71,18 @@ const CameraConfig = struct {
         const hashed = hash(key);
         switch (hashed) {
             KeyHashes.name => {
-                cpy_w_padding(&self.name, val);
+                _ = cpy_w_padding(&self.name, val);
             },
             KeyHashes.id => {
                 self.id = std.fmt.parseInt(u8, val, 10) catch @compileError("Invalid id in camera config");
             },
             KeyHashes.eth_ip => {
-                cpy_w_padding(&self.eth_ip, val);
+                const padding_len = cpy_w_padding(&self.eth_ip, val);
+                self.eth_ip_len = self.eth_ip.len - padding_len;
             },
             KeyHashes.wifi_ip => {
-                cpy_w_padding(&self.wifi_ip, val);
+                const padding_len = cpy_w_padding(&self.wifi_ip, val);
+                self.wifi_ip_len = self.wifi_ip.len - padding_len;
             },
             KeyHashes.tcp_port => {
                 self.tcp_port = std.fmt.parseInt(u16, val, 10) catch @compileError("Invalid tcp port in camera config");

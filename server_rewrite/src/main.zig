@@ -2,6 +2,7 @@ const std = @import("std");
 const config_parser = @import("config_parser.zig");
 const frame = @import("frame.zig");
 const log = @import("log.zig");
+const net = @import("net.zig");
 const ring_alloc = @import("ring_allocator.zig");
 const sched = @import("sched.zig");
 const shared_mem_builder = @import("shared_mem_builder.zig");
@@ -11,6 +12,7 @@ const config_bytes = @embedFile("cams.yaml");
 const ConfigType = config_parser.Config(config_bytes);
 const config = config_parser.parse(ConfigType, config_bytes);
 
+const camera_count = config.camera_configs.len;
 const yuv_size: u64 = config.stream_params.frame_width * config.stream_params.frame_height * 3 / 2;
 const Frame = frame.Frame(yuv_size);
 const SPSCQueue = spscq.Queue(*Frame);
@@ -36,6 +38,13 @@ pub fn main() !void {
 
     try sched.pin_to_core(0);
     try sched.set_sched_priority(99);
+
+    var stream_control = try net.StreamControl.init(&config.camera_configs);
+    defer stream_control.deinit();
+
+    const start_timestamp = try net.StreamControl.start_timestamp();
+    try stream_control.broadcast(&start_timestamp);
+    try stream_control.broadcast("STOP");
 
     var shared_mem = try SharedMemBuilder.init(shm_name, shm_addr, shm_size);
     defer shared_mem.deinit();
