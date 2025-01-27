@@ -13,8 +13,8 @@ pub fn Frame(comptime size: u64) type {
     };
 }
 
-pub fn Frameset(comptime size: u64) type {
+pub fn Frameset(comptime size: u64, comptime FrameType: type) type {
     return struct {
-        buffer: [size]*Frame,
+        buffer: [size]?*FrameType,
     };
 }

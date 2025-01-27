@@ -12,7 +12,7 @@ pub fn StreamThread(Queue: type, Allocator: type) type {
         packet_queue: *Queue,
         thread: std.Thread,
 
-        pub fn launch(self: *Self, camera_config: *config_parser.CameraConfig, stop_flag: *bool, packet_allocator: Allocator, packet_queue: *Queue) !void {
+        pub fn launch(self: *Self, camera_config: config_parser.CameraConfig, stop_flag: *bool, packet_allocator: Allocator, packet_queue: *Queue) !void {
             self.stream_receiver = try net.StreamReceiver.init(camera_config);
             self.stop_flag = stop_flag;
             self.packet_allocator = packet_allocator;
@@ -31,15 +31,15 @@ pub fn StreamThread(Queue: type, Allocator: type) type {
             while (!@atomicLoad(bool, self.stop_flag, .acquire)) {
                 var packet = self.packet_allocator.next();
 
-                const timestamp_buffer: [8]u8 = undefined;
-                self.stream_receiver.read(timestamp_buffer) catch break;
-                if (std.mem.eql(timestamp_buffer, "EOSTREAM")) break;
+                var timestamp_buffer: [8]u8 = undefined;
+                self.stream_receiver.read(&timestamp_buffer) catch break;
+                if (std.mem.eql(u8, &timestamp_buffer, "EOSTREAM")) break;
                 packet.timestamp = @bitCast(timestamp_buffer);
 
-                const size_buffer: [4]u8 = undefined;
-                self.stream_receiver.read(size_buffer) catch break;
+                var size_buffer: [4]u8 = undefined;
+                self.stream_receiver.read(&size_buffer) catch break;
                 const packet_size: u32 = @bitCast(size_buffer);
-                std.testing.expect(packet_size <= packet.buffer.len);
+                std.testing.expect(packet_size <= packet.buffer.len) catch break;
 
                 self.stream_receiver.read(packet.buffer[0..packet_size]) catch break;
 

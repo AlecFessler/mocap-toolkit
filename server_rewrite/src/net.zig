@@ -50,7 +50,7 @@ pub const StreamReceiver = struct {
     client: std.posix.socket_t,
     socket: std.posix.socket_t,
 
-    pub fn init(camera_config: *config_parser.CameraConfig) !Self {
+    pub fn init(camera_config: config_parser.CameraConfig) !Self {
         const socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.STREAM, 0);
 
         const enable = 1;

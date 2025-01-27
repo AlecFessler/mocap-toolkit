@@ -18,8 +18,8 @@ pub const Decoder = struct {
         const gpu_context = try libav.create_hwdevice_context(.CUDA, null, null, 0);
 
         context.hw_device_ctx = gpu_context;
-        context.width = frame_width;
-        context.height = frame_height;
+        context.width = @intCast(frame_width);
+        context.height = @intCast(frame_height);
         context.pix_fmt = .CUDA;
         context.pkt_timebase = libav.Rational{ .num = 1, .den = 90_000 };
 
@@ -29,9 +29,9 @@ pub const Decoder = struct {
         const gpu_frame = try libav.Frame.alloc();
         const packet = try libav.Packet.alloc();
 
-        cpu_frame.format = .NV12;
-        cpu_frame.width = frame_width;
-        cpu_frame.height = frame_height;
+        cpu_frame.format.pixel = .NV12;
+        cpu_frame.width = @intCast(frame_width);
+        cpu_frame.height = @intCast(frame_height);
 
         return .{
             .context = context,

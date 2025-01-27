@@ -27,13 +27,13 @@ const yuv_size: u64 = config.stream_params.frame_width * config.stream_params.fr
 const Frame = data_containers.Frame(yuv_size);
 const FrameQueue = spscq.Queue(*Frame);
 const FrameRingAllocator = ring_alloc.RingAllocator(Frame);
-const DecoderThread = decoder_thread.DecoderThread(PacketQueue, FrameQueue, FrameRingAllocator);
+const DecoderThread = decoder_thread.DecoderThread(Packet, PacketQueue, FrameQueue, FrameRingAllocator);
 // per decoder thread
 const num_frames = 11;
 const num_frame_queue_slots = 4;
 
 const camera_count = config.camera_configs.len;
-const Frameset = data_containers.Frameset(camera_count);
+const Frameset = data_containers.Frameset(camera_count, Frame);
 const FramesetQueue = spscq.Queue(*Frameset);
 const FramesetRingAllocator = ring_alloc.RingAllocator(Frameset);
 // only main thread
@@ -68,7 +68,8 @@ pub fn main() !void {
     const framesets = shared_mem.get_slice(Frameset, framesets_reservation.offset, num_framesets);
     const frameset_queue_slots = shared_mem.get_slice(*Frameset, frameset_queue_slots_reservation.offset, num_frameset_queue_slots);
 
-    var frameset_queue = shared_mem.get_item(FramesetQueue, frameset_queue_reservation.offset).init(frameset_queue_slots);
+    var frameset_queue = shared_mem.get_item(FramesetQueue, frameset_queue_reservation.offset);
+    frameset_queue.init(frameset_queue_slots);
     var frameset_allocator = FramesetRingAllocator.init(framesets);
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -76,21 +77,20 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     const packets = try allocator.alloc(Packet, num_packets * camera_count);
-    const packet_queue_slots: [num_packet_queue_slots * camera_count]*Packet = undefined;
+    var packet_queue_slots: [num_packet_queue_slots * camera_count]*Packet = undefined;
     var packet_queues: [camera_count]PacketQueue = undefined;
 
-    const frame_queue_slots: [num_frame_queue_slots * camera_count]*Frame = undefined;
+    var frame_queue_slots: [num_frame_queue_slots * camera_count]*Frame = undefined;
     var frame_queues: [camera_count]FrameQueue = undefined;
 
     var stream_threads: [camera_count]StreamThread = undefined;
     var decoder_threads: [camera_count]DecoderThread = undefined;
 
-    for (config.camera_configs, 0..) |*camera_config, i| {
+    for (config.camera_configs, 0..) |camera_config, i| {
         // partition packet queue slots and packet queues
         const packet_slots_start = i * num_packet_queue_slots;
         const packet_slots_end = packet_slots_start + num_packet_queue_slots;
-        const packet_slots = packet_queue_slots[packet_slots_start..packet_slots_end];
-        packet_queues[i].init(packet_slots);
+        packet_queues[i].init(packet_queue_slots[packet_slots_start..packet_slots_end]);
 
         // partition packets
         const packets_start = i * num_packets;
@@ -100,8 +100,7 @@ pub fn main() !void {
         // partition frame queue slots and frame queues
         const frame_slots_start = i * num_frame_queue_slots;
         const frame_slots_end = frame_slots_start + num_frame_queue_slots;
-        const frame_slots = frame_queue_slots[frame_slots_start..frame_slots_end];
-        frame_queues[i].init(frame_slots);
+        frame_queues[i].init(frame_queue_slots[frame_slots_start..frame_slots_end]);
 
         // partition frames
         const frames_start = i * num_frames;
@@ -110,7 +109,7 @@ pub fn main() !void {
 
         // launch thread pair
         try stream_threads[i].launch(camera_config, &stop_flag, packet_allocator, &packet_queues[i]);
-        try decoder_threads[i].launch(camera_config, &stop_flag, &packet_queues[i], frame_allocator, &frame_queues[i]);
+        try decoder_threads[i].launch(config.stream_params, &stop_flag, &packet_queues[i], frame_allocator, &frame_queues[i]);
     }
 
     var stream_control = try net.StreamControl.init(&config.camera_configs);
@@ -119,9 +118,46 @@ pub fn main() !void {
     const start_timestamp = try net.StreamControl.start_timestamp();
     try stream_control.broadcast(&start_timestamp);
 
-    while (!@atomicLoad(bool, &stop_flag, .acquire)) {
-        var frameset = frameset_allocator.next();
-        // port the rest of the logic from C over
+    var frameset = frameset_allocator.next();
+    for (0..camera_count) |i| {
+        frameset.buffer[i] = null;
+    }
+
+    outer: while (!@atomicLoad(bool, &stop_flag, .acquire)) {
+        for (0..camera_count) |i| {
+            if (frameset.buffer[i] != null) continue;
+            frameset.buffer[i] = frame_queues[i].dequeue();
+            if (frameset.buffer[i] == null) {
+                std.Thread.sleep(100_000); // 0.1ms
+                continue :outer;
+            }
+        }
+
+        var max_timestamp: u64 = 0;
+        for (0..camera_count) |i| {
+            max_timestamp = @max(max_timestamp, frameset.buffer[i].?.timestamp);
+        }
+
+        std.debug.print("frameset timestamp {}", .{max_timestamp});
+
+        var all_match = true;
+        for (0..camera_count) |i| {
+            if (frameset.buffer[i].?.timestamp != max_timestamp) {
+                all_match = false;
+                frameset.buffer[i] = null;
+            }
+        }
+
+        if (!all_match) continue;
+
+        while (!frameset_queue.enqueue(frameset)) {
+            std.Thread.sleep(100_000); // 0.1ms
+        }
+
+        frameset = frameset_allocator.next();
+        for (0..camera_count) |i| {
+            frameset.buffer[i] = null;
+        }
     }
 
     try stream_control.broadcast("STOP");

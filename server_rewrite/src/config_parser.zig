@@ -12,7 +12,7 @@ fn cpy_w_padding(dest: []u8, src: []const u8) u32 {
     return dest.len - src.len;
 }
 
-const StreamParams = struct {
+pub const StreamParams = struct {
     const Self = @This();
     const KeyHashes = struct {
         const frame_width = hash("frame_width:");

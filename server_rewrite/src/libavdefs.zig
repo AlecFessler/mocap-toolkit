@@ -1853,7 +1853,7 @@ pub fn create_hwdevice_context(
     /// Currently unused, should be 0
     flags: c_int,
 ) Error!*BufferRef {
-    var device_ctx: ?*BufferRef = null;
+    var device_ctx: *BufferRef = undefined;
     // Call the underlying C function and handle errors using the existing wrap function
     _ = try wrap(av_hwdevice_ctx_create(
         &device_ctx,
@@ -1863,7 +1863,7 @@ pub fn create_hwdevice_context(
         flags,
     ));
     // Since we handled the error cases, we know device_ctx is non-null
-    return device_ctx.?;
+    return device_ctx;
 }
 
 pub fn hwframe_transfer_data(dst: *Frame, src: *const Frame, flags: c_int) Error!void {
