@@ -135,13 +135,7 @@ void* stream_mgr_fn(void* ptr) {
         continue;
       }
 
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Received packet header from %s",
-        ctx->conf->name
-      );
-      log(BENCHMARK, logstr);
+      log(BENCHMARK, "Received packet header");
 
       ret = enqueue(&timestamp_queue, (void*)&timestamp);
       if (ret)
@@ -202,21 +196,8 @@ void* stream_mgr_fn(void* ptr) {
         goto err_cleanup;
       }
 
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Received full packet from %s",
-        ctx->conf->name
-      );
-      log(BENCHMARK, logstr);
-
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Started decoding packet from %s",
-        ctx->conf->name
-      );
-      log(BENCHMARK, logstr);
+      log(BENCHMARK, "Received full packet");
+      log(BENCHMARK, "Started decoding packet");
 
       ret = decode_packet(
         &viddec,
@@ -226,13 +207,7 @@ void* stream_mgr_fn(void* ptr) {
       if (ret)
         goto err_cleanup;
 
-      snprintf(
-        logstr,
-        sizeof(logstr),
-        "Finished decoding packet from %s",
-        ctx->conf->name
-      );
-      log(BENCHMARK, logstr);
+      log(BENCHMARK, "Finished decoding packet");
     }
 
     ret = recv_frame(
