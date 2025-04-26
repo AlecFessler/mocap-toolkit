@@ -54,9 +54,7 @@ int init_decoder(
     goto cleanup;
   }
 
-  dec->ctx->width = width;
-  dec->ctx->height = height;
-  dec->ctx->pix_fmt = AV_PIX_FMT_CUDA;
+  dec->ctx->pix_fmt = AV_PIX_FMT_NONE;
   dec->ctx->pkt_timebase = (AVRational){1, 90000}; // 90 KHz
   dec->ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 

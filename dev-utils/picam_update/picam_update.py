@@ -9,7 +9,7 @@ from fabric import Connection, Config
 USERNAME = "alecfessler"
 
 CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml"
-CAM_SOFTWARE_PATH = "~/Documents/mocap-toolkit/picam"
+CAM_SOFTWARE_PATH = os.path.expanduser("~/mocap-toolkit/picam")
 
 SERVICE_PATH = "/etc/systemd/system/"
 SERVICE_NAME = "picam.service"

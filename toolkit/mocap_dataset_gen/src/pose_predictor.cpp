@@ -222,7 +222,7 @@ static torch::Tensor refine_keypoints(
     torch::Tensor eps_tensor = torch::eye(2, keypoints.device()).mul(std::numeric_limits<float>::epsilon());
     hessian += eps_tensor.unsqueeze(0).expand({num_keypoints, -1, -1});
 
-    torch::Tensor hessian_inv = torch::linalg::inv(hessian);
+    torch::Tensor hessian_inv = at::inverse(hessian);
     torch::Tensor adjustment = torch::matmul(hessian_inv, derivative).squeeze(-1);
 
     refined_keypoints[n].sub_(adjustment);

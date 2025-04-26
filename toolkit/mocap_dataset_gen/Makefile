@@ -1,8 +1,8 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g -O3 -D_GLIBCXX_USE_CXX11_ABI=1
 
-LIBTORCH_PATH = /usr/local/libtorch
-CUDA_PATH = /usr/local/cuda-12.3
+LIBTORCH_PATH = /usr/local
+CUDA_PATH = /opt/cuda
 
 COMMON_DIR = ../common
 COMMON_SRC_DIR = $(COMMON_DIR)/src
@@ -14,20 +14,17 @@ BIN_DIR = bin
 COMMON_OBJ_DIR = $(OBJ_DIR)/common
 DATASET_GEN_OBJ_DIR = $(OBJ_DIR)/calib
 
-PKG_OPENCV = $(shell pkg-config --cflags opencv4)
-PKG_LIBS_OPENCV = $(shell pkg-config --libs opencv4)
-
 INCLUDES = -I$(COMMON_INC_DIR) \
-          -I$(DATASET_GEN_INC_DIR) \
-          -I$(LIBTORCH_PATH)/include \
-          -I$(LIBTORCH_PATH)/include/torch/csrc/api/include \
-          -I$(CUDA_PATH)/include \
-          $(PKG_OPENCV)
+           -I$(DATASET_GEN_INC_DIR) \
+           -I$(LIBTORCH_PATH)/include \
+           -I$(LIBTORCH_PATH)/include/torch/csrc/api/include \
+           -I$(CUDA_PATH)/include \
+           -I/usr/include/opencv4
 
-LIBS = $(PKG_LIBS_OPENCV) \
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui -lopencv_calib3d \
        -L$(LIBTORCH_PATH)/lib -L$(CUDA_PATH)/lib64 \
        -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda \
-       -lcudart -lcnpy -lz -lyaml -pthread
+       -lcudart -lz -lyaml -pthread
 
 COMMON_SRCS = $(wildcard $(COMMON_SRC_DIR)/*.cpp)
 DATASET_GEN_SRCS = $(wildcard $(DATASET_GEN_SRC_DIR)/*.cpp)
@@ -49,7 +46,6 @@ $(DATASET_GEN_OBJ_DIR)/%.o: $(DATASET_GEN_SRC_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -rf $(OBJ_DIR)
-	rm -rf $(BIN_DIR)
+	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
 .PHONY: all clean
