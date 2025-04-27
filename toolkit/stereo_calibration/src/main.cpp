@@ -181,8 +181,9 @@ int main() {
 
     for (int i = 0; i < cam_count; i++) {
       cv::imshow(cam_confs[i].name, bgr_frames[i]);
-      cv::waitKey(1);
     }
+    cv::waitKey(16);
+    usleep(1000); // give gui a chance to render before performing heavy computation
 
     if (cooldown > 0) {
       if (++cooldown_counter >= cooldown)
