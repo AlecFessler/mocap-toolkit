@@ -6,7 +6,7 @@
 # Add NTP server configuration to sync with PC
 sudo tee /etc/chrony/chrony.conf << 'EOF'
 # Get time from PC with frequent polling
-server 192.168.86.100 iburst minpoll 0 maxpoll 5 prefer
+server 192.168.1.100 iburst minpoll 0 maxpoll 5 prefer
 
 # Allow stepping the clock for large offsets
 makestep 10.0 3
