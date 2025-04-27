@@ -22,7 +22,7 @@ The system is built around a distributed capture network and a centralized proce
 - Multiple Raspberry Pi 5 nodes running custom network clock sync aware video capture software included in the repo
 - PTP-based time synchronization over standard ethernet network hardware, leveraging the Pi 5 ethernet controller's hardware timestamping capabilities
 - Video encoder configured for low-latency streaming
-- Cameras indepenently compute the same deterministic capture schedule based on the server's initial timestamp broadcast
+- Cameras independently compute the same deterministic capture schedule based on the server's initial timestamp broadcast
 - Systemd service for automated camera software management and reliable operation
 
 ### Central Server
@@ -30,7 +30,7 @@ The system is built around a distributed capture network and a centralized proce
 - Receives and manages synchronized video streams from all cameras
 - Hardware accelerated video decoding using Nvidia's NVCUVID
 - Bundles incoming frames based on matching timestamps
-- Custom Wait-free, zero-copy, FIFO IPC protocol using shared memory for downstream tools
+- Custom wait-free, zero-copy, FIFO IPC protocol using shared memory for downstream tools
 
 ### Processing Toolkit
 - **Lens Calibration**: Real-time camera matrix and distortion coefficient computation directly from live video stream
@@ -65,89 +65,75 @@ The system is built around a distributed capture network and a centralized proce
 - libavutil 57.28.100
 
 #### Server
-- Linux distribution of choice (tested on Fedora 41)
-- Nvidia GPU drivers supporting NVCUVID (tested with 565.57.01)
-- CUDA 12.3
+- Linux distribution of choice (tested on Arch Linux)
+- Nvidia GPU drivers supporting NVCUVID (tested with 535.146.03)
+- CUDA 12.8
 - libyaml 0.2.5
 - libavcodec 61.27.101
 - libavutil 59.51.100
 
-**Note**: The FFmpeg install is a little tricky to get right, see details [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#server-2)
+**Note**: The FFmpeg install is a little tricky to get right, see details [here](#server-2).
 
 #### Toolkit
-- Linux distribution of choice (tested on Fedora 41)
-- CUDA 12.3
-- libtorch 2.5.1+cu121
+- Linux distribution of choice (tested on Arch Linux)
+- CUDA 12.8
+- libtorch 2.3.0+cu128
 - opencv 4.10.0
 - libyaml 0.2.5
 
-**Note**: There is no libtorch for cuda 12.3 like we're using, but the version compiled for 12.1 is compatible based on my testing
-
 ### Network Requirements
 - All devices (cameras and server) must be on the same local network
-- All devices (cameras and server) should have an established static IP address
+- Server and cameras must be assigned IPs on the same subnet (e.g., 192.168.1.X/24)
+- Static IP addresses for all devices
 - Sufficient bandwidth for video streaming (gigabit recommended)
-- Cameras should be configured for PTP sync with each other and NTP sync with server
-- Server should be configured to serve NTP time to cameras
+- Cameras configured for PTP sync with each other and NTP sync with server
+- Server configured to serve NTP time to cameras
 
 ## Installation
 
 ### Camera Nodes
 
 #### Network Time Services
-
 ```bash
 sudo apt install chrony
 sudo apt install linuxptp
 ```
 
-**Note**: There is a shell script in the repo that automates setup on the cameras for the network time services after installation, see details in the Configuration section of the Readme
-
 #### Development Tools and Libs
-
 ```bash
 sudo apt install build-essential
 sudo apt install libavcodec-dev libavutil-dev
 sudo apt install libcamera-dev
 ```
 
-**Note**: This step is only necessary if you're building the recording software from source using the provided Makefile
-
 ### Server
-
-**Note**: The installation guide is Fedora-based and assumes a fresh install, some details may differ for your machine
 
 #### Network Time Service
 ```bash
 sudo dnf install chrony
 ```
 
-**Note**: Details on the time service configuration are shown [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#server-3)
-
 #### CUDA
-Install the 12.3 CUDA Toolkit from this link: https://developer.nvidia.com/cuda-12-3-0-download-archive
+Install the CUDA 12.8 Toolkit from this link:  
+https://developer.nvidia.com/cuda-12-8-0-download-archive
 
-#### Building FFmpeg from source
-
+#### FFmpeg (with NVENC/NVDEC support)
 ```bash
 # Install build tools
-sudo dnf install -y build-essential pkg-config git yasm nasm cmake
+sudo dnf install -y build-essential pkgconfig git yasm nasm cmake
 
-# Download the Nvidia Codec SDK
-mkdir ~/ffmpeg_build
-cd ~/ffmpeg_build
-wget https://developer.nvidia.com/video-sdk-12-0-16-7 -O Video_Codec_SDK.zip
-unzip Video_Codec_SDK.zip
-
-# Copy headers to /usr/local/include/ffnvcodec
-sudo cp -r include/ffnvcodec /usr/local/include/
+# Clone NVCodec headers
+git clone https://code.videolan.org/videolan/ffmpeg/nv-codec-headers.git
+cd nv-codec-headers
+make
+sudo make install
 
 # Clone FFmpeg
-cd ~/ffmpeg_build
+cd ..
 git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
 cd ffmpeg
 
-# Configure the build
+# Configure FFmpeg
 ./configure --prefix=/usr/local \
             --enable-nonfree \
             --enable-cuda-nvcc \
@@ -159,14 +145,16 @@ cd ffmpeg
             --disable-static \
             --extra-cflags='-I/usr/local/include -I/usr/local/include/ffnvcodec -I/usr/local/cuda/include -fPIC' \
             --extra-ldflags='-L/usr/local/cuda/lib64 -fPIC' \
-            --nvccflags='-ccbin /usr/local/gcc-12.3.0/bin/g++-12.3'
+            --nvccflags='-ccbin /usr/bin/gcc-13'
 
 # Build and install
 make -j$(nproc)
 sudo make install
 ```
 
-**Note**: I had to use gcc 14 specifically to get FFmpeg to compile
+**Note**: Use GCC 14 for building FFmpeg itself, but GCC 13 specifically for nvccflags when configuring.
+
+**Note for Arch Linux users**: Package names on Arch do not have the `-devel` suffix.
 
 #### LibYaml
 ```bash
@@ -174,26 +162,35 @@ sudo dnf install libyaml-devel
 ```
 
 ### Toolkit
-**Note**: libyaml is a dependency of the toolkit as well as the server, so if you followed along with the installation for the server you'll already have it installed, otherwise see the instructions [here](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#libyaml)
 
 #### LibTorch
-Install LibTorch with Linux, C++/Java, and CUDA 12.1 selected from this link: https://pytorch.org/get-started/locally/
+Download LibTorch (Linux, C++/Java, CUDA 12.8) from:
+https://download.pytorch.org/libtorch/cu128/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcu128.zip
 
-**Note**: There is no LibTorch for cuda 12.3 like we're using, but the version compiled for 12.1 is compatible based on my testing
+Extract and install accordingly.
 
 #### OpenCV
 ```bash
 sudo dnf install opencv opencv-devel
 ```
 
+#### Pose Model
+Download the pose model from Huggingface:
+https://huggingface.co/facebook/sapiens-pose-1b-torchscript
+
+Save the model to:
+`/var/lib/mocap-toolkit/sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2`
+
 ## Configuration
-The system requires configuration files and services to be setup on both the camera nodes and the server. Before proceeding, ensure you have established static IP addresses for all devices in your network, as these will be needed in the configuration files.
+The system requires configuration files and services to be set up on both the camera nodes and the server. Before proceeding, ensure you have established static IP addresses for all devices in your network, as these will be needed in the configuration files.
+
+**Important**: The server and all camera nodes must be assigned IPs on the same subnet (e.g., 192.168.1.X/24). If the server is on 192.168.86.X and the cameras are on 192.168.1.X, they will not be able to communicate correctly.
 
 ### Camera Nodes
 The camera nodes require several components to be configured: the time synchronization services, the recording service, and the camera configuration file.
 
 #### Time Synchronization Setup
-After installing chrony and linuxptp as described in the [Installation section](https://github.com/AlecFessler/mocap-toolkit?tab=readme-ov-file#installation), run the provided setup script:
+After installing chrony and linuxptp as described in the [Installation section](#installation), run the provided setup script:
 
 ```bash
 sudo ./setup_time.sh
@@ -202,8 +199,7 @@ sudo ./setup_time.sh
 This script configures both NTP synchronization with the server and PTP synchronization between the cameras. It creates and enables the necessary systemd services for reliable operation.
 
 #### Recording Service Setup
-Create the framecap service file at
-`/etc/systemd/system/framecap.service`:
+Create the picam service file at `/etc/systemd/system/picam.service`:
 
 ```bash
 [Unit]
@@ -212,7 +208,7 @@ After=network.target
 Wants=network.target
 
 [Service]
-ExecStart=/usr/local/bin/framecap
+ExecStart=/usr/local/bin/picam
 WorkingDirectory=/usr/local/bin
 Restart=always
 RestartSec=1
@@ -227,8 +223,8 @@ WantedBy=multi-user.target
 After creating the service file, enable and start it:
 
 ```bash
-sudo systemctl enable framecap
-sudo systemctl start framecap
+sudo systemctl enable picam
+sudo systemctl start picam
 ```
 
 #### Camera Configuration
@@ -246,9 +242,9 @@ Create the camera configuration file at `/etc/picam/cam_config.txt`:
 FRAME_WIDTH=1280
 FRAME_HEIGHT=720
 FPS=30
-SERVER_IP=192.168.86.100  # Replace with your server's static IP
-TCP_PORT=12347            # Must match port in server config
-UDP_PORT=22347            # Must match port in server config
+SERVER_IP=192.168.1.100  # Replace with your server's static IP
+TCP_PORT=12345            # Must match port in server config
+UDP_PORT=22345            # Must match port in server config
 ```
 
 **Note**: Changing the resolution and fps from 720p30 is not recommended, but should work within some reasonable range. You need to change this in the server config as well if doing so.
@@ -260,7 +256,7 @@ Add the following line to `/etc/chrony.conf` to allow NTP client access from cam
 
 ```bash
 # Allow NTP client access from local network
-allow 192.168.86.0/24  # Adjust subnet to match your network
+allow 192.168.1.0/24  # Adjust subnet to match your network
 ```
 
 Restart the chrony service to apply changes:
@@ -289,11 +285,10 @@ stream_params:
 cameras:
   - name: rpicam01          # Must follow this naming convention (rpicamXX)
     id: 0                   # Must increment by 1 for each camera
-    eth_ip: 192.168.1.102   # Camera's ethernet IP
-    wifi_ip: 192.168.86.79  # Camera's wifi IP (if used, otherwise put a placeholder IP)
+    eth_ip: 192.168.1.101   # Camera's ethernet IP
+    wifi_ip: 192.168.86.106 # Camera's wifi IP (if used, otherwise put a placeholder IP)
     tcp_port: 12345         # Must be unique
     udp_port: 22345         # Must be unique
-  # Add additional cameras as needed
 ```
 
 ## Usage
