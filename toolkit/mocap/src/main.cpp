@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <cuda_runtime.h>
 #include <errno.h>
 #include <opencv2/opencv.hpp>
 #include <spsc_queue.hpp>
@@ -17,10 +18,10 @@
 #include "pose_predictor.hpp"
 #include "stream_ctl.h"
 
-constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/dataset_gen.log";
+constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/mocap.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 constexpr const char* CALIBRATION_PARAMS_PATH = "/etc/mocap-toolkit/";
-constexpr const char* MODEL_PATH = "/var/lib/mocap-toolkit/sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2";
+constexpr const char* MODEL_PATH = "/var/lib/mocap-toolkit/sapiens_0.3b_goliath_best_goliath_AP_573_torchscript.pt2";
 
 constexpr uint32_t CORES_PER_CCD = 8;
 
@@ -119,8 +120,6 @@ int main() {
   struct stream_ctx stream_ctx;
   ret = start_streams(
     stream_ctx,
-    stream_conf.frame_width,
-    stream_conf.frame_height,
     cam_count,
     nullptr
   );
@@ -130,13 +129,54 @@ int main() {
     return ret;
   }
 
+  uint32_t frame_pitch = ((stream_conf.frame_width + 511) / 512) * 512;
+  uint64_t frame_size = stream_conf.frame_width * stream_conf.frame_height * 3 / 2;
+  uint8_t* host_frames = static_cast<uint8_t*>(malloc(frame_size * cam_count));
+  if (host_frames == nullptr) {
+    cleanup_streams(stream_ctx);
+    cleanup_logging();
+    return -ENOMEM;
+  }
+
   while (!stop_flag) {
-    struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
-      spsc_dequeue(stream_ctx.filled_frameset_q)
+    void* dev_ptrs[cam_count];
+    cudaIpcMemHandle_t* ipc_handles = static_cast<cudaIpcMemHandle_t*>(
+      spsc_dequeue(stream_ctx.ipc_handles_cq)
     );
-    if (frameset == nullptr) {
+    if (ipc_handles == nullptr) {
       usleep(100); // 0.1ms
       continue;
+    }
+
+    for (int i = 0; i < cam_count; i++) {
+      cudaError_t cudaErr = cudaIpcOpenMemHandle(&dev_ptrs[i], ipc_handles[i], cudaIpcMemLazyEnablePeerAccess);
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaIpcOpenMemHandle failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log_write(ERROR, logstr);
+      }
+      cudaErr = cudaMemcpy2D(
+        host_frames + i * frame_size,
+        stream_conf.frame_width,
+        dev_ptrs[i],
+        frame_pitch,
+        stream_conf.frame_width,
+        stream_conf.frame_height * 3 / 2,
+        cudaMemcpyDeviceToHost
+      );
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaMemcpy failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log_write(ERROR, logstr);
+      }
     }
 
     for (int i = 0; i < cam_count; i++) {
@@ -144,7 +184,7 @@ int main() {
         stream_conf.frame_height * 3/2,
         stream_conf.frame_width,
         CV_8UC1,
-        frameset[i]->frame_buf
+        host_frames + i * frame_size
       );
 
       cv::Mat unprocessed_bgr;
@@ -153,11 +193,25 @@ int main() {
         unprocessed_bgr,
         cv::COLOR_YUV2BGR_NV12
       );
-      cv::Mat processed_bgr = wide_to_3_4_ar(unprocessed_bgr);
-      bgr_frames[i] = processed_bgr;
+      bgr_frames[i] = wide_to_3_4_ar(unprocessed_bgr);
     }
 
-    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+    for (int i = 0; i < cam_count; i++) {
+      cudaError_t cudaErr = cudaIpcCloseMemHandle(dev_ptrs[i]);
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaIpcCloseMemHandle failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log_write(ERROR, logstr);
+      }
+    }
+    for (int i = 0; i < cam_count + 1; i++) {
+      stream_ctx.counters[i].fetch_sub(1, std::memory_order_relaxed);
+    }
+
     predictor.predict(bgr_frames, keypoints, confidence_scores);
 
     for (int i = 0; i < cam_count; i++) {
@@ -171,8 +225,8 @@ int main() {
         cv::circle(bgr_frames[i], cv::Point(x, y), 3, cv::Scalar(0, 0, 225), -1);
       }
       cv::imshow(cam_confs[i].name, bgr_frames[i]);
-      cv::waitKey(1);
     }
+    cv::waitKey(1);
   }
 
   cleanup_streams(stream_ctx);
