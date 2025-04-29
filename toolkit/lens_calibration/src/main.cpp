@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
         snprintf(
           logstr,
           sizeof(logstr),
-          "cudaMemcpy failed: %s",
+          "cudaIpcCloseMemHandle failed: %s",
           cudaGetErrorString(cudaErr)
         );
         log_write(ERROR, logstr);
