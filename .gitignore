@@ -1,6 +1,4 @@
-cams.yaml
 **/__pycache__/
 **/bin/
 **/obj/
-**/.zig-cache/
-logs/
+*.o
