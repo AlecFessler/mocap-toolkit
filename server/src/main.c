@@ -23,7 +23,6 @@
 
 #define LOG_PATH "/var/log/mocap-toolkit/server.log"
 #define CAM_CONF_PATH "/etc/mocap-toolkit/cams.yaml"
-
 #define SHM_NAME "/mocap-toolkit_shm"
 #define SHM_ADDR ((void*)0x7f0000000000)
 
@@ -31,6 +30,7 @@
 #define TIMESTAMP_DELAY 1 // seconds
 #define EMPTY_QS_WAIT 10000 // 0.01 ms
 #define DEV_PTRS_PER_THREAD 16
+#define IPC_HANDLE_ACQUIRE_RETRY_LIMIT 10
 
 static void shutdown_handler(int signum);
 static void perform_cleanup();
@@ -169,6 +169,7 @@ int main(int argc, char* argv[]) {
     return -errno;
   }
 
+  shm_unlink(SHM_NAME); // delete old shm file if it exists
   int shm_fd = shm_open(
     SHM_NAME,
     O_CREAT | O_RDWR,
@@ -375,7 +376,17 @@ int main(int argc, char* argv[]) {
     log(BENCHMARK, "Received full frameset");
 
     // wait for an available ipc_handles subarray
+    uint32_t retries = 0;
     while (atomic_load_explicit(&counters[cam_count], memory_order_relaxed) >= DEV_PTRS_PER_THREAD) {
+      if (retries++ >= IPC_HANDLE_ACQUIRE_RETRY_LIMIT) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "Main thread ran out of retries for acquiring an IPC handle subarray"
+        );
+        perform_cleanup();
+        return -EAGAIN;
+      }
       nanosleep(&ts, NULL);
     }
     atomic_fetch_add(&counters[cam_count], 1);

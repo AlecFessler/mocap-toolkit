@@ -19,6 +19,7 @@
 
 #define TS_Q_INIT_SIZE 8
 #define NO_DEV_PTRS_WAIT 10000 // 0.01 ms
+#define DEV_PTR_ACQUIRE_RETRY_LIMIT 10
 
 static volatile sig_atomic_t running = 1;
 
@@ -59,8 +60,8 @@ void* stream_mgr_fn(void* ptr) {
     snprintf(
       logstr,
       sizeof(logstr),
-      "Error pinning thread %d to core %d, err: %s",
-      gettid(),
+      "Error pinning thread for cam %hhu to core %d, err: %s",
+      ctx->conf->id,
       ctx->core,
       strerror(errno)
     );
@@ -203,7 +204,17 @@ void* stream_mgr_fn(void* ptr) {
         .tv_sec = 0,
         .tv_nsec = NO_DEV_PTRS_WAIT
       };
+      uint32_t retries = 0;
       while (atomic_load_explicit(ctx->dev_ptrs_used, memory_order_relaxed) >= ctx->dev_ptrs_total) {
+        if (retries++ >= DEV_PTR_ACQUIRE_RETRY_LIMIT) {
+          snprintf(
+            logstr,
+            sizeof(logstr),
+            "Stream manager thread for cam %hhu ran out of dev ptr acquisition retries",
+            ctx->conf->id
+          );
+          goto err_cleanup;
+        }
         nanosleep(&ts, NULL);
       }
       atomic_fetch_add(ctx->dev_ptrs_used, 1);
