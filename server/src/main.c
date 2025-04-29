@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <cuda_runtime.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -29,8 +30,7 @@
 #define CORES_PER_CCD 8
 #define TIMESTAMP_DELAY 1 // seconds
 #define EMPTY_QS_WAIT 10000 // 0.01 ms
-#define FRAME_BUFS_PER_THREAD 512
-#define FRAMESET_SLOTS_PER_THREAD 8
+#define DEV_PTRS_PER_THREAD 16
 
 static void shutdown_handler(int signum);
 static void perform_cleanup();
@@ -39,6 +39,7 @@ struct cleanup_ctx {
   void* mmap_buf;
   size_t shm_size;
   int shm_fd;
+  struct ts_dev_ptr* ts_dev_ptrs;
   pthread_t* threads;
   int thread_count;
   bool logging_initialized;
@@ -187,51 +188,33 @@ int main(int argc, char* argv[]) {
 
   #define align_up(offset, align) (((offset) + (align-1)) & ~(align-1))
 
-  // frame buffers
-  const uint64_t frame_bufs_count = cam_count * FRAME_BUFS_PER_THREAD;
-  const uint64_t frame_buf_size = stream_conf.frame_width * stream_conf.frame_height * 3 / 2;
-  size_t shm_size = frame_buf_size * frame_bufs_count;
+  size_t shm_size = 0;
 
-  // timestamped structs with frame buffer ptrs
-  shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf));
-  size_t ts_frame_bufs_offset = shm_size;
-  shm_size += sizeof(struct ts_frame_buf) * frame_bufs_count;
-
-  // filled frameset producer queue
+  // ipc handle producer queue
   shm_size = align_up(shm_size, _Alignof(struct producer_q));
-  size_t filled_frameset_producer_q_offset = shm_size;
+  const size_t producer_q_offset = shm_size;
   shm_size += sizeof(struct producer_q);
 
-  // filled frameset consumer queue
+  // ipc handle consumer queue
   shm_size = align_up(shm_size, _Alignof(struct consumer_q));
-  size_t filled_frameset_consumer_q_offset = shm_size;
+  const size_t consumer_q_offset = shm_size;
   shm_size += sizeof(struct consumer_q);
 
-  // empty frameset producer queue
-  shm_size = align_up(shm_size, _Alignof(struct producer_q));
-  size_t empty_frameset_producer_q_offset = shm_size;
-  shm_size += sizeof(struct producer_q);
+  // ipc handle queue buffer
+  shm_size = align_up(shm_size, _Alignof(void*));
+  const size_t ipc_handles_q_buf_offset = shm_size;
+  shm_size += sizeof(void*) * DEV_PTRS_PER_THREAD;
 
-  // empty frameset consumer queue
-  shm_size = align_up(shm_size, _Alignof(struct consumer_q));
-  size_t empty_frameset_consumer_q_offset = shm_size;
-  shm_size += sizeof(struct consumer_q);
+  // atomic counters
+  shm_size = align_up(shm_size, _Alignof(_Atomic uint32_t));
+  const size_t counters_offset = shm_size;
+  shm_size += sizeof(_Atomic uint32_t) * (cam_count + 1);
 
-  // filled frameset queue buffer
-  shm_size = align_up(shm_size, _Alignof(void**));
-  size_t filled_q_bufs_offset = shm_size;
-  shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
-
-  // empty frameset queue buffer
-  shm_size = align_up(shm_size, _Alignof(void**));
-  size_t empty_q_bufs_offset = shm_size;
-  shm_size += (sizeof(void*) * FRAME_BUFS_PER_THREAD);
-
-  // framesets slots
-  size_t num_frameset_slots = FRAMESET_SLOTS_PER_THREAD * cam_count;
-  shm_size = align_up(shm_size, _Alignof(struct ts_frame_buf*));
-  size_t frameset_slots_offset = shm_size;
-  shm_size += sizeof(struct ts_frame_buf*) * num_frameset_slots;
+  // ipc handles
+  size_t num_ipc_handles = cam_count * DEV_PTRS_PER_THREAD;
+  shm_size = align_up(shm_size, _Alignof(cudaIpcMemHandle_t));
+  const size_t ipc_handles_offset = shm_size;
+  shm_size += sizeof(cudaIpcMemHandle_t) * num_ipc_handles;
 
   ret = ftruncate(
     shm_fd,
@@ -269,73 +252,45 @@ int main(int argc, char* argv[]) {
   }
   cleanup.mmap_buf = mmap_buf;
 
-  // assign frame buffers to ts_frame_bufs (this is a permanent assignment)
-  uint8_t* frame_bufs = mmap_buf;
-  struct ts_frame_buf* ts_frame_bufs = (struct ts_frame_buf*)(mmap_buf + ts_frame_bufs_offset);
-  for (uint i = 0; i < frame_bufs_count; i++) {
-    size_t offset = i * frame_buf_size;
-    ts_frame_bufs[i].frame_buf = frame_bufs + offset;
-  }
-
-  struct producer_q* filled_frameset_producer_q = (struct producer_q*)(mmap_buf + filled_frameset_producer_q_offset);
-  struct consumer_q* filled_frameset_consumer_q = (struct consumer_q*)(mmap_buf + filled_frameset_consumer_q_offset);
-  void* filled_frameset_q_bufs = (void**)(mmap_buf + filled_q_bufs_offset);
+  struct producer_q* ipc_handles_pq = (struct producer_q*)(mmap_buf + producer_q_offset);
+  struct consumer_q* ipc_handles_cq = (struct consumer_q*)(mmap_buf + consumer_q_offset);
+  void** ipc_handles_q_buf = (void**)(mmap_buf + ipc_handles_q_buf_offset);
   spsc_queue_init(
-    filled_frameset_producer_q,
-    filled_frameset_consumer_q,
-    filled_frameset_q_bufs,
-    num_frameset_slots
+    ipc_handles_pq,
+    ipc_handles_cq,
+    ipc_handles_q_buf,
+    DEV_PTRS_PER_THREAD
   );
 
-  struct producer_q* empty_frameset_producer_q = (struct producer_q*)(mmap_buf + empty_frameset_producer_q_offset);
-  struct consumer_q* empty_frameset_consumer_q = (struct consumer_q*)(mmap_buf + empty_frameset_consumer_q_offset);
-  void* empty_frameset_q_bufs = (void**)(mmap_buf + empty_q_bufs_offset);
-  spsc_queue_init(
-    empty_frameset_producer_q,
-    empty_frameset_consumer_q,
-    empty_frameset_q_bufs,
-    num_frameset_slots
-  );
+  _Atomic uint32_t* counters = (_Atomic uint32_t*)(mmap_buf + counters_offset);
 
-  struct ts_frame_buf** frameset_slots = (struct ts_frame_buf**)(mmap_buf + frameset_slots_offset);
-  memset(frameset_slots, 0, sizeof(struct ts_frame_buf*) * num_frameset_slots);
-  for (size_t i = 0; i < num_frameset_slots; i++) {
-    struct ts_frame_buf** slot_addr = frameset_slots + (i * cam_count);
-    spsc_enqueue(
-      empty_frameset_producer_q,
-      slot_addr
-    );
-  }
+  uint32_t ipc_handles_idx = 0; // increments by cam_count until it hits num_ipc_handles
+  cudaIpcMemHandle_t* ipc_handles = (cudaIpcMemHandle_t*)(mmap_buf + ipc_handles_offset);
 
-  struct producer_q filled_frame_producer_qs[cam_count];
-  struct consumer_q filled_frame_consumer_qs[cam_count];
+  struct producer_q dev_ptr_pqs[cam_count];
+  struct consumer_q dev_ptr_cqs[cam_count];
+  void* dev_ptr_q_bufs[cam_count * DEV_PTRS_PER_THREAD];
 
-  struct producer_q empty_frame_producer_qs[cam_count];
-  struct consumer_q empty_frame_consumer_qs[cam_count];
-
-  void* q_bufs[frame_bufs_count * 2];
   for (int i = 0; i < cam_count; i++) {
     spsc_queue_init(
-      &filled_frame_producer_qs[i],
-      &filled_frame_consumer_qs[i],
-      &q_bufs[i * 2 * FRAME_BUFS_PER_THREAD],
-      FRAME_BUFS_PER_THREAD
+      &dev_ptr_pqs[i],
+      &dev_ptr_cqs[i],
+      &dev_ptr_q_bufs[i * DEV_PTRS_PER_THREAD],
+      DEV_PTRS_PER_THREAD
     );
-
-    spsc_queue_init(
-      &empty_frame_producer_qs[i],
-      &empty_frame_consumer_qs[i],
-      &q_bufs[(i * 2 + 1) * FRAME_BUFS_PER_THREAD],
-      FRAME_BUFS_PER_THREAD
-    );
-
-    for (int j = 0; j < FRAME_BUFS_PER_THREAD; j++) {
-      spsc_enqueue(
-        &empty_frame_producer_qs[i],
-        &ts_frame_bufs[i * FRAME_BUFS_PER_THREAD + j]
-      );
-    }
   }
+
+  struct ts_dev_ptr* ts_dev_ptrs = malloc(cam_count * DEV_PTRS_PER_THREAD * sizeof(struct ts_dev_ptr));
+  if (ts_dev_ptrs == NULL) {
+    snprintf(
+      logstr,
+      sizeof(logstr),
+      "Failed to allocate memory for timestamped device ptrs"
+    );
+    log(ERROR, logstr);
+    perform_cleanup();
+  }
+  cleanup.ts_dev_ptrs = ts_dev_ptrs;
 
   struct thread_ctx ctxs[cam_count];
   pthread_t threads[cam_count];
@@ -343,8 +298,10 @@ int main(int argc, char* argv[]) {
   for (int i = 0; i < cam_count; i++) {
     ctxs[i].conf = &confs[i];
     ctxs[i].stream_conf = &stream_conf;
-    ctxs[i].filled_bufs = &filled_frame_producer_qs[i];
-    ctxs[i].empty_bufs = &empty_frame_consumer_qs[i];
+    ctxs[i].dev_ptr_queue = &dev_ptr_pqs[i];
+    ctxs[i].dev_ptrs_used = &counters[i];
+    ctxs[i].dev_ptrs_total = DEV_PTRS_PER_THREAD;
+    ctxs[i].dev_ptrs = &ts_dev_ptrs[i * DEV_PTRS_PER_THREAD];
     ctxs[i].core = i % CORES_PER_CCD;
     ctxs[i].main_running = &running;
 
@@ -369,27 +326,23 @@ int main(int argc, char* argv[]) {
   uint64_t timestamp = (ts.tv_sec + TIMESTAMP_DELAY) * 1000000000ULL + ts.tv_nsec;
   broadcast_msg(confs, cam_count, (char*)&timestamp, sizeof(timestamp));
 
-  struct ts_frame_buf* current_frames[cam_count];
-  memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
+  struct ts_dev_ptr* dev_ptrs_set[cam_count];
+  memset(dev_ptrs_set, 0, sizeof(void*) * cam_count);
 
   // reuse ts for our sleep timer to prevent busy waiting
   ts.tv_sec = 0;
   ts.tv_nsec = EMPTY_QS_WAIT;
 
-  uint32_t dequeue_retry_counter = 0;
-
-  uint32_t dequeued_framesets = 0;
-
   while (running) {
     // dequeue a full set of timestamped frame buffers from each worker thread
     bool full_set = true;
     for(int i = 0; i < cam_count; i++) {
-      if (current_frames[i] != NULL)
+      if (dev_ptrs_set[i] != NULL)
         continue; // already set
 
-      current_frames[i] = spsc_dequeue(&filled_frame_consumer_qs[i]);
+      dev_ptrs_set[i] = spsc_dequeue(&dev_ptr_cqs[i]);
 
-      if (current_frames[i] == NULL) {
+      if (dev_ptrs_set[i] == NULL) {
         full_set = false; // queue empty
         continue;
       }
@@ -403,17 +356,16 @@ int main(int argc, char* argv[]) {
     // find the max timestamp
     uint64_t max_timestamp = 0;
     for (int i = 0; i < cam_count; i++) {
-      if (current_frames[i]->timestamp > max_timestamp)
-        max_timestamp = current_frames[i]->timestamp;
+      if (dev_ptrs_set[i]->timestamp > max_timestamp)
+        max_timestamp = dev_ptrs_set[i]->timestamp;
     }
 
-    // check if all have matching timestamps
     bool all_equal = true;
     for (int i = 0; i < cam_count; i++) {
-      if (current_frames[i]->timestamp != max_timestamp) {
+      if (dev_ptrs_set[i]->timestamp != max_timestamp) {
         all_equal = false;
-        spsc_enqueue(&empty_frame_producer_qs[i], current_frames[i]);
-        current_frames[i] = NULL; // get a new timestamped buffer
+        atomic_fetch_sub(&counters[i], 1);
+        dev_ptrs_set[i] = NULL; // get a new timestamped buffer
       }
     }
 
@@ -422,30 +374,30 @@ int main(int argc, char* argv[]) {
 
     log(BENCHMARK, "Received full frameset");
 
-    struct ts_frame_buf** frameset = spsc_dequeue(empty_frameset_consumer_q);
-    while (!frameset) {
-      if (++dequeue_retry_counter >= stream_conf.fps) {
-        log(ERROR, "Main thread ran out of empty frameset dequeue retries");
-        running = 0;
-        break;
-      }
+    // wait for an available ipc_handles subarray
+    while (atomic_load_explicit(&counters[cam_count], memory_order_relaxed) >= DEV_PTRS_PER_THREAD) {
       nanosleep(&ts, NULL);
-      frameset = spsc_dequeue(empty_frameset_consumer_q);
     }
+    atomic_fetch_add(&counters[cam_count], 1);
 
-    dequeue_retry_counter = 0;
-
-    if (dequeued_framesets >= FRAMESET_SLOTS_PER_THREAD) {
-      for (int i = 0; i < cam_count; i++) {
-        spsc_enqueue(&empty_frame_producer_qs[i], frameset[i]);
+    for (int i = 0; i < cam_count; i++) {
+      cudaError_t cudaErr = cudaIpcGetMemHandle(&ipc_handles[ipc_handles_idx + i], dev_ptrs_set[i]->dev_ptr);
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaIpcGetMemHandle failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log(ERROR, logstr);
       }
-    } else {
-      dequeued_framesets++;
     }
-
-    memcpy(frameset, current_frames, sizeof(struct ts_frame_buf*) * cam_count);
-    spsc_enqueue(filled_frameset_producer_q, frameset);
-    memset(current_frames, 0, sizeof(struct ts_frame_buf*) * cam_count);
+    spsc_enqueue(ipc_handles_pq, &ipc_handles[ipc_handles_idx]);
+    ipc_handles_idx += cam_count;
+    if (ipc_handles_idx >= num_ipc_handles) {
+      ipc_handles_idx = 0;
+    }
+    memset(dev_ptrs_set, 0, sizeof(void*) * cam_count);
   }
 
   // stop the camera devices
@@ -471,6 +423,9 @@ static void perform_cleanup() {
       pthread_join(cleanup.threads[i], NULL);
     }
   }
+
+  if (cleanup.ts_dev_ptrs != NULL)
+    free(cleanup.ts_dev_ptrs);
 
   if (cleanup.logging_initialized)
     cleanup_logging();

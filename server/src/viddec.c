@@ -9,7 +9,8 @@
 int init_decoder(
   decoder* dec,
   uint32_t width,
-  uint32_t height
+  uint32_t height,
+  uint32_t num_surfaces
 ) {
   int ret = 0;
   char logstr[128];
@@ -58,10 +59,20 @@ int init_decoder(
   dec->ctx->pkt_timebase = (AVRational){1, 90000}; // 90 KHz
   dec->ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
+  AVDictionary* opts = NULL;
+  char num_surfaces_str[4];
+  snprintf(
+    num_surfaces_str,
+    sizeof(num_surfaces_str),
+    "%d",
+    num_surfaces
+  );
+  av_dict_set(&opts, "surfaces", num_surfaces_str, 0);
+
   ret = avcodec_open2(
     dec->ctx,
     codec,
-    NULL
+    &opts
   );
   if (ret < 0) {
     snprintf(
@@ -73,20 +84,10 @@ int init_decoder(
     goto cleanup;
   }
 
-  dec->frame = av_frame_alloc();
   dec->hw_frame = av_frame_alloc();
   dec->pkt = av_packet_alloc();
-  if (!dec->frame || !dec->hw_frame || !dec->pkt) {
+  if (!dec->hw_frame || !dec->pkt) {
     log(ERROR, "Failed to allocate frame/packet");
-    goto cleanup;
-  }
-
-  dec->frame->format = AV_PIX_FMT_NV12;
-  dec->frame->width = width;
-  dec->frame->height = height;
-  ret = av_frame_get_buffer(dec->frame, 0);
-  if (ret < 0) {
-    log(ERROR, "Failed to allocate frame buffer");
     goto cleanup;
   }
 
@@ -100,9 +101,6 @@ int init_decoder(
 void cleanup_decoder(decoder* dec) {
   if (dec->pkt) {
     av_packet_free(&dec->pkt);
-  }
-  if (dec->frame) {
-    av_frame_free(&dec->frame);
   }
   if (dec->hw_frame) {
     av_frame_free(&dec->hw_frame);
@@ -138,7 +136,7 @@ int decode_packet(decoder* dec, uint8_t* data, uint32_t size) {
   return 0;
 }
 
-int recv_frame(decoder* dec, uint8_t* out_buf) {
+int recv_frame(decoder* dec, void** dev_ptr) {
   int ret = 0;
 
   ret = avcodec_receive_frame(dec->ctx, dec->hw_frame);
@@ -151,17 +149,7 @@ int recv_frame(decoder* dec, uint8_t* out_buf) {
     return ret;
   }
 
-  dec->frame->data[0] = out_buf;
-  dec->frame->data[1] = out_buf + (dec->width * dec->height);
-  dec->frame->linesize[0] = dec->width;
-  dec->frame->linesize[1] = dec->width;
-
-  ret = av_hwframe_transfer_data(dec->frame, dec->hw_frame, 0);
-  if (ret < 0) {
-    log(ERROR, "Error transferring frame from GPU to CPU");
-    return ret;
-  }
-
+  *dev_ptr = dec->hw_frame->data[0];
   return 0;
 }
 

@@ -18,7 +18,7 @@
 #include "viddec.h"
 
 #define TS_Q_INIT_SIZE 8
-#define EMPTY_Q_WAIT 10000 // 0.01 ms
+#define NO_DEV_PTRS_WAIT 10000 // 0.01 ms
 
 static volatile sig_atomic_t running = 1;
 
@@ -39,6 +39,7 @@ void* stream_mgr_fn(void* ptr) {
   int clientfd = -1;
 
   struct thread_ctx* ctx = (struct thread_ctx*)ptr;
+  uint32_t dev_ptrs_idx = 0; // wraps around at ctx->dev_ptrs_total
 
   uint8_t* enc_frame_buf = malloc(ENCODED_FRAME_BUF_SIZE);
   if (!enc_frame_buf) {
@@ -81,7 +82,8 @@ void* stream_mgr_fn(void* ptr) {
   ret = init_decoder(
     &viddec,
     ctx->stream_conf->frame_width,
-    ctx->stream_conf->frame_height
+    ctx->stream_conf->frame_height,
+    ctx->dev_ptrs_total
   );
   if (ret)
     goto err_cleanup;
@@ -98,9 +100,6 @@ void* stream_mgr_fn(void* ptr) {
     goto err_cleanup;
   }
 
-  struct ts_frame_buf* current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
-
-  uint32_t dequeue_retry_counter = 0;
   bool incoming_stream = true;
   while (running && ctx->main_running) {
     if (incoming_stream) {
@@ -199,6 +198,16 @@ void* stream_mgr_fn(void* ptr) {
       log(BENCHMARK, "Received full packet");
       log(BENCHMARK, "Started decoding packet");
 
+      // check for available device ptrs before decoding
+      struct timespec ts = {
+        .tv_sec = 0,
+        .tv_nsec = NO_DEV_PTRS_WAIT
+      };
+      while (atomic_load_explicit(ctx->dev_ptrs_used, memory_order_relaxed) >= ctx->dev_ptrs_total) {
+        nanosleep(&ts, NULL);
+      }
+      atomic_fetch_add(ctx->dev_ptrs_used, 1);
+
       ret = decode_packet(
         &viddec,
         enc_frame_buf,
@@ -210,9 +219,14 @@ void* stream_mgr_fn(void* ptr) {
       log(BENCHMARK, "Finished decoding packet");
     }
 
+    struct ts_dev_ptr* dev_ptr = &ctx->dev_ptrs[dev_ptrs_idx];
+    dev_ptrs_idx += 1;
+    if (dev_ptrs_idx >= ctx->dev_ptrs_total) {
+      dev_ptrs_idx = 0;
+    }
     ret = recv_frame(
       &viddec,
-      current_buf->frame_buf
+      &dev_ptr->dev_ptr
     );
 
     if (ret == EAGAIN) {
@@ -220,25 +234,8 @@ void* stream_mgr_fn(void* ptr) {
     } else if (ret) {
       goto err_cleanup;
     } else {
-      dequeue(&timestamp_queue, (void*)&current_buf->timestamp);
-      spsc_enqueue(ctx->filled_bufs, (void*)current_buf);
-
-      current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
-      while (!current_buf && running) {
-        if (++dequeue_retry_counter >= ctx->stream_conf->fps) {
-          log(ERROR, "Worker thread ran out of empty frame dequeue retries");
-          running = 0;
-          goto err_cleanup;
-        }
-        struct timespec ts = {
-          .tv_sec = 0,
-          .tv_nsec = EMPTY_Q_WAIT
-        };
-        nanosleep(&ts, NULL);
-        current_buf = (struct ts_frame_buf*)spsc_dequeue(ctx->empty_bufs);
-      }
-
-      dequeue_retry_counter = 0;
+      dequeue(&timestamp_queue, (void*)&dev_ptr->timestamp);
+      spsc_enqueue(ctx->dev_ptr_queue, (void*)dev_ptr);
     }
   }
 

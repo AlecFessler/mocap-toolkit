@@ -1,10 +1,10 @@
 CC=gcc
 PKG_AVCODEC=$(shell pkg-config --cflags libavcodec libavutil)
-INCLUDES=-I./include $(PKG_AVCODEC)
+INCLUDES=-I./include $(PKG_AVCODEC) -I/opt/cuda/include
 CFLAGS=-Wall -Wextra -O2 $(INCLUDES)
 
 PKG_LIBS_AVCODEC=$(shell pkg-config --libs libavcodec libavutil)
-LDFLAGS=-pthread -latomic -lyaml $(PKG_LIBS_AVCODEC)
+LDFLAGS=-pthread -latomic -lyaml -L/opt/cuda/lib64 -lcudart $(PKG_LIBS_AVCODEC)
 
 CFILES=$(wildcard src/*.c)
 OBJFILES=$(CFILES:src/%.c=obj/%.o)

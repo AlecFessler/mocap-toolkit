@@ -10,7 +10,6 @@ struct AVBufferRef;
 
 typedef struct decoder {
   struct AVCodecContext* ctx;
-  struct AVFrame* frame;
   struct AVFrame* hw_frame;
   struct AVPacket* pkt;
   struct AVBufferRef* hw_device_ctx;
@@ -22,7 +21,8 @@ typedef struct decoder {
 int init_decoder(
   decoder* dec,
   uint32_t width,
-  uint32_t height
+  uint32_t height,
+  uint32_t num_surfaces
 );
 
 int decode_packet(
@@ -33,7 +33,7 @@ int decode_packet(
 
 int recv_frame(
   decoder* dec,
-  uint8_t* out_buf
+  void** dev_ptr
 );
 
 int flush_decoder(decoder* dec);
