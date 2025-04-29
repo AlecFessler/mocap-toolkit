@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <cuda_runtime.h>
 #include <errno.h>
 #include <opencv2/opencv.hpp>
 #include <sched.h>
@@ -19,8 +20,7 @@ constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/lens_calibration.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
 
 constexpr uint32_t BOARD_WIDTH = 9;
-constexpr uint32_t BOARD_HEIGHT = 6;
-constexpr float SQUARE_SIZE = 25.0; // mm
+constexpr uint32_t BOARD_HEIGHT = 6; constexpr float SQUARE_SIZE = 25.0; // mm
 
 constexpr uint32_t CORES_PER_CCD = 8;
 
@@ -129,8 +129,6 @@ int main(int argc, char* argv[]) {
   char* target_id = target_cam_id >= 0 ? argv[1] : nullptr;
   ret = start_streams(
     stream_ctx,
-    stream_conf.frame_width,
-    stream_conf.frame_height,
     cam_count,
     target_id
   );
@@ -138,6 +136,15 @@ int main(int argc, char* argv[]) {
     cleanup_streams(stream_ctx);
     cleanup_logging();
     return ret;
+  }
+
+  uint32_t frame_pitch = ((stream_conf.frame_width + 511) / 512) * 512;
+  uint64_t frame_size = stream_conf.frame_width * stream_conf.frame_height * 3 / 2;
+  uint8_t* host_frame = static_cast<uint8_t*>(malloc(frame_size));
+  if (host_frame == nullptr) {
+    cleanup_streams(stream_ctx);
+    cleanup_logging();
+    return -ENOMEM;
   }
 
   /*
@@ -158,19 +165,49 @@ int main(int argc, char* argv[]) {
 
   bool calibration_complete = false;
   while (!stop_flag && !calibration_complete) {
-    struct ts_frame_buf** frameset = static_cast<ts_frame_buf**>(
-      spsc_dequeue(stream_ctx.filled_frameset_q)
+    void* dev_ptr = nullptr;
+    cudaIpcMemHandle_t* ipc_handle = static_cast<cudaIpcMemHandle_t*>(
+      spsc_dequeue(stream_ctx.ipc_handles_cq)
     );
-    if (frameset == nullptr) {
+    if (ipc_handle == nullptr) {
       usleep(100); // 0.1ms
       continue;
+    }
+
+    cudaError_t cudaErr = cudaIpcOpenMemHandle(&dev_ptr, *ipc_handle, cudaIpcMemLazyEnablePeerAccess);
+    if (cudaErr != cudaSuccess) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "cudaIpcOpenMemHandle failed: %s",
+        cudaGetErrorString(cudaErr)
+      );
+      log_write(ERROR, logstr);
+    }
+    cudaErr = cudaMemcpy2D(
+      host_frame,
+      stream_conf.frame_width,
+      dev_ptr,
+      frame_pitch,
+      stream_conf.frame_width,
+      stream_conf.frame_height * 3 / 2,
+      cudaMemcpyDeviceToHost
+    );
+    if (cudaErr != cudaSuccess) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "cudaMemcpy failed: %s",
+        cudaGetErrorString(cudaErr)
+      );
+      log_write(ERROR, logstr);
     }
 
     cv::Mat nv12_frame(
       stream_conf.frame_height * 3/2,
       stream_conf.frame_width,
       CV_8UC1,
-      frameset[0]->frame_buf
+      host_frame
     );
 
     cv::Mat unprocessed_bgr;
@@ -182,7 +219,19 @@ int main(int argc, char* argv[]) {
     cv::Mat bgr_frame = wide_to_3_4_ar(unprocessed_bgr);
 
     if (cooldown > 0) {
-      spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+      cudaErr = cudaIpcCloseMemHandle(dev_ptr);
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaMemcpy failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log_write(ERROR, logstr);
+      }
+      for (uint32_t i = 0; i < cam_count + 1; i++) {
+        stream_ctx.counters[i].fetch_sub(1, std::memory_order_relaxed);
+      }
 
       cv::imshow("stream", bgr_frame);
       cv::waitKey(1);
@@ -203,7 +252,19 @@ int main(int argc, char* argv[]) {
     );
     cv::Mat gray_frame = wide_to_3_4_ar(unprocessed_gray);
 
-    spsc_enqueue(stream_ctx.empty_frameset_q, frameset);
+    cudaErr = cudaIpcCloseMemHandle(dev_ptr);
+    if (cudaErr != cudaSuccess) {
+      snprintf(
+        logstr,
+        sizeof(logstr),
+        "cudaIpcCloseMemHandle failed: %s",
+        cudaGetErrorString(cudaErr)
+      );
+      log_write(ERROR, logstr);
+    }
+    for (uint32_t i = 0; i < cam_count + 1; i++) {
+      stream_ctx.counters[i].fetch_sub(1, std::memory_order_relaxed);
+    }
 
     bool found_corners = calibrator.try_frame(gray_frame);
     if (!found_corners) {
@@ -227,5 +288,6 @@ int main(int argc, char* argv[]) {
 
   cleanup_streams(stream_ctx);
   cleanup_logging();
+  free(host_frame);
   return 0;
 }

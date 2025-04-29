@@ -188,25 +188,33 @@ int main(int argc, char* argv[]) {
 
   #define align_up(offset, align) (((offset) + (align-1)) & ~(align-1))
 
-  // shm_block contains everything with a size known at compile time
-  struct shm_block_t {
-    struct producer_q ipc_handles_pq;
-    struct consumer_q ipc_handles_cq;
-    void* ipc_handles_q_buf[DEV_PTRS_PER_THREAD];
-  };
+  size_t shm_size = 0;
 
-  size_t shm_size = sizeof(struct shm_block_t);
+  // ipc handle producer queue
+  shm_size = align_up(shm_size, _Alignof(struct producer_q));
+  const size_t producer_q_offset = shm_size;
+  shm_size += sizeof(struct producer_q);
 
-  // atomic counters for dev ptrs and ipc handle subarrays in use
-  shm_size += align_up(shm_size, _Alignof(_Atomic uint32_t));
+  // ipc handle consumer queue
+  shm_size = align_up(shm_size, _Alignof(struct consumer_q));
+  const size_t consumer_q_offset = shm_size;
+  shm_size += sizeof(struct consumer_q);
+
+  // ipc handle queue buffer
+  shm_size = align_up(shm_size, _Alignof(void*));
+  const size_t ipc_handles_q_buf_offset = shm_size;
+  shm_size += sizeof(void*) * DEV_PTRS_PER_THREAD;
+
+  // atomic counters
+  shm_size = align_up(shm_size, _Alignof(_Atomic uint32_t));
   const size_t counters_offset = shm_size;
   shm_size += sizeof(_Atomic uint32_t) * (cam_count + 1);
 
-  // cuda ipc mem handles array
+  // ipc handles
   size_t num_ipc_handles = cam_count * DEV_PTRS_PER_THREAD;
-  shm_size += align_up(shm_size, _Alignof(cudaIpcMemHandle_t*));
+  shm_size = align_up(shm_size, _Alignof(cudaIpcMemHandle_t));
   const size_t ipc_handles_offset = shm_size;
-  shm_size += sizeof(cudaIpcMemHandle_t) * (num_ipc_handles);
+  shm_size += sizeof(cudaIpcMemHandle_t) * num_ipc_handles;
 
   ret = ftruncate(
     shm_fd,
@@ -244,10 +252,9 @@ int main(int argc, char* argv[]) {
   }
   cleanup.mmap_buf = mmap_buf;
 
-  struct shm_block_t* shm_block = (struct shm_block_t*)(mmap_buf);
-  struct producer_q* ipc_handles_pq = &shm_block->ipc_handles_pq;
-  struct consumer_q* ipc_handles_cq = &shm_block->ipc_handles_cq;
-  void** ipc_handles_q_buf = shm_block->ipc_handles_q_buf;
+  struct producer_q* ipc_handles_pq = (struct producer_q*)(mmap_buf + producer_q_offset);
+  struct consumer_q* ipc_handles_cq = (struct consumer_q*)(mmap_buf + consumer_q_offset);
+  void** ipc_handles_q_buf = (void**)(mmap_buf + ipc_handles_q_buf_offset);
   spsc_queue_init(
     ipc_handles_pq,
     ipc_handles_cq,
@@ -374,7 +381,16 @@ int main(int argc, char* argv[]) {
     atomic_fetch_add(&counters[cam_count], 1);
 
     for (int i = 0; i < cam_count; i++) {
-      cudaIpcGetMemHandle(&ipc_handles[ipc_handles_idx + i], dev_ptrs_set[i]->dev_ptr);
+      cudaError_t cudaErr = cudaIpcGetMemHandle(&ipc_handles[ipc_handles_idx + i], dev_ptrs_set[i]->dev_ptr);
+      if (cudaErr != cudaSuccess) {
+        snprintf(
+          logstr,
+          sizeof(logstr),
+          "cudaIpcGetMemHandle failed: %s",
+          cudaGetErrorString(cudaErr)
+        );
+        log(ERROR, logstr);
+      }
     }
     spsc_enqueue(ipc_handles_pq, &ipc_handles[ipc_handles_idx]);
     ipc_handles_idx += cam_count;
