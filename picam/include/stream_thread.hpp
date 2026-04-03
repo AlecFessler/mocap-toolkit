@@ -12,20 +12,19 @@
 
 #include "packet_buffer.hpp"
 #include "spsc_queue_wrapper.hpp"
-#include "tcp_socket.hpp"
+#include "udp_stream.hpp"
 
 class StreamThread {
 public:
-  // everything is public for the stream thread function to access
-  TcpSocket m_tcpsock;
+  UdpStream m_udp_stream;
   SPSCQueue<struct packet>& m_packet_queue;
   std::atomic<bool>& m_main_stop_flag;
 
   pthread_t m_this_thread;
 
   StreamThread(
-    uint16_t port,
-    std::string_view ip,
+    uint16_t stream_port,
+    std::string_view server_ip,
     SPSCQueue<struct packet>& packet_queue,
     std::atomic<bool>& main_stop_flag
   );

@@ -15,6 +15,7 @@ ExecStart=/usr/local/bin/picam
 Restart=always
 RestartSec=1
 KillSignal=SIGTERM
+TimeoutStopSec=5
 User=alecfessler
 Environment=PATH=/usr/bin:/usr/local/bin
 

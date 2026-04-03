@@ -39,13 +39,14 @@ void* encoder_thread_fn(void* ptr) {
     set_scheduling_prio(99);
     stop_flag = 0; // reset from previous session
     setup_sig_handler(SIGTERM, stop_handler);
-    while (!stop_flag) {
+    auto& main_stop = instance->m_main_stop_flag;
+    while (!stop_flag && !main_stop.load(std::memory_order_relaxed)) {
       std::optional<struct frame> frame = instance->m_frame_queue.try_dequeue();
-      while (!frame.has_value() && !stop_flag) {
+      while (!frame.has_value() && !stop_flag && !main_stop.load(std::memory_order_relaxed)) {
         std::this_thread::sleep_for(SLEEP_DURATION);
         frame = instance->m_frame_queue.try_dequeue();
       }
-      if (stop_flag) break;
+      if (stop_flag || main_stop.load(std::memory_order_relaxed)) break;
 
       log_(BENCHMARK, "Started encoding frame");
 
@@ -65,13 +66,13 @@ void* encoder_thread_fn(void* ptr) {
       bool enqueued = instance->m_packet_queue.try_enqueue(
         instance->m_packet_buffers[instance->m_next_buffer]
       );
-      while (!enqueued && !stop_flag) {
+      while (!enqueued && !stop_flag && !main_stop.load(std::memory_order_relaxed)) {
         std::this_thread::sleep_for(SLEEP_DURATION);
         enqueued = instance->m_packet_queue.try_enqueue(
           instance->m_packet_buffers[instance->m_next_buffer]
         );
       }
-      if (stop_flag) break;
+      if (stop_flag || main_stop.load(std::memory_order_relaxed)) break;
 
       if (++instance->m_next_buffer == instance->m_packet_buffers.capacity())
         instance->m_next_buffer = 0;

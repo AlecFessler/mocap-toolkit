@@ -52,7 +52,7 @@ void setup_sig_handler(int signum, signal_handler_t handler) {
   struct sigaction sa{};
   sa.sa_handler = handler;
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_RESTART;
+  sa.sa_flags = 0;
   int status = sigaction(signum, &sa, nullptr);
   if (status == -1) {
     std::string err_msg =

@@ -59,12 +59,16 @@ config parse_config(const std::string& filename) {
           config.server_ip = value;
           break;
 
-        case hash_string("TCP_PORT"):
-          config.tcp_port = std::stoi(value);
+        case hash_string("CTRL_PORT"):
+          config.ctrl_port = std::stoi(value);
           break;
 
-        case hash_string("UDP_PORT"):
-          config.udp_port = std::stoi(value);
+        case hash_string("STREAM_PORT"):
+          config.stream_port = std::stoi(value);
+          break;
+
+        case hash_string("CAMERA_ID"):
+          config.camera_id = std::stoi(value);
           break;
 
         case hash_string("FRAME_WIDTH"):

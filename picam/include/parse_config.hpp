@@ -10,8 +10,9 @@
 
 struct config {
   std::string server_ip;
-  uint16_t tcp_port;
-  uint16_t udp_port;
+  uint16_t ctrl_port;     // TCP control channel port
+  uint16_t stream_port;   // UDP frame streaming port
+  uint8_t camera_id;      // camera identifier
   std::pair<uint32_t, uint32_t> resolution;
   uint32_t fps;
 };
