@@ -34,6 +34,7 @@ void* stream_thread_fn(void* ptr) {
   try {
     pin_to_core(1);
     set_scheduling_prio(98);
+    stop_flag = 0; // reset from previous session
     setup_sig_handler(SIGTERM, stop_handler);
     while (!stop_flag) {
       std::optional<struct packet> packet = instance->m_packet_queue.try_dequeue();

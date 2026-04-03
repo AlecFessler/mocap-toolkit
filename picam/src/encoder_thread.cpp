@@ -37,6 +37,7 @@ void* encoder_thread_fn(void* ptr) {
   try{
     pin_to_core(1);
     set_scheduling_prio(99);
+    stop_flag = 0; // reset from previous session
     setup_sig_handler(SIGTERM, stop_handler);
     while (!stop_flag) {
       std::optional<struct frame> frame = instance->m_frame_queue.try_dequeue();

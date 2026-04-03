@@ -44,6 +44,10 @@ public:
       return std::nullopt;
     return *static_cast<T*>(ptr);
   }
+
+  void drain() {
+    while (spsc_dequeue(&cq) != nullptr) {}
+  }
 };
 
 #endif // SPSC_QUEUE_WRAPPER_HPP

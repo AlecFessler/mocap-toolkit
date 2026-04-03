@@ -22,6 +22,7 @@ static void stop_handler(int signum) {
 
 void* stop_watchdog_fn(void* ptr) {
   auto instance = static_cast<StopWatchdog*>(ptr);
+  stop_flag = 0; // reset from previous session
   setup_sig_handler(SIGTERM, stop_handler);
 
   int signal;

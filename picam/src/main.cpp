@@ -26,10 +26,11 @@ constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 constexpr const char* CONFIG_PATH = "/etc/picam/cam_config.txt";
 constexpr uint32_t QUEUE_SLOTS = 8;
 
-static std::atomic<bool> stop_flag = 0;
-static void stop_handler(int signum) {
+// terminate_flag: set by SIGTERM, exits the process entirely
+static std::atomic<bool> terminate_flag = 0;
+static void terminate_handler(int signum) {
   (void)signum;
-  stop_flag.store(1, std::memory_order_relaxed);
+  terminate_flag.store(1, std::memory_order_relaxed);
 }
 
 int main() {
@@ -45,67 +46,98 @@ try {
     QUEUE_SLOTS + 2, // num frames
     frame_queue
   };
-  EncoderThread encoder_thread{
-    config.resolution,
-    config.fps,
-    QUEUE_SLOTS + 2, // num packets
-    frame_queue,
-    packet_queue,
-    stop_flag
-  };
-  StreamThread stream_thread{
-    config.tcp_port,
-    std::string_view(config.server_ip),
-    packet_queue,
-    stop_flag
-  };
+
+  auto interval = std::chrono::nanoseconds{std::chrono::seconds{1}} / config.fps;
   UdpSocket udpsock{config.udp_port};
-  StopWatchdog stop_watcher_thread{stop_flag, udpsock};
 
   pin_to_core(0);
-  set_scheduling_prio(98); // one less than camera thread for immediate preemption
-  setup_sig_handler(SIGTERM, stop_handler);
+  set_scheduling_prio(98);
+  setup_sig_handler(SIGTERM, terminate_handler);
   setup_sig_handler(SIGRTMIN, SIG_IGN);
-  sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
 
-  std::chrono::nanoseconds initial_timestamp{0};
-  while (
-    initial_timestamp == std::chrono::nanoseconds{0} &&
-    !stop_flag.load(std::memory_order_relaxed)
-  ) {
-    int signal;
-    sigwait(&sigset, &signal);
-    if (signal == SIGTERM)
-      break;
+  log_(INFO, "Initialization complete, entering session loop");
 
-    initial_timestamp = udpsock.recv_stream_ctl();
-    if (initial_timestamp == std::chrono::nanoseconds{0}) {
-      std::string warning_msg = "Expected timestamp but received stop message";
-      log_(WARNING, warning_msg.c_str());
-      continue;
-    }
+  // session loop: wait for timestamp, stream, cleanup, repeat
+  while (!terminate_flag.load(std::memory_order_relaxed)) {
 
-    auto interval = std::chrono::nanoseconds{std::chrono::seconds{1}} / config.fps;
-    IntervalTimer timer{
-      initial_timestamp,
-      interval,
-      SIGRTMIN
-    };
+    // wait for initial timestamp from server
+    sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
+    std::chrono::nanoseconds initial_timestamp{0};
 
-    stop_watcher_thread.launch();
-    encoder_thread.launch();
-    stream_thread.launch();
-
-    sigset = setup_sigwait({SIGRTMIN, SIGTERM});
-    std::chrono::nanoseconds next_capture = timer.arm_timer();
-    while (!stop_flag.load(std::memory_order_relaxed)) {
+    while (initial_timestamp == std::chrono::nanoseconds{0} &&
+           !terminate_flag.load(std::memory_order_relaxed)) {
+      int signal;
       sigwait(&sigset, &signal);
       if (signal == SIGTERM)
         break;
 
-      cam.capture_frame(next_capture);
-      next_capture = timer.arm_timer();
+      initial_timestamp = udpsock.recv_stream_ctl();
+      if (initial_timestamp == std::chrono::nanoseconds{0}) {
+        log_(WARNING, "Received stop signal while waiting for timestamp, ignoring");
+        continue;
+      }
     }
+
+    if (terminate_flag.load(std::memory_order_relaxed))
+      break;
+
+    log_(INFO, "Received initial timestamp, starting session");
+
+    // session_stop: set by StopWatchdog (UDP STOP) or StreamThread (TCP error)
+    // only ends the current session, not the process
+    std::atomic<bool> session_stop{0};
+
+    { // session scope — all session resources destroyed on scope exit
+      IntervalTimer timer{
+        initial_timestamp,
+        interval,
+        SIGRTMIN
+      };
+      EncoderThread encoder_thread{
+        config.resolution,
+        config.fps,
+        QUEUE_SLOTS + 2, // num packets
+        frame_queue,
+        packet_queue,
+        session_stop
+      };
+      StreamThread stream_thread{
+        config.tcp_port,
+        std::string_view(config.server_ip),
+        packet_queue,
+        session_stop
+      };
+      StopWatchdog stop_watcher{session_stop, udpsock};
+
+      stop_watcher.launch();
+      encoder_thread.launch();
+      stream_thread.launch();
+
+      sigset = setup_sigwait({SIGRTMIN, SIGTERM});
+      std::chrono::nanoseconds next_capture = timer.arm_timer();
+
+      while (!session_stop.load(std::memory_order_relaxed) &&
+             !terminate_flag.load(std::memory_order_relaxed)) {
+        int signal;
+        sigwait(&sigset, &signal);
+        if (signal == SIGTERM)
+          break;
+
+        cam.capture_frame(next_capture);
+        next_capture = timer.arm_timer();
+      }
+    } // destructors fire: threads joined, TCP closed, timer deleted
+
+    // drain queues so they're clean for next session
+    frame_queue.drain();
+    packet_queue.drain();
+
+    if (terminate_flag.load(std::memory_order_relaxed)) {
+      log_(INFO, "Received SIGTERM, shutting down");
+      break;
+    }
+
+    log_(INFO, "Session ended, waiting for next timestamp...");
   }
 
   return 0;
