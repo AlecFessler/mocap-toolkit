@@ -167,12 +167,17 @@ __global__ void triangulate_kernel(
 
     const float nan_val = nanf("");
 
-    // require all cameras visible
+    // collect visible cameras and their confidence weights
     int visible[MAX_CAMS];
+    float weights[MAX_CAMS];
     int num_visible = 0;
     for (int c = 0; c < num_cameras && c < MAX_CAMS; c++) {
-        if (confidence[c * num_keypoints + k] >= conf_threshold)
-            visible[num_visible++] = c;
+        float conf = confidence[c * num_keypoints + k];
+        if (conf >= conf_threshold) {
+            visible[num_visible] = c;
+            weights[num_visible] = conf;  // use raw confidence as weight
+            num_visible++;
+        }
     }
 
     if (num_visible < 2) {
@@ -194,7 +199,8 @@ __global__ void triangulate_kernel(
                             &norm_pts[i * 2 + 0], &norm_pts[i * 2 + 1]);
     }
 
-    // N-view DLT: stack 2 rows per camera, solve via normal equations
+    // N-view DLT: stack 2 weighted rows per camera, solve via normal equations
+    // Higher confidence cameras contribute more to the solution
     double AtA[9] = {0};
     double Atb[3] = {0};
 
@@ -202,6 +208,7 @@ __global__ void triangulate_kernel(
         const double* P = &proj_matrices[visible[i] * 12];
         double u = norm_pts[i * 2 + 0];
         double v = norm_pts[i * 2 + 1];
+        double w = static_cast<double>(weights[i]);  // confidence weight
 
         double a0[3], a1[3], b0, b1;
         for (int j = 0; j < 3; j++) {
@@ -213,8 +220,8 @@ __global__ void triangulate_kernel(
 
         for (int r = 0; r < 3; r++) {
             for (int c = 0; c < 3; c++)
-                AtA[r * 3 + c] += a0[r] * a0[c] + a1[r] * a1[c];
-            Atb[r] += a0[r] * b0 + a1[r] * b1;
+                AtA[r * 3 + c] += w * (a0[r] * a0[c] + a1[r] * a1[c]);
+            Atb[r] += w * (a0[r] * b0 + a1[r] * b1);
         }
     }
 

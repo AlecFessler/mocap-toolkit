@@ -129,106 +129,54 @@ int recv_ctrl_msg(int fd, ctrl_msg_header* header, void* payload, uint32_t max_p
   return header->type;
 }
 
-// ========== UDP Frame Receive ==========
+// ========== TCP Video Stream ==========
 
-int setup_udp_recv(uint16_t port) {
-  char logstr[128];
-
-  int fd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (fd < 0) {
-    snprintf(logstr, sizeof(logstr), "Error creating UDP socket: %s", strerror(errno));
-    log_write(ERROR, logstr);
-    return -errno;
-  }
-
-  // large receive buffer for burst arrivals
-  int rcvbuf = 1024 * 1024; // 1MB
-  setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
-
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = INADDR_ANY;
-
-  if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-    snprintf(logstr, sizeof(logstr), "Error binding UDP socket: %s", strerror(errno));
-    log_write(ERROR, logstr);
-    close(fd);
-    return -errno;
-  }
-
-  // non-blocking for polling
-  struct timeval timeout = {.tv_sec = 0, .tv_usec = 100000}; // 100ms
-  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-  return fd;
+int setup_stream_listener(uint16_t port) {
+  return setup_ctrl_listener(port); // same TCP listener setup
 }
 
-// ========== UDP Reassembly ==========
-
-void reassembly_init(reassembly_buf* buf) {
-  memset(buf, 0, sizeof(*buf));
-  buf->active = false;
+int accept_stream_conn(int listenfd) {
+  return accept_ctrl_conn(listenfd); // same accept logic
 }
 
-int reassembly_add_fragment(
-  reassembly_buf* buf,
-  const uint8_t* packet,
-  uint32_t packet_size,
-  uint64_t* out_timestamp
-) {
-  if (packet_size < UDP_HEADER_SIZE)
-    return 0;
-
-  const udp_frag_header* header = reinterpret_cast<const udp_frag_header*>(packet);
-  const uint8_t* payload = packet + UDP_HEADER_SIZE;
-  uint32_t payload_size = header->frag_size;
-
-  if (payload_size + UDP_HEADER_SIZE > packet_size)
-    return 0;
-
-  // new sequence — reset buffer
-  if (!buf->active || header->sequence != buf->sequence) {
-    memset(buf->frag_mask, 0, sizeof(buf->frag_mask));
-    buf->sequence = header->sequence;
-    buf->timestamp = header->timestamp;
-    buf->frag_total = header->frag_total;
-    buf->frags_received = 0;
-    buf->total_size = 0;
-    buf->active = true;
+// Read exactly `size` bytes from fd, handling partial reads.
+// Returns 0 on success, -1 on error/disconnect, -2 on timeout.
+static int read_exact(int fd, void* buf, uint32_t size) {
+  uint8_t* ptr = static_cast<uint8_t*>(buf);
+  uint32_t received = 0;
+  while (received < size) {
+    ssize_t n = read(fd, ptr + received, size - received);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;
+      return -1;
+    }
+    if (n == 0) return -1; // connection closed
+    received += n;
   }
-
-  // skip if old sequence
-  if (header->sequence < buf->sequence)
-    return 0;
-
-  // skip if fragment index out of range
-  if (header->frag_idx >= buf->frag_total || header->frag_idx >= MAX_FRAGMENTS)
-    return 0;
-
-  // skip if already received this fragment
-  uint32_t byte_idx = header->frag_idx / 8;
-  uint8_t bit_mask = 1 << (header->frag_idx % 8);
-  if (buf->frag_mask[byte_idx] & bit_mask)
-    return 0;
-
-  // copy payload into correct position
-  uint32_t offset = header->frag_idx * UDP_MAX_PAYLOAD;
-  if (offset + payload_size > sizeof(buf->data))
-    return 0;
-
-  memcpy(buf->data + offset, payload, payload_size);
-  buf->frag_mask[byte_idx] |= bit_mask;
-  buf->frags_received++;
-  buf->total_size += payload_size;
-
-  // check if all fragments received
-  if (buf->frags_received == buf->frag_total) {
-    *out_timestamp = buf->timestamp;
-    buf->active = false;
-    return buf->total_size;
-  }
-
   return 0;
+}
+
+int recv_tcp_frame(
+  int fd,
+  uint8_t* buf,
+  uint32_t buf_size,
+  uint64_t* out_timestamp,
+  uint32_t* out_sequence
+) {
+  // read frame header
+  tcp_frame_header header;
+  int ret = read_exact(fd, &header, TCP_FRAME_HEADER_SIZE);
+  if (ret == -2) return 0;  // timeout
+  if (ret < 0) return -1;   // error/disconnect
+
+  if (header.size > buf_size) return -1; // frame too large
+
+  // read frame payload
+  ret = read_exact(fd, buf, header.size);
+  if (ret < 0) return -1;
+
+  *out_timestamp = header.timestamp;
+  *out_sequence = header.sequence;
+  return static_cast<int>(header.size);
 }

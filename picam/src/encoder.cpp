@@ -41,6 +41,9 @@ Encoder::Encoder(
   m_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
   m_ctx->codec_type = AVMEDIA_TYPE_VIDEO;
 
+  m_ctx->gop_size = 15;  // keyframe every 15 frames (~0.5s at 30fps) for fast error recovery
+  m_ctx->max_b_frames = 0;  // no B-frames (already implied by zerolatency but be explicit)
+
   AVDictionary *opts = nullptr;
   av_dict_set(&opts, "preset", "ultrafast", 0);
   av_dict_set(&opts, "tune", "zerolatency", 0);

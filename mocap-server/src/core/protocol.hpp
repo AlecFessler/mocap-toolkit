@@ -24,18 +24,14 @@ struct __attribute__((packed)) ctrl_msg_header {
 
 constexpr uint32_t CTRL_HEADER_SIZE = sizeof(ctrl_msg_header);
 
-// UDP frame fragment header
-struct __attribute__((packed)) udp_frag_header {
+// TCP video stream frame header
+struct __attribute__((packed)) tcp_frame_header {
   uint32_t sequence;    // frame sequence number (monotonic per camera)
   uint64_t timestamp;   // capture timestamp (nanoseconds since epoch)
-  uint16_t frag_idx;    // fragment index within this frame (0-based)
-  uint16_t frag_total;  // total fragments for this frame
-  uint16_t frag_size;   // payload size in this fragment
+  uint32_t size;        // total payload size in bytes
 };
 
-constexpr uint32_t UDP_HEADER_SIZE = sizeof(udp_frag_header);
-constexpr uint32_t UDP_MTU = 1472;  // typical ethernet MTU minus IP+UDP headers
-constexpr uint32_t UDP_MAX_PAYLOAD = UDP_MTU - UDP_HEADER_SIZE;
+constexpr uint32_t TCP_FRAME_HEADER_SIZE = sizeof(tcp_frame_header);
 
 // Heartbeat timing
 constexpr uint32_t HEARTBEAT_INTERVAL_MS = 1000;

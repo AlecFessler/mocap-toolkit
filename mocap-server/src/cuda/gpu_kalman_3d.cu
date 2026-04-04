@@ -219,12 +219,12 @@ __global__ void kalman_3d_update_kernel(
         for (int i = 0; i < 36; i++)
             P[i] = PP[i];
 
-        // check if covariance has grown too large — reset
-        if (P[0] > 1e6f) {
-            for (int i = 0; i < 6; i++) ps[i] = 0.0f;
-            for (int i = 0; i < 36; i++) P[i] = 0.0f;
-            P[0] = 1000.0f; P[7] = 1000.0f; P[14] = 1000.0f;
-            P[21] = 1000.0f; P[28] = 1000.0f; P[35] = 1000.0f;
+        // cap covariance growth during coast — keep predicting but don't let uncertainty explode
+        // preserve position/velocity (don't reset to zero), just clamp diagonal
+        float max_cov = 1e6f;
+        for (int i = 0; i < 6; i++) {
+            if (P[i * 6 + i] > max_cov)
+                P[i * 6 + i] = max_cov;
         }
     }
 
@@ -234,8 +234,10 @@ __global__ void kalman_3d_update_kernel(
     for (int i = 0; i < 36; i++)
         covariance[idx * 36 + i] = P[i];
 
-    // output: use predicted/updated position, or NaN if uninitialized
-    if (PP[0] > 500.0f && !has_measurement) {
+    // output: use predicted/updated position
+    // NaN only if filter has never received a valid measurement (covariance still at init value)
+    bool never_initialized = (P[0] >= 999.0f && !has_measurement);
+    if (never_initialized) {
         kp3d_out[idx * 3 + 0] = nanf("");
         kp3d_out[idx * 3 + 1] = nanf("");
         kp3d_out[idx * 3 + 2] = nanf("");

@@ -3,7 +3,7 @@
 
 #include "cuda/gpu_preprocess.hpp"
 
-// Fused kernel: NV12 -> RGB -> rotate 90 CW -> resize -> center crop -> normalize -> NCHW float32
+// Fused kernel: NV12 -> RGB -> rotate 90 CCW -> resize -> center crop -> normalize -> NCHW float32
 //
 // After rotation, the source image becomes (src_height x src_width) i.e. 720x1280
 // We scale so width matches dst_width: scale = dst_width / src_height
@@ -28,7 +28,7 @@ __global__ void nv12_preprocess_kernel(
   if (dst_x >= dst_width || dst_y >= dst_height)
     return;
 
-  // After 90 CW rotation, the rotated image is (src_height x src_width) = (720 x 1280)
+  // After 90 CCW rotation, the rotated image is (src_height x src_width) = (720 x 1280)
   // rotated_width = src_height, rotated_height = src_width
   uint32_t rotated_width = src_height;
   uint32_t rotated_height = src_width;
@@ -49,10 +49,10 @@ __global__ void nv12_preprocess_kernel(
   float rot_x = scaled_x / scale;
   float rot_y = scaled_y / scale;
 
-  // Rotation 90 CW maps rotated(rx, ry) -> source(ry, rotated_width - 1 - rx)
-  // source_x = rot_y, source_y = rotated_width - 1 - rot_x = src_height - 1 - rot_x
-  float src_x_f = rot_y;
-  float src_y_f = static_cast<float>(src_height - 1) - rot_x;
+  // Rotation 90 CCW maps rotated(rx, ry) -> source(rotated_height - 1 - ry, rx)
+  // source_x = src_width - 1 - rot_y, source_y = rot_x
+  float src_x_f = static_cast<float>(src_width - 1) - rot_y;
+  float src_y_f = rot_x;
 
   // Clamp to valid source range
   src_x_f = fminf(fmaxf(src_x_f, 0.0f), static_cast<float>(src_width - 1));

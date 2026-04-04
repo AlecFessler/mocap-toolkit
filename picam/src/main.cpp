@@ -144,10 +144,14 @@ try {
       StreamThread stream_thread{
         config.stream_port,
         std::string_view(config.server_ip),
+        config.camera_id,
         packet_queue,
         session_stop
       };
 
+      log_(INFO, "Connecting stream TCP...");
+      stream_thread.m_tcp_stream.connect_to_server();
+      log_(INFO, "Stream TCP connected");
       encoder_thread.launch();
       stream_thread.launch();
 

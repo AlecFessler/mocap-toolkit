@@ -12,11 +12,11 @@
 
 #include "packet_buffer.hpp"
 #include "spsc_queue_wrapper.hpp"
-#include "udp_stream.hpp"
+#include "tcp_stream.hpp"
 
 class StreamThread {
 public:
-  UdpStream m_udp_stream;
+  TcpStream m_tcp_stream;
   SPSCQueue<struct packet>& m_packet_queue;
   std::atomic<bool>& m_main_stop_flag;
 
@@ -25,6 +25,7 @@ public:
   StreamThread(
     uint16_t stream_port,
     std::string_view server_ip,
+    uint8_t camera_id,
     SPSCQueue<struct packet>& packet_queue,
     std::atomic<bool>& main_stop_flag
   );

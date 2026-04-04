@@ -320,9 +320,8 @@ static void* inference_thread_fn(void* ptr) {
       }
     }
 
-    // Stage 4: COMETH IK
-    float ik_output[NUM_KEYPOINTS * 3];
-    ctx->cometh->process(host_kp3d, ik_output);
+    // Stage 4: COMETH IK (bypassed — using raw DLT+Kalman output directly)
+    float* ik_output = host_kp3d;
 
     // Stage 5: Measure IK displacement on body joints
     {
@@ -527,22 +526,24 @@ int main(int argc, char* argv[]) {
     );
   }
 
-  // setup TCP control listeners and UDP receive sockets per camera
+  // setup TCP control and stream listeners per camera
   int ctrl_listen_fds[MAX_CAMERAS];
   int ctrl_fds[MAX_CAMERAS];
-  int udp_fds[MAX_CAMERAS];
+  int stream_listen_fds[MAX_CAMERAS];
+  int stream_fds[MAX_CAMERAS];
+  memset(stream_fds, -1, sizeof(stream_fds));
 
-  log_write(INFO, "Setting up control listeners and UDP sockets...");
+  log_write(INFO, "Setting up control and stream listeners...");
   for (int i = 0; i < cam_count; i++) {
-    ctrl_listen_fds[i] = setup_ctrl_listener(cam_confs[i].tcp_port); // reuse tcp_port as ctrl_port
+    ctrl_listen_fds[i] = setup_ctrl_listener(cam_confs[i].tcp_port);
     if (ctrl_listen_fds[i] < 0) {
       log_write(ERROR, "Failed to setup control listener");
       running = 0;
       break;
     }
-    udp_fds[i] = setup_udp_recv(cam_confs[i].udp_port); // reuse udp_port as stream_port
-    if (udp_fds[i] < 0) {
-      log_write(ERROR, "Failed to setup UDP receive socket");
+    stream_listen_fds[i] = setup_stream_listener(cam_confs[i].udp_port);
+    if (stream_listen_fds[i] < 0) {
+      log_write(ERROR, "Failed to setup stream listener");
       running = 0;
       break;
     }
@@ -594,9 +595,35 @@ int main(int argc, char* argv[]) {
       }
     }
     log_write(INFO, "All cameras started");
+
+    // accept stream TCP connections (Pi connects after receiving START)
+    log_write(INFO, "Waiting for stream connections...");
+    for (int i = 0; i < cam_count && running; i++) {
+      snprintf(logstr, sizeof(logstr), "Accepting stream connection for cam %d on port %d...",
+        i, cam_confs[i].udp_port);
+      log_write(INFO, logstr);
+      stream_fds[i] = accept_stream_conn(stream_listen_fds[i]);
+      if (stream_fds[i] < 0) {
+        snprintf(logstr, sizeof(logstr), "Failed to accept stream connection for cam %d: %s",
+          i, strerror(errno));
+        log_write(ERROR, logstr);
+        running = 0;
+        break;
+      }
+
+      // receive IDENTIFY from stream connection
+      ctrl_msg_header stream_hdr;
+      uint8_t stream_cam_id;
+      int stream_msg = recv_ctrl_msg(stream_fds[i], &stream_hdr, &stream_cam_id, sizeof(stream_cam_id));
+      if (stream_msg == CTRL_IDENTIFY) {
+        snprintf(logstr, sizeof(logstr), "Stream connection from cam %d (id=%d)", i, stream_cam_id);
+        log_write(INFO, logstr);
+      }
+    }
+    log_write(INFO, "All stream connections established");
   }
 
-  // spawn worker threads with control + UDP fds
+  // spawn worker threads with stream fds
   thread_ctx ctxs[MAX_CAMERAS];
   pthread_t threads[MAX_CAMERAS];
   int thread_count = 0;
@@ -612,7 +639,7 @@ int main(int argc, char* argv[]) {
     ctxs[i].main_running = &running;
     ctxs[i].hw_device_ctx = hw_device_ctx;
     ctxs[i].ctrl_fd = ctrl_fds[i];
-    ctxs[i].udp_fd = udp_fds[i];
+    ctxs[i].stream_fd = stream_fds[i];
 
     ret = pthread_create(&threads[i], nullptr, stream_mgr_fn, static_cast<void*>(&ctxs[i]));
     if (ret) {
@@ -839,12 +866,11 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // camera feed display windows (mocap mode)
+  // camera feed display windows (mocap mode) — landscape, half resolution
   if (mode == MODE_MOCAP && running) {
     for (int i = 0; i < cam_count; i++) {
-      cv::namedWindow(cam_confs[i].name, cv::WINDOW_NORMAL);
-      cv::resizeWindow(cam_confs[i].name, 384, 512);
-      cv::moveWindow(cam_confs[i].name, i * 390, 0);
+      cv::namedWindow(cam_confs[i].name, cv::WINDOW_AUTOSIZE);
+      cv::moveWindow(cam_confs[i].name, i * 650, 0);
     }
   }
 
@@ -1033,6 +1059,11 @@ int main(int argc, char* argv[]) {
         cv::Mat unprocessed_bgr;
         cv::cvtColor(nv12_frame, unprocessed_bgr, cv::COLOR_YUV2BGR_NV12);
         bgr_frames[i] = wide_to_3_4_ar(unprocessed_bgr);
+        // label with camera index and name
+        char label[64];
+        snprintf(label, sizeof(label), "cam %d: %s", i, cam_confs[i].name);
+        cv::putText(bgr_frames[i], label, cv::Point(10, 30),
+          cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
       }
 
       if (cooldown > 0) {
@@ -1092,7 +1123,7 @@ int main(int argc, char* argv[]) {
       }
       memset(dev_ptrs_set, 0, sizeof(dev_ptrs_set));
 
-      // display live camera feeds with 2D keypoint overlay
+      // display live camera feeds with 2D keypoint overlay (no rotation — show raw orientation)
       for (int i = 0; i < cam_count; i++) {
         cv::Mat nv12(
           stream_conf.frame_height * 3 / 2,
@@ -1102,33 +1133,48 @@ int main(int argc, char* argv[]) {
         );
         cv::Mat bgr;
         cv::cvtColor(nv12, bgr, cv::COLOR_YUV2BGR_NV12);
-        cv::Mat display = wide_to_3_4_ar(bgr);
 
         // overlay 2D keypoints if available
+        // model space (288x384) is rotated+scaled+cropped from original (1280x720)
+        // preprocess: rotate 90 CCW -> scale(288/720) -> center-crop height to 384
+        // 90 CCW: rotated(rx,ry) came from source(src_width-1-ry, rx)
+        // inverse: source(sx,sy) -> rotated(sy, src_width-1-sx)
+        // so model(mx,my) -> rotated(mx, my+crop_offset) -> source(src_width-1-(my+crop_offset)/scale, mx/scale)
         if (kp2d_ready.load(std::memory_order_acquire)) {
-          // scale from model space (288x384) to display space (768x1024)
-          float sx = static_cast<float>(PROCESSED_WIDTH) / INPUT_WIDTH;
-          float sy = static_cast<float>(PROCESSED_HEIGHT) / INPUT_HEIGHT;
+          float scale = static_cast<float>(INPUT_WIDTH) / stream_conf.frame_height; // 288/720
+          int scaled_h = static_cast<int>(stream_conf.frame_width * scale); // 1280 * 288/720 = 512
+          int crop_offset = (scaled_h - INPUT_HEIGHT) / 2; // (512 - 384) / 2 = 64
           int kp_offset = i * NUM_KEYPOINTS;
           for (int k = 0; k < NUM_KEYPOINTS; k++) {
             float conf = shared_confidence[kp_offset + k];
-            if (conf < 3.0f) continue; // same threshold as triangulation
+            if (conf < 3.0f) continue;
             float mx = shared_keypoints_2d[(kp_offset + k) * 2 + 0];
             float my = shared_keypoints_2d[(kp_offset + k) * 2 + 1];
-            int dx = static_cast<int>(mx * sx);
-            int dy = static_cast<int>(my * sy);
-            if (dx >= 0 && dx < display.cols && dy >= 0 && dy < display.rows) {
-              // green for body (5-16), blue for hands (91-132), yellow for feet (17-22)
+            // un-crop, un-scale, un-rotate (90 CCW inverse)
+            int orig_x = static_cast<int>((stream_conf.frame_width - 1) - (my + crop_offset) / scale);
+            int orig_y = static_cast<int>(mx / scale);
+            if (orig_x >= 0 && orig_x < bgr.cols && orig_y >= 0 && orig_y < bgr.rows) {
               cv::Scalar color;
-              if (k >= 91) color = cv::Scalar(255, 0, 0);      // blue = hands
-              else if (k >= 17 && k <= 22) color = cv::Scalar(0, 255, 255); // yellow = feet
-              else if (k >= 5 && k <= 16) color = cv::Scalar(0, 255, 0);   // green = body
-              else color = cv::Scalar(0, 0, 255);               // red = head/face
-              cv::circle(display, cv::Point(dx, dy), 3, color, -1);
+              if (k >= 91) color = cv::Scalar(255, 0, 0);
+              else if (k >= 17 && k <= 22) color = cv::Scalar(0, 255, 255);
+              else if (k >= 5 && k <= 16) color = cv::Scalar(0, 255, 0);
+              else color = cv::Scalar(0, 0, 255);
+              cv::circle(bgr, cv::Point(orig_x, orig_y), 4, color, -1);
             }
           }
         }
 
+        // label with camera index and name
+        {
+          char label[64];
+          snprintf(label, sizeof(label), "cam %d: %s", i, cam_confs[i].name);
+          cv::putText(bgr, label, cv::Point(10, 30),
+            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
+        }
+
+        // resize to fit window (half size for display)
+        cv::Mat display;
+        cv::resize(bgr, display, cv::Size(bgr.cols / 2, bgr.rows / 2));
         cv::imshow(cam_confs[i].name, display);
       }
       if (kp2d_ready.load(std::memory_order_relaxed))
@@ -1178,7 +1224,8 @@ int main(int argc, char* argv[]) {
   for (int i = 0; i < cam_count; i++) {
     if (ctrl_fds[i] >= 0) close(ctrl_fds[i]);
     if (ctrl_listen_fds[i] >= 0) close(ctrl_listen_fds[i]);
-    if (udp_fds[i] >= 0) close(udp_fds[i]);
+    if (stream_fds[i] >= 0) close(stream_fds[i]);
+    if (stream_listen_fds[i] >= 0) close(stream_listen_fds[i]);
   }
 
   // wait for inference thread

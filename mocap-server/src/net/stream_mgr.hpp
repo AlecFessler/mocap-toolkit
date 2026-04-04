@@ -29,8 +29,8 @@ struct thread_ctx {
   uint32_t core;
   volatile sig_atomic_t* main_running;
   AVBufferRef* hw_device_ctx;
-  int ctrl_fd;   // TCP control connection (already accepted)
-  int udp_fd;    // UDP receive socket (already bound)
+  int ctrl_fd;     // TCP control connection (already accepted)
+  int stream_fd;   // TCP stream connection (already accepted)
 };
 
 void* stream_mgr_fn(void* ptr);

@@ -8,7 +8,7 @@ cv::Mat wide_to_3_4_ar(const cv::Mat& input) {
   cv::Size input_size = input.size();
 
   cv::Mat rotated;
-  cv::rotate(input, rotated, cv::ROTATE_90_CLOCKWISE);
+  cv::rotate(input, rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
 
   float scale = static_cast<float>(PROCESSED_WIDTH) / static_cast<float>(input_size.height);
 

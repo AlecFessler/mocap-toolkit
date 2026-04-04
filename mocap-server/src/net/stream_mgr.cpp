@@ -75,42 +75,36 @@ void* stream_mgr_fn(void* ptr) {
       goto err_cleanup;
     }
 
-    // UDP reassembly buffer
-    reassembly_buf reasm;
-    reassembly_init(&reasm);
+    uint8_t frame_buf[ENCODED_FRAME_BUF_SIZE];
 
-    uint8_t udp_recv_buf[UDP_MTU];
+    // set recv timeout on stream fd for periodic running check
+    struct timeval recv_timeout = {.tv_sec = 0, .tv_usec = 100000}; // 100ms
+    setsockopt(ctx->stream_fd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
 
-    snprintf(logstr, sizeof(logstr), "Stream manager for cam %s ready, receiving UDP frames",
+    snprintf(logstr, sizeof(logstr), "Stream manager for cam %s ready, receiving TCP frames",
       ctx->conf->name);
     log_write(INFO, logstr);
 
     while (running && *ctx->main_running) {
-      // receive UDP datagram
-      ssize_t recv_size = recv(ctx->udp_fd, udp_recv_buf, sizeof(udp_recv_buf), 0);
-      if (recv_size < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
-          continue; // timeout, just retry
-        if (errno == EINTR)
-          goto shutdown_path;
-        snprintf(logstr, sizeof(logstr), "UDP recv error: %s", strerror(errno));
-        log_write(ERROR, logstr);
-        continue;
-      }
-
-      // try to reassemble
       uint64_t timestamp = 0;
-      int frame_size = reassembly_add_fragment(
-        &reasm,
-        udp_recv_buf,
-        recv_size,
-        &timestamp
+      uint32_t sequence = 0;
+      int frame_size = recv_tcp_frame(
+        ctx->stream_fd,
+        frame_buf,
+        sizeof(frame_buf),
+        &timestamp,
+        &sequence
       );
 
-      if (frame_size <= 0)
-        continue; // incomplete frame, keep receiving
+      if (frame_size == 0)
+        continue; // timeout, check running flag and retry
+      if (frame_size < 0) {
+        snprintf(logstr, sizeof(logstr), "Stream TCP disconnected for cam %s", ctx->conf->name);
+        log_write(ERROR, logstr);
+        goto shutdown_path;
+      }
 
-      log_write(BENCHMARK, "Received complete UDP frame");
+      log_write(BENCHMARK, "Received complete TCP frame");
 
       // enqueue timestamp
       ret = enqueue(&timestamp_queue, static_cast<void*>(&timestamp));
@@ -120,18 +114,10 @@ void* stream_mgr_fn(void* ptr) {
         goto err_cleanup;
       }
 
-      // wait for available device ptrs before decoding
-      struct timespec ts = {.tv_sec = 0, .tv_nsec = NO_DEV_PTRS_WAIT};
-      while (ctx->dev_ptrs_used->load(std::memory_order_relaxed) >= ctx->dev_ptrs_total) {
-        if (!running || !*ctx->main_running)
-          goto shutdown_path;
-        nanosleep(&ts, nullptr);
-      }
-      ctx->dev_ptrs_used->fetch_add(1, std::memory_order_relaxed);
-
+      // always decode to keep H.264 decoder state consistent
       log_write(BENCHMARK, "Started decoding packet");
 
-      ret = decode_packet(&viddec, reasm.data, frame_size);
+      ret = decode_packet(&viddec, frame_buf, frame_size);
       if (ret) {
         cleanup_decoder(&viddec);
         cleanup_queue(&timestamp_queue);
@@ -140,12 +126,22 @@ void* stream_mgr_fn(void* ptr) {
 
       log_write(BENCHMARK, "Finished decoding packet");
 
+      // if device pointer pool is full, skip the output but keep decoding
+      if (ctx->dev_ptrs_used->load(std::memory_order_relaxed) >= ctx->dev_ptrs_total) {
+        // drain the decoded frame from the decoder without using it
+        void* discard_ptr;
+        recv_frame(&viddec, &discard_ptr); // ignore result
+        continue;
+      }
+      ctx->dev_ptrs_used->fetch_add(1, std::memory_order_relaxed);
+
       // try to receive decoded frame
       ts_dev_ptr* dev_ptr = &ctx->dev_ptrs[dev_ptrs_idx];
       dev_ptrs_idx = (dev_ptrs_idx + 1) % ctx->dev_ptrs_total;
 
       ret = recv_frame(&viddec, &dev_ptr->dev_ptr);
       if (ret == EAGAIN) {
+        ctx->dev_ptrs_used->fetch_sub(1, std::memory_order_relaxed);
         continue;
       } else if (ret) {
         cleanup_decoder(&viddec);

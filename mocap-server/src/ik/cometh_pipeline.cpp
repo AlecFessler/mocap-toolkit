@@ -139,24 +139,24 @@ void ComethPipeline::process(const float* input_kp3d, float* output_kp3d) {
   m_observer->predict();
 
   if (has_targets) {
-    // Start from observer's predicted state
+    // Start from observer's predicted joint angles (DOFs 6+)
     m_skeleton.q = m_observer->position();
 
     // Anchor root position and rotation directly from observed keypoints every frame.
-    // This bypasses the IK for the 6 root DOFs — the IK only needs to solve joint angles.
+    // Root DOFs (0-5) bypass the observer entirely — set from data, not filtered.
     anchor_root(input_kp3d, m_skeleton.q);
 
-    // First frame: reset observer to the anchored state so it doesn't fight us
+    // First frame: reset observer to the anchored state
     if (m_first_frame) {
       m_observer->reset(m_skeleton.q);
       m_first_frame = false;
     }
 
-    // Step 4: QPIK solve (now only needs to figure out joint angles, root is anchored)
+    // Step 4: QPIK solve (joint angles only, root is anchored)
     Eigen::VectorXf prev_vel = m_observer->velocity();
     m_solver->solve(targets, valid, prev_vel);
 
-    // Step 5: Update observer with IK result
+    // Step 5: Update observer with IK result (joint angles)
     m_observer->update(m_skeleton.q, true,
                        m_skeleton.rom_lower(), m_skeleton.rom_upper());
   } else {
@@ -164,7 +164,6 @@ void ComethPipeline::process(const float* input_kp3d, float* output_kp3d) {
     m_observer->update(m_skeleton.q, false,
                        m_skeleton.rom_lower(), m_skeleton.rom_upper());
 
-    // If coasting too long, re-initialize on next valid frame
     if (m_observer->coast_count() > m_params.max_coast_frames)
       m_first_frame = true;
   }

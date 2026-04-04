@@ -14,8 +14,8 @@ struct pipeline_config;
 class TextOverlay;
 
 struct renderer_config {
-  int width = 1280;
-  int height = 720;
+  int width = 1920;
+  int height = 1080;
   int num_keypoints;
   const int* skeleton_edges; // pairs: [a0, b0, a1, b1, ...]
   int num_edges;

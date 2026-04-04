@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <cstdint>
 
-// Fused NV12 -> RGB -> rotate 90 CW -> resize -> center crop -> normalize -> NCHW float32
+// Fused NV12 -> RGB -> rotate 90 CCW -> resize -> center crop -> normalize -> NCHW float32
 // Writes directly into the TensorRT input buffer for one batch element
 void gpu_preprocess_nv12(
   const uint8_t* nv12_dev_ptr,  // CUVID decoded NV12 frame (device memory)

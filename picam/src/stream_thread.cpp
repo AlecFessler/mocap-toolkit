@@ -19,7 +19,6 @@
 #include "sigsets.hpp"
 #include "spsc_queue_wrapper.hpp"
 #include "stream_thread.hpp"
-#include "udp_stream.hpp"
 
 constexpr std::chrono::microseconds SLEEP_DURATION{100};
 
@@ -47,7 +46,7 @@ void* stream_thread_fn(void* ptr) {
 
       log_(BENCHMARK, "Started streaming packet");
 
-      instance->m_udp_stream.stream_packet(
+      instance->m_tcp_stream.stream_packet(
         packet.value().timestamp,
         packet.value().buffer
       );
@@ -65,10 +64,11 @@ void* stream_thread_fn(void* ptr) {
 StreamThread::StreamThread(
   uint16_t stream_port,
   std::string_view server_ip,
+  uint8_t camera_id,
   SPSCQueue<struct packet>& packet_queue,
   std::atomic<bool>& main_stop_flag
 ) :
-  m_udp_stream{stream_port, server_ip},
+  m_tcp_stream{stream_port, server_ip, camera_id},
   m_packet_queue(packet_queue),
   m_main_stop_flag(main_stop_flag) {}
 
