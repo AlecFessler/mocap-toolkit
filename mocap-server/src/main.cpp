@@ -110,7 +110,8 @@ struct inference_ctx {
   cam_conf* cam_confs;
   int cam_count;
   uint8_t* host_frames; // for display (calibration modes)
-  float* latest_keypoints_3d;           // shared buffer for renderer [NUM_KEYPOINTS * 3]
+  float* latest_keypoints_3d;           // shared buffer for renderer [NUM_KEYPOINTS * 3] (IK output)
+  float* latest_keypoints_3d_raw;      // shared buffer for renderer [NUM_KEYPOINTS * 3] (raw DLT+Kalman)
   frame_metrics* latest_metrics;        // shared buffer for renderer
   std::atomic<bool>* keypoints_ready;   // signal main thread new data available
   volatile sig_atomic_t* running;
@@ -320,8 +321,9 @@ static void* inference_thread_fn(void* ptr) {
       }
     }
 
-    // Stage 4: COMETH IK (bypassed — using raw DLT+Kalman output directly)
-    float* ik_output = host_kp3d;
+    // Stage 4: COMETH IK
+    float ik_output[NUM_KEYPOINTS * 3];
+    ctx->cometh->process(host_kp3d, ik_output);
 
     // Stage 5: Measure IK displacement on body joints
     {
@@ -346,7 +348,30 @@ static void* inference_thread_fn(void* ptr) {
 
     // copy to shared buffers for renderer
     if (ctx->latest_keypoints_3d) {
-      memcpy(ctx->latest_keypoints_3d, ik_output, NUM_KEYPOINTS * 3 * sizeof(float));
+      // IK output: only pass major body joints (0=nose, 5-16=body), NaN everything else
+      for (int k = 0; k < NUM_KEYPOINTS; k++) {
+        if (k == 0 || (k >= 5 && k <= 16)) {
+          ctx->latest_keypoints_3d[k*3+0] = ik_output[k*3+0];
+          ctx->latest_keypoints_3d[k*3+1] = ik_output[k*3+1];
+          ctx->latest_keypoints_3d[k*3+2] = ik_output[k*3+2];
+        } else {
+          ctx->latest_keypoints_3d[k*3+0] = std::numeric_limits<float>::quiet_NaN();
+          ctx->latest_keypoints_3d[k*3+1] = std::numeric_limits<float>::quiet_NaN();
+          ctx->latest_keypoints_3d[k*3+2] = std::numeric_limits<float>::quiet_NaN();
+        }
+      }
+      // Raw 3D: same filtering
+      for (int k = 0; k < NUM_KEYPOINTS; k++) {
+        if (k == 0 || (k >= 5 && k <= 16)) {
+          ctx->latest_keypoints_3d_raw[k*3+0] = host_kp3d[k*3+0];
+          ctx->latest_keypoints_3d_raw[k*3+1] = host_kp3d[k*3+1];
+          ctx->latest_keypoints_3d_raw[k*3+2] = host_kp3d[k*3+2];
+        } else {
+          ctx->latest_keypoints_3d_raw[k*3+0] = std::numeric_limits<float>::quiet_NaN();
+          ctx->latest_keypoints_3d_raw[k*3+1] = std::numeric_limits<float>::quiet_NaN();
+          ctx->latest_keypoints_3d_raw[k*3+2] = std::numeric_limits<float>::quiet_NaN();
+        }
+      }
       if (ctx->latest_metrics)
         memcpy(ctx->latest_metrics, &metrics, sizeof(frame_metrics));
       ctx->keypoints_ready->store(true, std::memory_order_release);
@@ -722,10 +747,14 @@ int main(int argc, char* argv[]) {
 
   // shared buffers for renderer (written by inference thread, read by main thread)
   float shared_keypoints_3d[NUM_KEYPOINTS * 3];
+  float shared_keypoints_3d_raw[NUM_KEYPOINTS * 3];
   frame_metrics shared_metrics{};
   std::atomic<bool> keypoints_ready{false};
   pipeline_config pipe_config;
-  memset(shared_keypoints_3d, 0, sizeof(shared_keypoints_3d));
+  for (int i = 0; i < NUM_KEYPOINTS * 3; i++) {
+    shared_keypoints_3d[i] = std::numeric_limits<float>::quiet_NaN();
+    shared_keypoints_3d_raw[i] = std::numeric_limits<float>::quiet_NaN();
+  }
 
   // shared buffers for 2D keypoint overlay on camera feeds
   float shared_keypoints_2d[MAX_CAMERAS * NUM_KEYPOINTS * 2];
@@ -838,6 +867,7 @@ int main(int argc, char* argv[]) {
     inf_ctx.host_frames = mocap_host_frames;
     inf_ctx.running = &running;
     inf_ctx.latest_keypoints_3d = shared_keypoints_3d;
+    inf_ctx.latest_keypoints_3d_raw = shared_keypoints_3d_raw;
     inf_ctx.latest_metrics = &shared_metrics;
     inf_ctx.keypoints_ready = &keypoints_ready;
     inf_ctx.latest_keypoints_2d = shared_keypoints_2d;
@@ -1184,11 +1214,11 @@ int main(int argc, char* argv[]) {
       // render latest 3D keypoints (main thread, required by GLFW)
       if (renderer && keypoints_ready.load(std::memory_order_acquire)) {
         keypoints_ready.store(false, std::memory_order_relaxed);
-        if (!renderer->render_frame(shared_keypoints_3d, NUM_KEYPOINTS, &shared_metrics))
+        if (!renderer->render_frame(shared_keypoints_3d, shared_keypoints_3d_raw, NUM_KEYPOINTS, &shared_metrics))
           running = 0; // window closed
       } else if (renderer) {
         // still poll GLFW events even without new data
-        if (!renderer->render_frame(shared_keypoints_3d, NUM_KEYPOINTS, &shared_metrics))
+        if (!renderer->render_frame(shared_keypoints_3d, shared_keypoints_3d_raw, NUM_KEYPOINTS, &shared_metrics))
           running = 0;
       }
     }

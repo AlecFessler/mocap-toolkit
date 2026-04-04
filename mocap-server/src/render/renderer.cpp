@@ -569,7 +569,7 @@ uint32_t Renderer::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags 
 
 void Renderer::create_buffers(const int* skeleton_edges, int num_edges) {
   // Vertex buffer (host-visible for CPU updates — will switch to CUDA interop later)
-  VkDeviceSize vb_size = m_num_keypoints * sizeof(vertex);
+  VkDeviceSize vb_size = 2 * m_num_keypoints * sizeof(vertex);
   VkBufferCreateInfo vb_info{};
   vb_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   vb_info.size = vb_size;
@@ -589,8 +589,8 @@ void Renderer::create_buffers(const int* skeleton_edges, int num_edges) {
   vkBindBufferMemory(m_device, m_vertex_buffer, m_vertex_memory, 0);
   vkMapMemory(m_device, m_vertex_memory, 0, vb_size, 0, &m_vertex_mapped);
 
-  // Index buffer for lines
-  VkDeviceSize ib_size = num_edges * 2 * sizeof(uint16_t);
+  // Index buffer for lines (2x for dual skeleton)
+  VkDeviceSize ib_size = 2 * num_edges * 2 * sizeof(uint16_t);
   VkBufferCreateInfo ib_info{};
   ib_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   ib_info.size = ib_size;
@@ -615,6 +615,12 @@ void Renderer::create_buffers(const int* skeleton_edges, int num_edges) {
   for (int i = 0; i < num_edges; i++) {
     indices[i * 2 + 0] = static_cast<uint16_t>(skeleton_edges[i * 2 + 0]);
     indices[i * 2 + 1] = static_cast<uint16_t>(skeleton_edges[i * 2 + 1]);
+  }
+  // Second skeleton edges (reference) — offset by num_keypoints
+  int off = num_edges * 2;
+  for (int i = 0; i < num_edges; i++) {
+    indices[off + i * 2 + 0] = static_cast<uint16_t>(skeleton_edges[i * 2 + 0] + m_num_keypoints);
+    indices[off + i * 2 + 1] = static_cast<uint16_t>(skeleton_edges[i * 2 + 1] + m_num_keypoints);
   }
   vkUnmapMemory(m_device, m_line_index_memory);
 
@@ -854,18 +860,19 @@ void Renderer::update_camera() {
   memcpy(m_gizmo_ub_mapped, &gizmo_ubo, sizeof(gizmo_ubo));
 }
 
-bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const frame_metrics* metrics) {
+bool Renderer::render_frame(const float* keypoints_3d, const float* keypoints_3d_ref,
+                            int num_keypoints, const frame_metrics* metrics) {
   glfwPollEvents();
   if (glfwWindowShouldClose(m_window))
     return false;
 
-  // Update vertex buffer with keypoints + colors
   vertex* verts = static_cast<vertex*>(m_vertex_mapped);
+
+  // First skeleton (IK output) — red tint
   for (int i = 0; i < num_keypoints && i < m_num_keypoints; i++) {
     float x = keypoints_3d[i * 3 + 0];
     float y = keypoints_3d[i * 3 + 1];
     float z = keypoints_3d[i * 3 + 2];
-    // remap camera coords (Z=up from floor cameras) to renderer coords (Y=up)
     verts[i].x = x;
     verts[i].y = z;
     verts[i].z = y;
@@ -873,21 +880,36 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
       verts[i].r = verts[i].g = verts[i].b = 0;
       verts[i].a = 0;
     } else {
-      verts[i].r = m_colors[i * 4 + 0];
-      verts[i].g = m_colors[i * 4 + 1];
-      verts[i].b = m_colors[i * 4 + 2];
-      verts[i].a = m_colors[i * 4 + 3];
+      verts[i].r = 1.0f; verts[i].g = 0.3f; verts[i].b = 0.3f; verts[i].a = 1.0f;
     }
   }
 
-  // Auto-center camera on visible keypoints
+  // Second skeleton (raw triangulation reference) — blue tint
+  const float* ref = keypoints_3d_ref ? keypoints_3d_ref : keypoints_3d;
+  for (int i = 0; i < num_keypoints && i < m_num_keypoints; i++) {
+    int vi = m_num_keypoints + i;
+    float x = ref[i * 3 + 0];
+    float y = ref[i * 3 + 1];
+    float z = ref[i * 3 + 2];
+    verts[vi].x = x;
+    verts[vi].y = z;
+    verts[vi].z = y;
+    if (std::isnan(x)) {
+      verts[vi].r = verts[vi].g = verts[vi].b = 0;
+      verts[vi].a = 0;
+    } else {
+      verts[vi].r = 0.3f; verts[vi].g = 0.5f; verts[vi].b = 1.0f; verts[vi].a = 1.0f;
+    }
+  }
+
+  // Auto-center camera on reference (blue) skeleton for stability
   float cx = 0, cy = 0, cz = 0;
   int count = 0;
   for (int i = 0; i < num_keypoints; i++) {
-    if (!std::isnan(keypoints_3d[i * 3])) {
-      cx += verts[i].x;
-      cy += verts[i].y;
-      cz += verts[i].z;
+    if (!std::isnan(ref[i * 3])) {
+      cx += verts[m_num_keypoints + i].x;
+      cy += verts[m_num_keypoints + i].y;
+      cz += verts[m_num_keypoints + i].z;
       count++;
     }
   }
@@ -941,14 +963,14 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
   vkCmdBindDescriptorSets(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           m_pipeline_layout, 0, 1, &m_descriptor_set, 0, nullptr);
 
-  // Draw skeleton lines
+  // Draw skeleton lines (both IK and reference)
   vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_line_pipeline);
   vkCmdBindIndexBuffer(m_command_buffer, m_line_index_buffer, 0, VK_INDEX_TYPE_UINT16);
-  vkCmdDrawIndexed(m_command_buffer, m_num_edges * 2, 1, 0, 0, 0);
+  vkCmdDrawIndexed(m_command_buffer, m_num_edges * 2 * 2, 1, 0, 0, 0);
 
-  // Draw joint points
+  // Draw joint points (both skeletons)
   vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_point_pipeline);
-  vkCmdDraw(m_command_buffer, m_num_keypoints, 1, 0, 0);
+  vkCmdDraw(m_command_buffer, m_num_keypoints * 2, 1, 0, 0);
 
   // Draw rotation gizmo in bottom-right corner
   {

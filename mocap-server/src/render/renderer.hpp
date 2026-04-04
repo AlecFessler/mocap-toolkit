@@ -32,9 +32,11 @@ public:
   ~Renderer();
 
   // Update keypoints from host memory and render
-  // keypoints_3d: [num_keypoints * 3] floats (x,y,z), NaN for invalid
+  // keypoints_3d: [num_keypoints * 3] floats (x,y,z) — IK output (red), NaN for invalid
+  // keypoints_3d_ref: [num_keypoints * 3] floats — raw triangulation (blue), NaN for invalid. NULL to skip.
   // Returns false if window closed
-  bool render_frame(const float* keypoints_3d, int num_keypoints, const frame_metrics* metrics = nullptr);
+  bool render_frame(const float* keypoints_3d, const float* keypoints_3d_ref,
+                    int num_keypoints, const frame_metrics* metrics = nullptr);
 
 private:
   int m_width, m_height;

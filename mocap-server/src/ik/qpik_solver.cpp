@@ -149,7 +149,7 @@ float QPIKSolver::solve(const std::vector<Eigen::Vector3f>& target_positions,
     Eigen::MatrixXf WJ = w.asDiagonal() * J;
     Eigen::MatrixXf H = m_params.lambda * Eigen::MatrixXf::Identity(NUM_DOFS, NUM_DOFS)
                        + J.transpose() * WJ;
-    Eigen::VectorXf g = -2.0f * J.transpose() * w_error;
+    Eigen::VectorXf g = -J.transpose() * w_error;
 
     // Compute box bounds from ROM + velocity constraints
     const Eigen::VectorXf& q = m_skeleton.q;

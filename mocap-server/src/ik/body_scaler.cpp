@@ -37,8 +37,15 @@ float BodyScaler::median(int bone_idx) const {
 }
 
 bool BodyScaler::is_outlier(int bone_idx, float measured_length) const {
-  float expected = m_skeleton.joints[m_skeleton.bones[bone_idx].joint].bone_length;
+  const BoneDef& bd = m_skeleton.bones[bone_idx];
+  float expected = m_skeleton.joints[bd.joint].bone_length;
   if (expected <= 0.0f) return false; // no reference yet
+
+  // Width bones measure full inter-joint distance but joint stores half
+  if (bd.symmetric_pair == -1 &&
+      ((bd.coco_a == 11 && bd.coco_b == 12) ||
+       (bd.coco_a == 5 && bd.coco_b == 6)))
+    expected *= 2.0f;
 
   float ratio = measured_length / expected;
   return std::abs(ratio - 1.0f) > m_outlier_tolerance;
