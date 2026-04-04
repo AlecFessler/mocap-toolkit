@@ -422,7 +422,9 @@ void TextOverlay::update(
   int valid_count,
   int total_keypoints,
   float avg_reproj,
-  float avg_views
+  float avg_views,
+  float running_avg_reproj,
+  int running_avg_frames
 ) {
   text_vertex* verts = static_cast<text_vertex*>(m_vertex_mapped);
   int count = 0;
@@ -458,7 +460,19 @@ void TextOverlay::update(
     }
   }
 
+  // running average reproj
+  if (running_avg_frames > 0) {
+    snprintf(line, sizeof(line), "Avg reproj: %.2fpx (%d frames)", running_avg_reproj, running_avg_frames);
+    add_text(line, x_start, y, verts, &count);
+    y += line_spacing;
+  }
+
   m_vertex_count = count;
+}
+
+void TextOverlay::update_toggles(const pipeline_config* config) {
+  (void)config;
+  // toggle rendering disabled — infrastructure kept for future use
 }
 
 void TextOverlay::record(VkCommandBuffer cmd) {

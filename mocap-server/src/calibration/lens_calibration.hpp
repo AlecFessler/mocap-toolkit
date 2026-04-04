@@ -5,7 +5,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-constexpr int MIN_FRAMES = 10;
+constexpr int MIN_FRAMES = 30;
 constexpr double MIN_ERR = 1.0;
 
 class LensCalibration {

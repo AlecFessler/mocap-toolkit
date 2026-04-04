@@ -10,6 +10,7 @@
 #include <cstdint>
 
 struct frame_metrics;
+struct pipeline_config;
 class TextOverlay;
 
 struct renderer_config {
@@ -27,7 +28,7 @@ struct renderer_ubo {
 
 class Renderer {
 public:
-  Renderer(const renderer_config& config);
+  Renderer(const renderer_config& config, pipeline_config* pipe_config);
   ~Renderer();
 
   // Update keypoints from host memory and render
@@ -109,6 +110,9 @@ private:
 
   // Text overlay
   TextOverlay* m_text_overlay;
+
+  // Pipeline toggles (shared with inference thread)
+  pipeline_config* m_pipe_config;
 
   // Setup
   void create_instance();

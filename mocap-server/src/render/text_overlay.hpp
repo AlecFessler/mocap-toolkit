@@ -3,6 +3,7 @@
 
 #include <vulkan/vulkan.h>
 #include "triangulation/triangulator.hpp"
+#include "core/pipeline_config.h"
 
 struct text_vertex {
   float px, py;  // screen pixel position
@@ -12,6 +13,12 @@ struct text_vertex {
 // Max characters we can render per frame
 constexpr int MAX_TEXT_CHARS = 512;
 constexpr int MAX_TEXT_VERTICES = MAX_TEXT_CHARS * 6; // 2 tris per char
+
+constexpr int NUM_TOGGLES = 0;
+
+struct toggle_rect {
+  float x_min, y_min, x_max, y_max;
+};
 
 class TextOverlay {
 public:
@@ -30,8 +37,16 @@ public:
     int valid_count,
     int total_keypoints,
     float avg_reproj,
-    float avg_views
+    float avg_views,
+    float running_avg_reproj = 0.0f,
+    int running_avg_frames = 0
   );
+
+  // Render toggle buttons and return bounds for hit testing
+  void update_toggles(const pipeline_config* config);
+
+  // Toggle bounds for click hit testing (set by update_toggles)
+  toggle_rect toggle_bounds[NUM_TOGGLES];
 
   // Record draw commands into command buffer
   void record(VkCommandBuffer cmd);

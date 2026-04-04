@@ -9,6 +9,7 @@
 #include "render/text_overlay.hpp"
 #include "triangulation/triangulator.hpp"
 #include "core/logging.h"
+#include "core/pipeline_config.h"
 
 // Vertex: position (xyz) + color (rgba) = 28 bytes
 struct vertex {
@@ -113,11 +114,11 @@ static void mat4_look_at(float* m, const float* eye, const float* center, const 
   m[14] = (f[0]*eye[0]+f[1]*eye[1]+f[2]*eye[2]);
 }
 
-Renderer::Renderer(const renderer_config& config)
+Renderer::Renderer(const renderer_config& config, pipeline_config* pipe_config)
   : m_width(config.width), m_height(config.height),
     m_num_keypoints(config.num_keypoints), m_num_edges(config.num_edges),
     m_cam_azimuth(0.0f), m_cam_elevation(30.0f), m_cam_distance(2000.0f),
-    m_mouse_dragging(false)
+    m_mouse_dragging(false), m_pipe_config(pipe_config)
 {
   m_cam_target[0] = 0; m_cam_target[1] = 0; m_cam_target[2] = 1000;
   init_colors();
@@ -724,9 +725,10 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
     float x = keypoints_3d[i * 3 + 0];
     float y = keypoints_3d[i * 3 + 1];
     float z = keypoints_3d[i * 3 + 2];
+    // remap camera coords (Z=up from floor cameras) to renderer coords (Y=up)
     verts[i].x = x;
-    verts[i].y = -y; // flip Y for display (camera convention Y-down)
-    verts[i].z = z;
+    verts[i].y = z;
+    verts[i].z = y;
     if (std::isnan(x)) {
       verts[i].r = verts[i].g = verts[i].b = 0;
       verts[i].a = 0;
@@ -826,7 +828,10 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
     float avg_reproj = reproj_count > 0 ? total_reproj / reproj_count : 0.0f;
     float avg_views = num_keypoints > 0 ? total_views / num_keypoints : 0.0f;
 
-    m_text_overlay->update(metrics, valid_count, num_keypoints, avg_reproj, avg_views);
+    float running_reproj = m_pipe_config ? m_pipe_config->avg_reproj_running.load(std::memory_order_relaxed) : 0.0f;
+    int running_frames = m_pipe_config ? m_pipe_config->avg_reproj_frames.load(std::memory_order_relaxed) : 0;
+    m_text_overlay->update(metrics, valid_count, num_keypoints, avg_reproj, avg_views,
+      running_reproj, running_frames);
     m_text_overlay->record(m_command_buffer);
   }
 

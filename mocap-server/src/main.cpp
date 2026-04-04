@@ -29,8 +29,9 @@ extern "C" {
 #include "net/stream_mgr.hpp"
 #include "triangulation/triangulator.hpp"
 #include "render/renderer.hpp"
-#include "cuda/gpu_kalman.hpp"
 #include "cuda/gpu_triangulate.hpp"
+#include "cuda/gpu_kalman_3d.hpp"
+#include "core/pipeline_config.h"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/toolkit.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
@@ -124,12 +125,6 @@ struct inference_ctx {
   frame_metrics* latest_metrics;        // shared buffer for renderer
   std::atomic<bool>* keypoints_ready;   // signal main thread new data available
   volatile sig_atomic_t* running;
-  // Kalman filter state (device)
-  float* dev_kalman_state;
-  float* dev_kalman_covariance;
-  float* dev_kf_keypoints_out;
-  float* dev_kf_confidence_out;
-  kalman_params* dev_kalman_params;
   // GPU triangulation state (device)
   double* dev_proj_matrices;
   double* dev_cam_matrices;
@@ -138,6 +133,12 @@ struct inference_ctx {
   float* dev_reproj_error;
   float* dev_pairwise_spread;
   triangulate_params* dev_tri_params;
+  // 3D Kalman filter state (device)
+  float* dev_kf3d_state;
+  float* dev_kf3d_covariance;
+  float* dev_kf3d_out;
+  kalman_params* dev_kf3d_params;
+  pipeline_config* pipe_config;
 };
 
 static void* inference_thread_fn(void* ptr) {
@@ -167,6 +168,7 @@ static void* inference_thread_fn(void* ptr) {
   int64_t run_reproj_samples = 0;
   int64_t run_total_valid = 0;
   int64_t run_frames = 0;
+  uint32_t last_stats_gen = ctx->pipe_config->stats_generation.load(std::memory_order_relaxed);
 
   cudaStream_t stream = ctx->predictor->stream();
 
@@ -193,19 +195,9 @@ static void* inference_thread_fn(void* ptr) {
     for (int i = 0; i < ctx->cam_count; i++)
       fs->surface_counters[i]->fetch_sub(1, std::memory_order_relaxed);
 
-    // Kalman filter (disabled — calibration needs improvement first)
-    // gpu_kalman_update(
-    //   ctx->dev_kalman_state, ctx->dev_kalman_covariance,
-    //   dev_kp_raw, dev_conf_raw,
-    //   ctx->dev_kf_keypoints_out, ctx->dev_kf_confidence_out,
-    //   ctx->dev_kalman_params,
-    //   ctx->cam_count, NUM_KEYPOINTS, stream
-    // );
-
-    // Copy raw SimCC results D→H (bypass Kalman)
     cudaStreamSynchronize(stream);
 
-    // GPU triangulation + Gauss-Newton optimization (device to device)
+    // N-view DLT triangulation (all cameras required, with undistortion)
     gpu_triangulate(
       dev_kp_raw,
       dev_conf_raw,
@@ -218,6 +210,17 @@ static void* inference_thread_fn(void* ptr) {
       ctx->dev_tri_params,
       stream
     );
+
+    // 3D Kalman filter (temporal smoothing + gap filling)
+    gpu_kalman_3d_update(
+      ctx->dev_kf3d_state, ctx->dev_kf3d_covariance,
+      ctx->dev_keypoints_3d, ctx->dev_kf3d_out,
+      ctx->dev_kf3d_params,
+      NUM_KEYPOINTS, stream
+    );
+    cudaMemcpyAsync(ctx->dev_keypoints_3d, ctx->dev_kf3d_out,
+      NUM_KEYPOINTS * 3 * sizeof(float), cudaMemcpyDeviceToDevice, stream);
+
     cudaStreamSynchronize(stream);
 
     // Copy results D→H
@@ -309,11 +312,26 @@ static void* inference_thread_fn(void* ptr) {
           max_conf = host_conf_buf[c * NUM_KEYPOINTS + k];
       }
     }
+    // check if toggles changed — reset accumulators
+    uint32_t cur_gen = ctx->pipe_config->stats_generation.load(std::memory_order_relaxed);
+    if (cur_gen != last_stats_gen) {
+      run_total_reproj = 0.0;
+      run_reproj_samples = 0;
+      run_total_valid = 0;
+      run_frames = 0;
+      last_stats_gen = cur_gen;
+    }
+
     // accumulate run stats
     run_total_reproj += total_reproj;
     run_reproj_samples += reproj_count;
     run_total_valid += valid_count;
     run_frames++;
+
+    // publish running average for renderer
+    float running_avg = run_reproj_samples > 0 ? (float)(run_total_reproj / run_reproj_samples) : 0.0f;
+    ctx->pipe_config->avg_reproj_running.store(running_avg, std::memory_order_relaxed);
+    ctx->pipe_config->avg_reproj_frames.store((int32_t)run_frames, std::memory_order_relaxed);
 
     snprintf(logstr, sizeof(logstr), "Tri: %d/%d | reproj: %.1fpx | conf: %.2f-%.2f",
       valid_count, NUM_KEYPOINTS, avg_reproj, min_conf, max_conf);
@@ -597,7 +615,7 @@ int main(int argc, char* argv[]) {
     }
     if (running) {
       stereo_calibrator = new StereoCalibration(
-        calib_params, cam_count,
+        calib_params, cam_count, cam_confs,
         PROCESSED_WIDTH, PROCESSED_HEIGHT,
         BOARD_WIDTH, BOARD_HEIGHT, SQUARE_SIZE
       );
@@ -633,17 +651,17 @@ int main(int argc, char* argv[]) {
   float shared_keypoints_3d[NUM_KEYPOINTS * 3];
   frame_metrics shared_metrics{};
   std::atomic<bool> keypoints_ready{false};
+  pipeline_config pipe_config;
   memset(shared_keypoints_3d, 0, sizeof(shared_keypoints_3d));
 
   // inference thread setup for mocap mode
   int kp_fd = -1;
   int conf_fd = -1;
   int metrics_fd = -1;
-  float* dev_kalman_state = nullptr;
-  float* dev_kalman_covariance = nullptr;
-  float* dev_kf_keypoints_out = nullptr;
-  float* dev_kf_confidence_out = nullptr;
-  kalman_params* dev_kalman_params = nullptr;
+  float* dev_kf3d_state = nullptr;
+  float* dev_kf3d_covariance = nullptr;
+  float* dev_kf3d_out = nullptr;
+  kalman_params* dev_kf3d_params = nullptr;
   double* dev_proj_matrices = nullptr;
   double* dev_cam_matrices = nullptr;
   double* dev_dist_coeffs = nullptr;
@@ -686,33 +704,26 @@ int main(int argc, char* argv[]) {
 
     spsc_queue_init(&frameset_pq, &frameset_cq, frameset_q_buf, INFERENCE_Q_SLOTS);
 
-    // Kalman filter device buffers
-    int total_kf = cam_count * NUM_KEYPOINTS;
-
-    cudaMalloc(&dev_kalman_state, total_kf * 4 * sizeof(float));
-    cudaMalloc(&dev_kalman_covariance, total_kf * 16 * sizeof(float));
-    cudaMalloc(&dev_kf_keypoints_out, total_kf * 2 * sizeof(float));
-    cudaMalloc(&dev_kf_confidence_out, total_kf * sizeof(float));
-    cudaMalloc(&dev_kalman_params, sizeof(kalman_params));
-
-    // initialize Kalman state
     cudaStream_t kf_stream = predictor->stream();
-    gpu_kalman_init(dev_kalman_state, dev_kalman_covariance,
-      cam_count, NUM_KEYPOINTS, kf_stream);
 
-    // initialize confidence output to zero (so coasting starts fresh)
-    cudaMemset(dev_kf_confidence_out, 0, total_kf * sizeof(float));
+    // 3D Kalman filter buffers
+    cudaMalloc(&dev_kf3d_state, NUM_KEYPOINTS * 6 * sizeof(float));
+    cudaMalloc(&dev_kf3d_covariance, NUM_KEYPOINTS * 36 * sizeof(float));
+    cudaMalloc(&dev_kf3d_out, NUM_KEYPOINTS * 3 * sizeof(float));
+    cudaMalloc(&dev_kf3d_params, sizeof(kalman_params));
 
-    // upload Kalman params
-    kalman_params kf_params;
-    kf_params.process_noise = 5.0f;
-    kf_params.measurement_noise = 10.0f;
-    kf_params.gate_threshold = 16.0f;
-    kf_params.confidence_decay = 0.85f;
-    kf_params.min_confidence = 0.5f;
-    kf_params.dt = 1.0f / 30.0f;
-    kf_params.confidence_threshold = 3.0f;
-    cudaMemcpy(dev_kalman_params, &kf_params, sizeof(kalman_params), cudaMemcpyHostToDevice);
+    gpu_kalman_3d_init(dev_kf3d_state, dev_kf3d_covariance, NUM_KEYPOINTS, kf_stream);
+
+    // 3D Kalman uses different tuning (mm-scale positions, not pixels)
+    kalman_params kf3d_params;
+    kf3d_params.process_noise = 50.0f;
+    kf3d_params.measurement_noise = 100.0f;
+    kf3d_params.gate_threshold = 10000.0f;
+    kf3d_params.confidence_decay = 0.85f;
+    kf3d_params.min_confidence = 0.5f;
+    kf3d_params.dt = 1.0f / 30.0f;
+    kf3d_params.confidence_threshold = 3.0f;
+    cudaMemcpy(dev_kf3d_params, &kf3d_params, sizeof(kalman_params), cudaMemcpyHostToDevice);
     cudaStreamSynchronize(kf_stream);
 
     // GPU triangulation buffers
@@ -754,7 +765,6 @@ int main(int argc, char* argv[]) {
     tri_params.confidence_threshold = 3.0f;
     tri_params.num_cameras = cam_count;
     tri_params.num_keypoints = NUM_KEYPOINTS;
-    tri_params.optim_iterations = 3;
     cudaMemcpy(dev_tri_params, &tri_params, sizeof(triangulate_params), cudaMemcpyHostToDevice);
     cudaStreamSynchronize(kf_stream);
 
@@ -772,11 +782,10 @@ int main(int argc, char* argv[]) {
     inf_ctx.latest_keypoints_3d = shared_keypoints_3d;
     inf_ctx.latest_metrics = &shared_metrics;
     inf_ctx.keypoints_ready = &keypoints_ready;
-    inf_ctx.dev_kalman_state = dev_kalman_state;
-    inf_ctx.dev_kalman_covariance = dev_kalman_covariance;
-    inf_ctx.dev_kf_keypoints_out = dev_kf_keypoints_out;
-    inf_ctx.dev_kf_confidence_out = dev_kf_confidence_out;
-    inf_ctx.dev_kalman_params = dev_kalman_params;
+    inf_ctx.dev_kf3d_state = dev_kf3d_state;
+    inf_ctx.dev_kf3d_covariance = dev_kf3d_covariance;
+    inf_ctx.dev_kf3d_out = dev_kf3d_out;
+    inf_ctx.dev_kf3d_params = dev_kf3d_params;
     inf_ctx.dev_proj_matrices = dev_proj_matrices;
     inf_ctx.dev_cam_matrices = dev_cam_matrices;
     inf_ctx.dev_dist_coeffs = dev_dist_coeffs;
@@ -784,6 +793,7 @@ int main(int argc, char* argv[]) {
     inf_ctx.dev_reproj_error = dev_reproj_error;
     inf_ctx.dev_pairwise_spread = dev_pairwise_spread;
     inf_ctx.dev_tri_params = dev_tri_params;
+    inf_ctx.pipe_config = &pipe_config;
 
     ret = pthread_create(&inference_thread, nullptr, inference_thread_fn, &inf_ctx);
     if (ret) {
@@ -801,7 +811,7 @@ int main(int argc, char* argv[]) {
     rcfg.num_keypoints = NUM_KEYPOINTS;
     rcfg.skeleton_edges = RENDER_SKELETON_EDGES;
     rcfg.num_edges = NUM_RENDER_EDGES;
-    renderer = new Renderer(rcfg);
+    renderer = new Renderer(rcfg, &pipe_config);
   }
 
   // frame bundling arrays
@@ -981,12 +991,10 @@ int main(int argc, char* argv[]) {
         bgr_frames[i] = wide_to_3_4_ar(unprocessed_bgr);
       }
 
-      for (int i = 0; i < cam_count; i++)
-        cv::imshow(cam_confs[i].name, bgr_frames[i]);
-      cv::waitKey(16);
-      usleep(1000);
-
       if (cooldown > 0) {
+        for (int i = 0; i < cam_count; i++)
+          cv::imshow(cam_confs[i].name, bgr_frames[i]);
+        cv::waitKey(16);
         if (++cooldown_counter >= cooldown)
           cooldown = 0;
         continue;
@@ -996,6 +1004,18 @@ int main(int argc, char* argv[]) {
 
       stereo_calibrator->try_frames(gray_frames);
       calibration_complete = stereo_calibrator->check_status();
+
+      // draw detected corners on display frames
+      cv::Size board_size(BOARD_WIDTH, BOARD_HEIGHT);
+      for (int i = 0; i < cam_count; i++) {
+        std::vector<cv::Point2f> corners;
+        bool found = cv::findChessboardCorners(gray_frames[i], board_size, corners,
+          cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE + cv::CALIB_CB_FAST_CHECK);
+        if (found)
+          cv::drawChessboardCorners(bgr_frames[i], board_size, corners, true);
+        cv::imshow(cam_confs[i].name, bgr_frames[i]);
+      }
+      cv::waitKey(16);
 
     } else if (mode == MODE_MOCAP) {
       // package frameset and hand off to inference thread
@@ -1071,11 +1091,10 @@ int main(int argc, char* argv[]) {
   delete stereo_calibrator;
   delete predictor;
   delete triangulator;
-  cudaFree(dev_kalman_state);
-  cudaFree(dev_kalman_covariance);
-  cudaFree(dev_kf_keypoints_out);
-  cudaFree(dev_kf_confidence_out);
-  cudaFree(dev_kalman_params);
+  cudaFree(dev_kf3d_state);
+  cudaFree(dev_kf3d_covariance);
+  cudaFree(dev_kf3d_out);
+  cudaFree(dev_kf3d_params);
   cudaFree(dev_proj_matrices);
   cudaFree(dev_cam_matrices);
   cudaFree(dev_dist_coeffs);

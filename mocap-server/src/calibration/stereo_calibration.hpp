@@ -17,6 +17,7 @@ struct stereo_pair {
   cv::Mat cam2_dist_coeffs;
   cv::Mat rotation_mat;
   cv::Mat translation_mat;
+  double rms_error;
 };
 
 class StereoCalibration {
@@ -24,6 +25,7 @@ private:
   std::vector<cv::Point3f> objp;
 
   std::vector<stereo_pair> stereo_pairs;
+  cam_conf* cam_confs;
   int cam_count;
   int frame_width;
   int frame_height;
@@ -35,6 +37,7 @@ public:
   StereoCalibration(
     struct calibration_params* calib_params,
     int cam_count,
+    cam_conf* confs,
     int frame_width,
     int frame_height,
     int board_width,

@@ -4,10 +4,9 @@
 #include <cuda_runtime.h>
 
 struct triangulate_params {
-    float confidence_threshold;   // 0.5
+    float confidence_threshold;
     int num_cameras;
     int num_keypoints;
-    int optim_iterations;         // 3-5 Gauss-Newton iterations
 };
 
 // Upload camera calibration data to device (call once at init)
@@ -22,7 +21,7 @@ void gpu_triangulate_init(
     cudaStream_t stream
 );
 
-// Pairwise consensus triangulation + Gauss-Newton reprojection optimization
+// N-view DLT triangulation with lens undistortion, requires all cameras visible
 void gpu_triangulate(
     const float* dev_keypoints_2d,  // [cameras * keypoints * 2]
     const float* dev_confidence,    // [cameras * keypoints]

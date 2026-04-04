@@ -3,7 +3,7 @@
 # See LICENSE file in the project root for full license information.
 
 import numpy as np
-import cv2
+from PIL import Image
 
 def main():
   SQUARE_SIZE_MM = 25
@@ -28,17 +28,17 @@ def main():
       pattern[y1:y2, x1:x2] = 255
 
   border_size = int(SQUARE_SIZE_PX / 2)
-  bordered_pattern = cv2.copyMakeBorder(
-    pattern,
-    border_size,
-    border_size,
-    border_size,
-    border_size,
-    cv2.BORDER_CONSTANT,
-    value=255
+  bordered_pattern = np.full(
+    (pattern_height + 2 * border_size, pattern_width + 2 * border_size),
+    255, dtype=np.uint8
   )
+  bordered_pattern[border_size:border_size + pattern_height,
+                   border_size:border_size + pattern_width] = pattern
 
-  cv2.imwrite('chessboard_pattern.png', bordered_pattern)
+  img = Image.fromarray(bordered_pattern, mode='L')
+  img.save('chessboard_pattern.png', dpi=(DPI, DPI))
+  print(f"Saved chessboard_pattern.png ({img.width}x{img.height} px, {DPI} DPI)")
+  print(f"Print size: {img.width / DPI * MM_PER_INCH:.0f} x {img.height / DPI * MM_PER_INCH:.0f} mm")
 
 if __name__ == "__main__":
   main()
