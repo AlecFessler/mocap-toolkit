@@ -118,7 +118,8 @@ Renderer::Renderer(const renderer_config& config, pipeline_config* pipe_config)
   : m_width(config.width), m_height(config.height),
     m_num_keypoints(config.num_keypoints), m_num_edges(config.num_edges),
     m_cam_azimuth(0.0f), m_cam_elevation(30.0f), m_cam_distance(2000.0f),
-    m_mouse_dragging(false), m_pipe_config(pipe_config)
+    m_cam_roll(0.0f), m_mouse_dragging(false), m_selected_axis(-1),
+    m_pipe_config(pipe_config)
 {
   m_cam_target[0] = 0; m_cam_target[1] = 0; m_cam_target[2] = 1000;
   init_colors();
@@ -147,6 +148,7 @@ Renderer::Renderer(const renderer_config& config, pipeline_config* pipe_config)
   create_command_pool();
 
   m_text_overlay = new TextOverlay(m_device, m_physical_device, m_render_pass, m_width, m_height);
+  create_gizmo();
 }
 
 Renderer::~Renderer() {
@@ -164,6 +166,10 @@ Renderer::~Renderer() {
   vkFreeMemory(m_device, m_line_index_memory, nullptr);
   vkDestroyBuffer(m_device, m_uniform_buffer, nullptr);
   vkFreeMemory(m_device, m_uniform_memory, nullptr);
+  vkDestroyBuffer(m_device, m_gizmo_vb, nullptr);
+  vkFreeMemory(m_device, m_gizmo_vb_memory, nullptr);
+  vkDestroyBuffer(m_device, m_gizmo_ub, nullptr);
+  vkFreeMemory(m_device, m_gizmo_ub_memory, nullptr);
 
   vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
   vkDestroyDescriptorSetLayout(m_device, m_descriptor_set_layout, nullptr);
@@ -637,11 +643,11 @@ void Renderer::create_buffers(const int* skeleton_edges, int num_edges) {
 void Renderer::create_descriptor_set() {
   VkDescriptorPoolSize pool_size{};
   pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  pool_size.descriptorCount = 1;
+  pool_size.descriptorCount = 2; // main scene + gizmo
 
   VkDescriptorPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pool_info.maxSets = 1;
+  pool_info.maxSets = 2;
   pool_info.poolSizeCount = 1;
   pool_info.pPoolSizes = &pool_size;
   vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptor_pool);
@@ -695,6 +701,110 @@ void Renderer::create_command_pool() {
   vkAllocateCommandBuffers(m_device, &alloc_info, &m_command_buffer);
 }
 
+void Renderer::create_gizmo() {
+  // Generate ring geometry: 3 unit circles (YZ, XZ, XY planes)
+  vertex gizmo_verts[GIZMO_VERTS];
+  float colors[3][4] = {
+    {1.0f, 0.3f, 0.3f, 1.0f}, // X axis - red
+    {0.3f, 1.0f, 0.3f, 1.0f}, // Y axis - green
+    {0.3f, 0.3f, 1.0f, 1.0f}, // Z axis - blue
+  };
+
+  int vi = 0;
+  for (int axis = 0; axis < 3; axis++) {
+    for (int seg = 0; seg < GIZMO_SEGMENTS; seg++) {
+      float a0 = 2.0f * 3.14159265f * seg / GIZMO_SEGMENTS;
+      float a1 = 2.0f * 3.14159265f * (seg + 1) / GIZMO_SEGMENTS;
+      float c0 = cosf(a0), s0 = sinf(a0);
+      float c1 = cosf(a1), s1 = sinf(a1);
+
+      vertex v0{}, v1{};
+      v0.r = v1.r = colors[axis][0];
+      v0.g = v1.g = colors[axis][1];
+      v0.b = v1.b = colors[axis][2];
+      v0.a = v1.a = colors[axis][3];
+
+      if (axis == 0) { // X rotation: circle in YZ plane
+        v0.x = 0; v0.y = c0; v0.z = s0;
+        v1.x = 0; v1.y = c1; v1.z = s1;
+      } else if (axis == 1) { // Y rotation: circle in XZ plane
+        v0.x = c0; v0.y = 0; v0.z = s0;
+        v1.x = c1; v1.y = 0; v1.z = s1;
+      } else { // Z rotation: circle in XY plane
+        v0.x = c0; v0.y = s0; v0.z = 0;
+        v1.x = c1; v1.y = s1; v1.z = 0;
+      }
+
+      gizmo_verts[vi++] = v0;
+      gizmo_verts[vi++] = v1;
+    }
+  }
+
+  // Create vertex buffer
+  VkDeviceSize vb_size = sizeof(gizmo_verts);
+  VkBufferCreateInfo vb_info{};
+  vb_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  vb_info.size = vb_size;
+  vb_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+  vkCreateBuffer(m_device, &vb_info, nullptr, &m_gizmo_vb);
+
+  VkMemoryRequirements vb_req;
+  vkGetBufferMemoryRequirements(m_device, m_gizmo_vb, &vb_req);
+  VkMemoryAllocateInfo vb_alloc{};
+  vb_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  vb_alloc.allocationSize = vb_req.size;
+  vb_alloc.memoryTypeIndex = find_memory_type(vb_req.memoryTypeBits,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  vkAllocateMemory(m_device, &vb_alloc, nullptr, &m_gizmo_vb_memory);
+  vkBindBufferMemory(m_device, m_gizmo_vb, m_gizmo_vb_memory, 0);
+
+  void* mapped;
+  vkMapMemory(m_device, m_gizmo_vb_memory, 0, vb_size, 0, &mapped);
+  memcpy(mapped, gizmo_verts, vb_size);
+  vkUnmapMemory(m_device, m_gizmo_vb_memory);
+
+  // Create uniform buffer for gizmo (rotation-only view + ortho projection)
+  VkDeviceSize ub_size = sizeof(renderer_ubo);
+  VkBufferCreateInfo ub_info{};
+  ub_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  ub_info.size = ub_size;
+  ub_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+  vkCreateBuffer(m_device, &ub_info, nullptr, &m_gizmo_ub);
+
+  VkMemoryRequirements ub_req;
+  vkGetBufferMemoryRequirements(m_device, m_gizmo_ub, &ub_req);
+  VkMemoryAllocateInfo ub_alloc{};
+  ub_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  ub_alloc.allocationSize = ub_req.size;
+  ub_alloc.memoryTypeIndex = find_memory_type(ub_req.memoryTypeBits,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  vkAllocateMemory(m_device, &ub_alloc, nullptr, &m_gizmo_ub_memory);
+  vkBindBufferMemory(m_device, m_gizmo_ub, m_gizmo_ub_memory, 0);
+  vkMapMemory(m_device, m_gizmo_ub_memory, 0, ub_size, 0, &m_gizmo_ub_mapped);
+
+  // Allocate descriptor set from existing pool (reuses same layout)
+  VkDescriptorSetAllocateInfo ds_alloc{};
+  ds_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  ds_alloc.descriptorPool = m_descriptor_pool;
+  ds_alloc.descriptorSetCount = 1;
+  ds_alloc.pSetLayouts = &m_descriptor_set_layout;
+  vkAllocateDescriptorSets(m_device, &ds_alloc, &m_gizmo_desc_set);
+
+  VkDescriptorBufferInfo buf_info{};
+  buf_info.buffer = m_gizmo_ub;
+  buf_info.offset = 0;
+  buf_info.range = sizeof(renderer_ubo);
+
+  VkWriteDescriptorSet write{};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = m_gizmo_desc_set;
+  write.dstBinding = 0;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  write.descriptorCount = 1;
+  write.pBufferInfo = &buf_info;
+  vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
 void Renderer::update_camera() {
   float rad_az = m_cam_azimuth * 3.14159265f / 180.0f;
   float rad_el = m_cam_elevation * 3.14159265f / 180.0f;
@@ -704,7 +814,18 @@ void Renderer::update_camera() {
   eye[1] = m_cam_target[1] + m_cam_distance * sinf(rad_el);
   eye[2] = m_cam_target[2] + m_cam_distance * cosf(rad_el) * cosf(rad_az);
 
-  float up[3] = {0, 1, 0};
+  // compute up vector with roll
+  float rad_roll = m_cam_roll * 3.14159265f / 180.0f;
+  // right vector (perpendicular to view direction in horizontal plane)
+  float right[3] = {cosf(rad_az), 0, -sinf(rad_az)};
+  // base up
+  float base_up[3] = {0, 1, 0};
+  // rotate base_up around view direction by roll angle
+  float up[3] = {
+    base_up[0] * cosf(rad_roll) + right[0] * sinf(rad_roll),
+    base_up[1] * cosf(rad_roll) + right[1] * sinf(rad_roll),
+    base_up[2] * cosf(rad_roll) + right[2] * sinf(rad_roll)
+  };
 
   renderer_ubo ubo;
   mat4_look_at(ubo.view, eye, m_cam_target, up);
@@ -712,6 +833,25 @@ void Renderer::update_camera() {
                    (float)m_width / (float)m_height, 1.0f, 100000.0f);
 
   memcpy(m_uniform_mapped, &ubo, sizeof(ubo));
+
+  // update gizmo UBO: same rotation but no translation, orthographic projection
+  float gizmo_eye[3] = {
+    3.0f * cosf(rad_el) * sinf(rad_az),
+    3.0f * sinf(rad_el),
+    3.0f * cosf(rad_el) * cosf(rad_az)
+  };
+  float gizmo_target[3] = {0, 0, 0};
+
+  renderer_ubo gizmo_ubo;
+  mat4_look_at(gizmo_ubo.view, gizmo_eye, gizmo_target, up);
+  // orthographic projection [-2, 2]
+  memset(gizmo_ubo.projection, 0, sizeof(gizmo_ubo.projection));
+  gizmo_ubo.projection[0]  =  0.5f;  // 1/2 for [-2,2] range
+  gizmo_ubo.projection[5]  =  0.5f;
+  gizmo_ubo.projection[10] = -0.1f;  // depth
+  gizmo_ubo.projection[15] =  1.0f;
+
+  memcpy(m_gizmo_ub_mapped, &gizmo_ubo, sizeof(gizmo_ubo));
 }
 
 bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const frame_metrics* metrics) {
@@ -810,6 +950,41 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
   vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_point_pipeline);
   vkCmdDraw(m_command_buffer, m_num_keypoints, 1, 0, 0);
 
+  // Draw rotation gizmo in bottom-right corner
+  {
+    VkViewport gizmo_vp{};
+    gizmo_vp.x = (float)(m_swapchain_extent.width - GIZMO_SIZE);
+    gizmo_vp.y = (float)(m_swapchain_extent.height - GIZMO_SIZE);
+    gizmo_vp.width = (float)GIZMO_SIZE;
+    gizmo_vp.height = (float)GIZMO_SIZE;
+    gizmo_vp.maxDepth = 1.0f;
+    vkCmdSetViewport(m_command_buffer, 0, 1, &gizmo_vp);
+
+    VkRect2D gizmo_scissor{};
+    gizmo_scissor.offset = {(int32_t)(m_swapchain_extent.width - GIZMO_SIZE),
+                            (int32_t)(m_swapchain_extent.height - GIZMO_SIZE)};
+    gizmo_scissor.extent = {(uint32_t)GIZMO_SIZE, (uint32_t)GIZMO_SIZE};
+    vkCmdSetScissor(m_command_buffer, 0, 1, &gizmo_scissor);
+
+    VkDeviceSize gizmo_offset = 0;
+    vkCmdBindVertexBuffers(m_command_buffer, 0, 1, &m_gizmo_vb, &gizmo_offset);
+    vkCmdBindDescriptorSets(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_pipeline_layout, 0, 1, &m_gizmo_desc_set, 0, nullptr);
+    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_line_pipeline);
+    vkCmdDraw(m_command_buffer, GIZMO_VERTS, 1, 0, 0);
+
+    // restore full viewport and scissor
+    VkViewport full_vp{};
+    full_vp.width = (float)m_width;
+    full_vp.height = (float)m_height;
+    full_vp.maxDepth = 1.0f;
+    vkCmdSetViewport(m_command_buffer, 0, 1, &full_vp);
+
+    VkRect2D full_scissor{};
+    full_scissor.extent = m_swapchain_extent;
+    vkCmdSetScissor(m_command_buffer, 0, 1, &full_scissor);
+  }
+
   // Draw text overlay with metrics
   if (metrics) {
     int valid_count = 0;
@@ -867,9 +1042,87 @@ bool Renderer::render_frame(const float* keypoints_3d, int num_keypoints, const 
 // GLFW callbacks
 void Renderer::mouse_button_callback(GLFWwindow* window, int button, int action, int /*mods*/) {
   auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(window));
-  if (button == GLFW_MOUSE_BUTTON_LEFT) {
-    self->m_mouse_dragging = (action == GLFW_PRESS);
-    glfwGetCursorPos(window, &self->m_last_mouse_x, &self->m_last_mouse_y);
+  if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+    double mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+
+    // scale to render coords for gizmo hit test
+    int win_w, win_h;
+    glfwGetWindowSize(window, &win_w, &win_h);
+    double rx = mx * (double)self->m_width / (double)win_w;
+    double ry = my * (double)self->m_height / (double)win_h;
+
+    // check if click is in the gizmo region (bottom-right corner)
+    float gx = (float)self->m_width - GIZMO_SIZE;
+    float gy = (float)self->m_height - GIZMO_SIZE;
+    self->m_selected_axis = -1;
+
+    if (rx >= gx && ry >= gy) {
+      // normalize click within gizmo to [-1, 1]
+      float gnx = ((float)rx - gx) / GIZMO_SIZE * 2.0f - 1.0f;
+      float gny = ((float)ry - gy) / GIZMO_SIZE * 2.0f - 1.0f;
+
+      // project each ring and find closest to click
+      // the gizmo view is from the same camera angle looking at origin
+      // simplify: use screen-space distance to each axis line through origin
+      // X axis (red/pitch): ring in YZ plane — on screen, appears as ellipse
+      // Y axis (green/yaw): ring in XZ plane
+      // Z axis (blue/roll): ring in XY plane
+      // Approximate: distance from click to the projected circle
+      // For each axis, compute distance from (gnx, gny) to the unit circle
+      // projected through the gizmo view matrix
+
+      float rad_az = self->m_cam_azimuth * 3.14159265f / 180.0f;
+      float rad_el = self->m_cam_elevation * 3.14159265f / 180.0f;
+      float rad_roll = self->m_cam_roll * 3.14159265f / 180.0f;
+
+      float best_dist = 0.3f; // threshold in normalized gizmo coords
+      int best_axis = -1;
+
+      // sample points on each ring and find min distance to click
+      for (int axis = 0; axis < 3; axis++) {
+        float min_d = 1e9f;
+        for (int s = 0; s < GIZMO_SEGMENTS; s++) {
+          float a = 2.0f * 3.14159265f * s / GIZMO_SEGMENTS;
+          float ca = cosf(a), sa = sinf(a);
+          float wx, wy, wz;
+          if (axis == 0) { wx = 0; wy = ca; wz = sa; }
+          else if (axis == 1) { wx = ca; wy = 0; wz = sa; }
+          else { wx = ca; wy = sa; wz = 0; }
+
+          // apply camera rotation (simplified orbit projection)
+          // rotate by -azimuth around Y, then -elevation around X
+          float x1 = wx * cosf(rad_az) + wz * sinf(rad_az);
+          float z1 = -wx * sinf(rad_az) + wz * cosf(rad_az);
+          float y1 = wy;
+          float y2 = y1 * cosf(rad_el) - z1 * sinf(rad_el);
+          float x2 = x1;
+
+          // apply roll
+          float xr = x2 * cosf(rad_roll) - y2 * sinf(rad_roll);
+          float yr = x2 * sinf(rad_roll) + y2 * cosf(rad_roll);
+
+          // match the 0.5 scale in the gizmo ortho projection
+          float sx = xr * 0.5f;
+          float sy = yr * 0.5f;
+
+          float d = sqrtf((gnx - sx) * (gnx - sx) + (gny - sy) * (gny - sy));
+          if (d < min_d) min_d = d;
+        }
+        if (min_d < best_dist) {
+          best_dist = min_d;
+          best_axis = axis;
+        }
+      }
+      self->m_selected_axis = best_axis;
+    }
+
+    self->m_mouse_dragging = true;
+    self->m_last_mouse_x = mx;
+    self->m_last_mouse_y = my;
+  } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
+    self->m_mouse_dragging = false;
+    self->m_selected_axis = -1;
   }
 }
 
@@ -878,8 +1131,27 @@ void Renderer::cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
   if (self->m_mouse_dragging) {
     double dx = xpos - self->m_last_mouse_x;
     double dy = ypos - self->m_last_mouse_y;
-    self->m_cam_azimuth += (float)dx * 0.3f;
-    self->m_cam_elevation += (float)dy * 0.3f;
+    float sensitivity = 0.3f;
+
+    // scale azimuth sensitivity by cos(elevation) to prevent pole spin
+    float el_rad = self->m_cam_elevation * 3.14159265f / 180.0f;
+    float az_scale = fmaxf(cosf(el_rad), 0.1f);
+
+    switch (self->m_selected_axis) {
+      case 0: // X axis (pitch/elevation) — vertical drag only
+        self->m_cam_elevation += (float)dy * sensitivity;
+        break;
+      case 1: // Y axis (yaw/azimuth) — horizontal drag only
+        self->m_cam_azimuth += (float)dx * sensitivity / az_scale;
+        break;
+      case 2: // Z axis (roll) — horizontal drag
+        self->m_cam_roll += (float)dx * sensitivity;
+        break;
+      default: // free rotation
+        self->m_cam_azimuth += (float)dx * sensitivity / az_scale;
+        self->m_cam_elevation += (float)dy * sensitivity;
+        break;
+    }
     self->m_cam_elevation = fmaxf(-89.0f, fminf(89.0f, self->m_cam_elevation));
     self->m_last_mouse_x = xpos;
     self->m_last_mouse_y = ypos;

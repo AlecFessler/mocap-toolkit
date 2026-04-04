@@ -101,9 +101,11 @@ private:
   float m_cam_azimuth;
   float m_cam_elevation;
   float m_cam_distance;
+  float m_cam_roll;
   float m_cam_target[3];
   double m_last_mouse_x, m_last_mouse_y;
   bool m_mouse_dragging;
+  int m_selected_axis; // -1=free, 0=X(pitch), 1=Y(yaw), 2=Z(roll)
 
   // Body part colors [keypoint_index] -> rgba
   float m_colors[512 * 4]; // max keypoints * rgba
@@ -113,6 +115,19 @@ private:
 
   // Pipeline toggles (shared with inference thread)
   pipeline_config* m_pipe_config;
+
+  // Rotation gizmo
+  static constexpr int GIZMO_SEGMENTS = 48;
+  static constexpr int GIZMO_VERTS = 3 * GIZMO_SEGMENTS * 2;
+  static constexpr int GIZMO_SIZE = 150;
+  VkBuffer m_gizmo_vb;
+  VkDeviceMemory m_gizmo_vb_memory;
+  VkBuffer m_gizmo_ub;
+  VkDeviceMemory m_gizmo_ub_memory;
+  void* m_gizmo_ub_mapped;
+  VkDescriptorSet m_gizmo_desc_set;
+
+  void create_gizmo();
 
   // Setup
   void create_instance();
