@@ -32,6 +32,7 @@ extern "C" {
 #include "cuda/gpu_triangulate.hpp"
 #include "cuda/gpu_kalman_3d.hpp"
 #include "core/pipeline_config.h"
+#include "ik/cometh_pipeline.hpp"
 
 constexpr const char* LOG_PATH = "/var/log/mocap-toolkit/toolkit.log";
 constexpr const char* CAM_CONF_PATH = "/etc/mocap-toolkit/cams.yaml";
@@ -44,15 +45,6 @@ constexpr uint32_t EMPTY_QS_WAIT = 10000; // 0.01 ms
 constexpr uint32_t DEV_PTRS_PER_THREAD = 16;
 constexpr uint32_t DEV_PTR_ACQUIRE_RETRY_LIMIT = 10;
 
-constexpr const char* KEYPOINTS_OUTPUT_PATH = "/tmp/mocap_keypoints_alec.bin";
-constexpr const char* CONFIDENCE_OUTPUT_PATH = "/tmp/mocap_confidence_alec.bin";
-constexpr const char* METRICS_OUTPUT_PATH = "/tmp/mocap_metrics_alec.bin";
-// keypoints binary: each frame is NUM_KEYPOINTS * 3 floats (x,y,z), NaN for invalid
-constexpr uint32_t FRAME_BYTES = NUM_KEYPOINTS * 3 * sizeof(float);
-// confidence binary: each frame is MAX_CAMERAS * NUM_KEYPOINTS floats
-constexpr uint32_t CONF_FRAME_BYTES = MAX_CAMERAS * NUM_KEYPOINTS * sizeof(float);
-// metrics binary: each frame is one frame_metrics struct
-constexpr uint32_t METRICS_FRAME_BYTES = sizeof(frame_metrics);
 
 constexpr uint32_t BOARD_WIDTH = 9;
 constexpr uint32_t BOARD_HEIGHT = 6;
@@ -117,9 +109,6 @@ struct inference_ctx {
   stream_conf* strm_conf;
   cam_conf* cam_confs;
   int cam_count;
-  int kp_fd;
-  int conf_fd;
-  int metrics_fd;
   uint8_t* host_frames; // for display (calibration modes)
   float* latest_keypoints_3d;           // shared buffer for renderer [NUM_KEYPOINTS * 3]
   frame_metrics* latest_metrics;        // shared buffer for renderer
@@ -139,6 +128,11 @@ struct inference_ctx {
   float* dev_kf3d_out;
   kalman_params* dev_kf3d_params;
   pipeline_config* pipe_config;
+  ComethPipeline* cometh;
+  // shared 2D keypoint buffer for overlay on camera feeds [cam_count * NUM_KEYPOINTS * 2]
+  float* latest_keypoints_2d;
+  float* latest_confidence;
+  std::atomic<bool>* kp2d_ready;
 };
 
 static void* inference_thread_fn(void* ptr) {
@@ -234,18 +228,77 @@ static void* inference_thread_fn(void* ptr) {
     cudaMemcpy(host_spread, ctx->dev_pairwise_spread,
       NUM_KEYPOINTS * sizeof(float), cudaMemcpyDeviceToHost);
 
-    // Also copy confidence D→H for logging and file output
+    // Also copy confidence and 2D keypoints D→H
     cudaMemcpy(host_conf_buf.data(), dev_conf_raw,
       total_kf * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_kp_buf.data(), dev_kp_raw,
+      total_kf * 2 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // ========== PIPELINE INSTRUMENTATION ==========
+    // Stage 1: 2D detection — per-camera confidence stats for body keypoints (5-16)
+    {
+      int body_detected[MAX_CAMERAS] = {};  // keypoints with conf >= 3.0 per camera
+      float cam_max_conf[MAX_CAMERAS] = {};
+      float cam_min_conf[MAX_CAMERAS];
+      for (int c = 0; c < ctx->cam_count; c++) cam_min_conf[c] = 999.0f;
+
+      for (int c = 0; c < ctx->cam_count; c++) {
+        for (int k = 5; k <= 16; k++) {
+          float conf = host_conf_buf[c * NUM_KEYPOINTS + k];
+          if (conf >= 3.0f) body_detected[c]++;
+          if (conf > cam_max_conf[c]) cam_max_conf[c] = conf;
+          if (conf < cam_min_conf[c]) cam_min_conf[c] = conf;
+        }
+      }
+      // How many body keypoints have ALL cameras above threshold?
+      int all_cams_body = 0;
+      for (int k = 5; k <= 16; k++) {
+        bool all_pass = true;
+        for (int c = 0; c < ctx->cam_count; c++) {
+          if (host_conf_buf[c * NUM_KEYPOINTS + k] < 3.0f) {
+            all_pass = false;
+            break;
+          }
+        }
+        if (all_pass) all_cams_body++;
+      }
+
+      snprintf(logstr, sizeof(logstr),
+        "2D: cam_body=[%d,%d,%d] conf=[%.1f-%.1f, %.1f-%.1f, %.1f-%.1f] all_cams=%d/12",
+        body_detected[0], body_detected[1], ctx->cam_count > 2 ? body_detected[2] : 0,
+        cam_min_conf[0], cam_max_conf[0],
+        cam_min_conf[1], cam_max_conf[1],
+        ctx->cam_count > 2 ? cam_min_conf[2] : 0.0f,
+        ctx->cam_count > 2 ? cam_max_conf[2] : 0.0f,
+        all_cams_body);
+      log_write(INFO, logstr);
+    }
+
+    // Stage 2: DLT triangulation — how many keypoints survived?
+    int dlt_body_valid = 0;
+    int dlt_total_valid = 0;
+    for (int k = 0; k < NUM_KEYPOINTS; k++) {
+      if (!std::isnan(host_kp3d[k * 3])) {
+        dlt_total_valid++;
+        if (k >= 5 && k <= 16) dlt_body_valid++;
+      }
+    }
+
+    // Stage 3: Kalman — same buffer post-kalman, count again
+    // (kalman fills NaN gaps via prediction, so count may increase)
+    // Note: host_kp3d already has kalman output since we copied dev_kf3d_out -> dev_keypoints_3d -> host
+
+    snprintf(logstr, sizeof(logstr), "DLT: body=%d/12 total=%d/133",
+      dlt_body_valid, dlt_total_valid);
+    log_write(INFO, logstr);
 
     // Build frame_metrics from GPU results
     frame_metrics metrics;
     for (int k = 0; k < NUM_KEYPOINTS; k++) {
       metrics.reproj_error[k] = host_reproj[k];
       metrics.pairwise_spread[k] = host_spread[k];
-      metrics.num_views[k] = 0; // GPU kernel doesn't output this, compute below
+      metrics.num_views[k] = 0;
     }
-    // count visible cameras per keypoint from raw confidence
     for (int k = 0; k < NUM_KEYPOINTS; k++) {
       int views = 0;
       for (int c = 0; c < ctx->cam_count; c++) {
@@ -254,7 +307,6 @@ static void* inference_thread_fn(void* ptr) {
       }
       metrics.num_views[k] = views;
     }
-    // compute bone lengths from 3D keypoints
     for (int b = 0; b < NUM_BONES; b++) {
       int a = BONE_EDGES[b].a;
       int bi = BONE_EDGES[b].b;
@@ -268,74 +320,68 @@ static void* inference_thread_fn(void* ptr) {
       }
     }
 
+    // Stage 4: COMETH IK
+    float ik_output[NUM_KEYPOINTS * 3];
+    ctx->cometh->process(host_kp3d, ik_output);
+
+    // Stage 5: Measure IK displacement on body joints
+    {
+      float total_dist = 0.0f, max_dist = 0.0f;
+      int matched = 0;
+      for (int k = 5; k <= 16; k++) {
+        if (std::isnan(host_kp3d[k*3]) || std::isnan(ik_output[k*3])) continue;
+        float dx = host_kp3d[k*3]-ik_output[k*3];
+        float dy = host_kp3d[k*3+1]-ik_output[k*3+1];
+        float dz = host_kp3d[k*3+2]-ik_output[k*3+2];
+        float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+        total_dist += dist;
+        if (dist > max_dist) max_dist = dist;
+        matched++;
+      }
+      snprintf(logstr, sizeof(logstr), "IK: body_in=%d body_out=%d disp=%.1f/%.1fmm",
+        dlt_body_valid, matched,
+        matched > 0 ? total_dist / matched : 0.0f, max_dist);
+      log_write(INFO, logstr);
+    }
+    // ========== END INSTRUMENTATION ==========
+
     // copy to shared buffers for renderer
     if (ctx->latest_keypoints_3d) {
-      memcpy(ctx->latest_keypoints_3d, host_kp3d, NUM_KEYPOINTS * 3 * sizeof(float));
+      memcpy(ctx->latest_keypoints_3d, ik_output, NUM_KEYPOINTS * 3 * sizeof(float));
       if (ctx->latest_metrics)
         memcpy(ctx->latest_metrics, &metrics, sizeof(frame_metrics));
       ctx->keypoints_ready->store(true, std::memory_order_release);
     }
 
-    // write 3D keypoints to file
-    if (ctx->kp_fd >= 0)
-      write(ctx->kp_fd, host_kp3d, NUM_KEYPOINTS * 3 * sizeof(float));
-
-    // write per-camera confidence scores
-    if (ctx->conf_fd >= 0)
-      write(ctx->conf_fd, host_conf_buf.data(), total_kf * sizeof(float));
-
-    // write metrics
-    if (ctx->metrics_fd >= 0)
-      write(ctx->metrics_fd, &metrics, sizeof(frame_metrics));
-
-    // compute summary stats for logging
-    int valid_count = 0;
-    float total_reproj = 0.0f;
-    int reproj_count = 0;
-    for (int k = 0; k < NUM_KEYPOINTS; k++) {
-      if (!std::isnan(host_kp3d[k * 3]))
-        valid_count++;
-      if (!std::isnan(host_reproj[k])) {
-        total_reproj += host_reproj[k];
-        reproj_count++;
-      }
+    // copy 2D keypoints + confidence to shared buffer for camera feed overlay
+    if (ctx->latest_keypoints_2d) {
+      memcpy(ctx->latest_keypoints_2d, host_kp_buf.data(), total_kf * 2 * sizeof(float));
+      memcpy(ctx->latest_confidence, host_conf_buf.data(), total_kf * sizeof(float));
+      ctx->kp2d_ready->store(true, std::memory_order_release);
     }
-    float avg_reproj = reproj_count > 0 ? total_reproj / reproj_count : 0.0f;
 
-    // log confidence range for debugging
-    float min_conf = 1e9f, max_conf = -1e9f;
-    for (int c = 0; c < ctx->cam_count; c++) {
+    // running stats for renderer overlay
+    {
+      int valid_count = 0;
+      float total_reproj = 0.0f;
+      int reproj_count = 0;
       for (int k = 0; k < NUM_KEYPOINTS; k++) {
-        if (host_conf_buf[c * NUM_KEYPOINTS + k] < min_conf)
-          min_conf = host_conf_buf[c * NUM_KEYPOINTS + k];
-        if (host_conf_buf[c * NUM_KEYPOINTS + k] > max_conf)
-          max_conf = host_conf_buf[c * NUM_KEYPOINTS + k];
+        if (!std::isnan(host_kp3d[k * 3])) valid_count++;
+        if (!std::isnan(host_reproj[k])) { total_reproj += host_reproj[k]; reproj_count++; }
       }
+      uint32_t cur_gen = ctx->pipe_config->stats_generation.load(std::memory_order_relaxed);
+      if (cur_gen != last_stats_gen) {
+        run_total_reproj = 0.0; run_reproj_samples = 0; run_total_valid = 0; run_frames = 0;
+        last_stats_gen = cur_gen;
+      }
+      run_total_reproj += total_reproj;
+      run_reproj_samples += reproj_count;
+      run_total_valid += valid_count;
+      run_frames++;
+      float running_avg = run_reproj_samples > 0 ? (float)(run_total_reproj / run_reproj_samples) : 0.0f;
+      ctx->pipe_config->avg_reproj_running.store(running_avg, std::memory_order_relaxed);
+      ctx->pipe_config->avg_reproj_frames.store((int32_t)run_frames, std::memory_order_relaxed);
     }
-    // check if toggles changed — reset accumulators
-    uint32_t cur_gen = ctx->pipe_config->stats_generation.load(std::memory_order_relaxed);
-    if (cur_gen != last_stats_gen) {
-      run_total_reproj = 0.0;
-      run_reproj_samples = 0;
-      run_total_valid = 0;
-      run_frames = 0;
-      last_stats_gen = cur_gen;
-    }
-
-    // accumulate run stats
-    run_total_reproj += total_reproj;
-    run_reproj_samples += reproj_count;
-    run_total_valid += valid_count;
-    run_frames++;
-
-    // publish running average for renderer
-    float running_avg = run_reproj_samples > 0 ? (float)(run_total_reproj / run_reproj_samples) : 0.0f;
-    ctx->pipe_config->avg_reproj_running.store(running_avg, std::memory_order_relaxed);
-    ctx->pipe_config->avg_reproj_frames.store((int32_t)run_frames, std::memory_order_relaxed);
-
-    snprintf(logstr, sizeof(logstr), "Tri: %d/%d | reproj: %.1fpx | conf: %.2f-%.2f",
-      valid_count, NUM_KEYPOINTS, avg_reproj, min_conf, max_conf);
-    log_write(INFO, logstr);
   }
 
   // log run summary
@@ -654,10 +700,14 @@ int main(int argc, char* argv[]) {
   pipeline_config pipe_config;
   memset(shared_keypoints_3d, 0, sizeof(shared_keypoints_3d));
 
+  // shared buffers for 2D keypoint overlay on camera feeds
+  float shared_keypoints_2d[MAX_CAMERAS * NUM_KEYPOINTS * 2];
+  float shared_confidence[MAX_CAMERAS * NUM_KEYPOINTS];
+  std::atomic<bool> kp2d_ready{false};
+  memset(shared_keypoints_2d, 0, sizeof(shared_keypoints_2d));
+  memset(shared_confidence, 0, sizeof(shared_confidence));
+
   // inference thread setup for mocap mode
-  int kp_fd = -1;
-  int conf_fd = -1;
-  int metrics_fd = -1;
   float* dev_kf3d_state = nullptr;
   float* dev_kf3d_covariance = nullptr;
   float* dev_kf3d_out = nullptr;
@@ -677,25 +727,9 @@ int main(int argc, char* argv[]) {
   uint32_t frameset_pool_idx = 0;
   pthread_t inference_thread;
   bool inference_thread_started = false;
-  inference_ctx inf_ctx;
+  inference_ctx inf_ctx{};  // zero-initialize so cometh/pointers are null in non-mocap modes
 
   if (mode == MODE_MOCAP && running) {
-    kp_fd = open(KEYPOINTS_OUTPUT_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (kp_fd < 0) {
-      snprintf(logstr, sizeof(logstr), "Failed to open keypoints output: %s", strerror(errno));
-      log_write(ERROR, logstr);
-    }
-    conf_fd = open(CONFIDENCE_OUTPUT_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (conf_fd < 0) {
-      snprintf(logstr, sizeof(logstr), "Failed to open confidence output: %s", strerror(errno));
-      log_write(ERROR, logstr);
-    }
-    metrics_fd = open(METRICS_OUTPUT_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (metrics_fd < 0) {
-      snprintf(logstr, sizeof(logstr), "Failed to open metrics output: %s", strerror(errno));
-      log_write(ERROR, logstr);
-    }
-
     mocap_host_frames = static_cast<uint8_t*>(malloc(frame_size * cam_count));
     if (!mocap_host_frames) {
       log_write(ERROR, "Failed to allocate mocap display buffer");
@@ -774,14 +808,14 @@ int main(int argc, char* argv[]) {
     inf_ctx.strm_conf = &stream_conf;
     inf_ctx.cam_confs = cam_confs;
     inf_ctx.cam_count = cam_count;
-    inf_ctx.kp_fd = kp_fd;
-    inf_ctx.conf_fd = conf_fd;
-    inf_ctx.metrics_fd = metrics_fd;
     inf_ctx.host_frames = mocap_host_frames;
     inf_ctx.running = &running;
     inf_ctx.latest_keypoints_3d = shared_keypoints_3d;
     inf_ctx.latest_metrics = &shared_metrics;
     inf_ctx.keypoints_ready = &keypoints_ready;
+    inf_ctx.latest_keypoints_2d = shared_keypoints_2d;
+    inf_ctx.latest_confidence = shared_confidence;
+    inf_ctx.kp2d_ready = &kp2d_ready;
     inf_ctx.dev_kf3d_state = dev_kf3d_state;
     inf_ctx.dev_kf3d_covariance = dev_kf3d_covariance;
     inf_ctx.dev_kf3d_out = dev_kf3d_out;
@@ -794,6 +828,7 @@ int main(int argc, char* argv[]) {
     inf_ctx.dev_pairwise_spread = dev_pairwise_spread;
     inf_ctx.dev_tri_params = dev_tri_params;
     inf_ctx.pipe_config = &pipe_config;
+    inf_ctx.cometh = new ComethPipeline();
 
     ret = pthread_create(&inference_thread, nullptr, inference_thread_fn, &inf_ctx);
     if (ret) {
@@ -801,6 +836,15 @@ int main(int argc, char* argv[]) {
       running = 0;
     } else {
       inference_thread_started = true;
+    }
+  }
+
+  // camera feed display windows (mocap mode)
+  if (mode == MODE_MOCAP && running) {
+    for (int i = 0; i < cam_count; i++) {
+      cv::namedWindow(cam_confs[i].name, cv::WINDOW_NORMAL);
+      cv::resizeWindow(cam_confs[i].name, 384, 512);
+      cv::moveWindow(cam_confs[i].name, i * 390, 0);
     }
   }
 
@@ -1018,6 +1062,19 @@ int main(int argc, char* argv[]) {
       cv::waitKey(16);
 
     } else if (mode == MODE_MOCAP) {
+      // copy NV12 frames D→H for live camera feed display
+      for (int i = 0; i < cam_count; i++) {
+        cudaMemcpy2D(
+          mocap_host_frames + i * frame_size,
+          stream_conf.frame_width,
+          frame_dev_ptrs[i],
+          frame_pitch,
+          stream_conf.frame_width,
+          stream_conf.frame_height * 3 / 2,
+          cudaMemcpyDeviceToHost
+        );
+      }
+
       // package frameset and hand off to inference thread
       frameset* fs = &frameset_pool[frameset_pool_idx];
       frameset_pool_idx = (frameset_pool_idx + 1) % INFERENCE_Q_SLOTS;
@@ -1034,6 +1091,49 @@ int main(int argc, char* argv[]) {
           dev_ptrs_used[i].fetch_sub(1, std::memory_order_relaxed);
       }
       memset(dev_ptrs_set, 0, sizeof(dev_ptrs_set));
+
+      // display live camera feeds with 2D keypoint overlay
+      for (int i = 0; i < cam_count; i++) {
+        cv::Mat nv12(
+          stream_conf.frame_height * 3 / 2,
+          stream_conf.frame_width,
+          CV_8UC1,
+          mocap_host_frames + i * frame_size
+        );
+        cv::Mat bgr;
+        cv::cvtColor(nv12, bgr, cv::COLOR_YUV2BGR_NV12);
+        cv::Mat display = wide_to_3_4_ar(bgr);
+
+        // overlay 2D keypoints if available
+        if (kp2d_ready.load(std::memory_order_acquire)) {
+          // scale from model space (288x384) to display space (768x1024)
+          float sx = static_cast<float>(PROCESSED_WIDTH) / INPUT_WIDTH;
+          float sy = static_cast<float>(PROCESSED_HEIGHT) / INPUT_HEIGHT;
+          int kp_offset = i * NUM_KEYPOINTS;
+          for (int k = 0; k < NUM_KEYPOINTS; k++) {
+            float conf = shared_confidence[kp_offset + k];
+            if (conf < 3.0f) continue; // same threshold as triangulation
+            float mx = shared_keypoints_2d[(kp_offset + k) * 2 + 0];
+            float my = shared_keypoints_2d[(kp_offset + k) * 2 + 1];
+            int dx = static_cast<int>(mx * sx);
+            int dy = static_cast<int>(my * sy);
+            if (dx >= 0 && dx < display.cols && dy >= 0 && dy < display.rows) {
+              // green for body (5-16), blue for hands (91-132), yellow for feet (17-22)
+              cv::Scalar color;
+              if (k >= 91) color = cv::Scalar(255, 0, 0);      // blue = hands
+              else if (k >= 17 && k <= 22) color = cv::Scalar(0, 255, 255); // yellow = feet
+              else if (k >= 5 && k <= 16) color = cv::Scalar(0, 255, 0);   // green = body
+              else color = cv::Scalar(0, 0, 255);               // red = head/face
+              cv::circle(display, cv::Point(dx, dy), 3, color, -1);
+            }
+          }
+        }
+
+        cv::imshow(cam_confs[i].name, display);
+      }
+      if (kp2d_ready.load(std::memory_order_relaxed))
+        kp2d_ready.store(false, std::memory_order_relaxed);
+      cv::waitKey(1);
 
       // render latest 3D keypoints (main thread, required by GLFW)
       if (renderer && keypoints_ready.load(std::memory_order_acquire)) {
@@ -1106,12 +1206,7 @@ int main(int argc, char* argv[]) {
     free(host_frames);
   if (mocap_host_frames)
     free(mocap_host_frames);
-  if (kp_fd >= 0)
-    close(kp_fd);
-  if (conf_fd >= 0)
-    close(conf_fd);
-  if (metrics_fd >= 0)
-    close(metrics_fd);
+  delete inf_ctx.cometh;
   if (hw_device_ctx)
     av_buffer_unref(&hw_device_ctx);
   cleanup_logging();

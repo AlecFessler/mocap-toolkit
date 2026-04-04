@@ -21,7 +21,7 @@ void gpu_triangulate_init(
     cudaStream_t stream
 );
 
-// N-view DLT triangulation with lens undistortion, requires all cameras visible
+// N-view DLT triangulation with lens undistortion, uses 2+ cameras with sufficient confidence
 void gpu_triangulate(
     const float* dev_keypoints_2d,  // [cameras * keypoints * 2]
     const float* dev_confidence,    // [cameras * keypoints]

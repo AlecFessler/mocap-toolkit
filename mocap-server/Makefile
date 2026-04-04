@@ -11,12 +11,13 @@ OBJ_DIR = obj
 BIN_DIR = bin
 SHADER_DIR = src/render/shaders
 
-MODULES = core net video model cuda calibration triangulation render
+MODULES = core net video model cuda calibration triangulation render ik
 
 INCLUDES = -I$(SRC_DIR) \
            -I$(TENSORRT_PATH)/include \
            -I$(CUDA_PATH)/include \
-           -I/usr/include/opencv4
+           -I/usr/include/opencv4 \
+           -I/usr/include/eigen3
 
 PKG_AVCODEC = $(shell pkg-config --cflags libavcodec libavutil)
 INCLUDES += $(PKG_AVCODEC)

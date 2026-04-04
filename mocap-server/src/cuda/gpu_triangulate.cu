@@ -146,7 +146,7 @@ __device__ static void triangulate_dlt_pair(
 }
 
 // ========== Main triangulation kernel ==========
-// N-view DLT with undistortion, requires all cameras visible
+// N-view DLT with undistortion, uses all cameras with sufficient confidence (min 2)
 
 __global__ void triangulate_kernel(
     const float* __restrict__ keypoints_2d,
@@ -175,7 +175,7 @@ __global__ void triangulate_kernel(
             visible[num_visible++] = c;
     }
 
-    if (num_visible < num_cameras) {
+    if (num_visible < 2) {
         keypoints_3d[k * 3 + 0] = nan_val;
         keypoints_3d[k * 3 + 1] = nan_val;
         keypoints_3d[k * 3 + 2] = nan_val;
