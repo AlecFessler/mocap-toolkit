@@ -1,0 +1,27 @@
+[stream_params]
+frame_width  = 1280
+frame_height = 720
+fps          = 30
+
+# shared by every camera so one datagram starts/stops the whole rig
+[control]
+broadcast = "192.168.1.255"
+port      = 22345
+
+[[cameras]]
+name     = "rpicam01"
+id       = 0
+eth_ip   = "192.168.1.101"
+tcp_port = 12345
+
+[[cameras]]
+name     = "rpicam02"
+id       = 1
+eth_ip   = "192.168.1.102"
+tcp_port = 12346
+
+[[cameras]]
+name     = "rpicam03"
+id       = 2
+eth_ip   = "192.168.1.103"
+tcp_port = 12347
