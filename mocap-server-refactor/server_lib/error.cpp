@@ -12,6 +12,17 @@ Error errno_error(std::string detail) {
   };
 }
 
+Error retry() {
+  return Error{
+    std::make_error_code(std::errc::resource_unavailable_try_again),
+    "incomplete"
+  };
+}
+
+bool is_retry(const Error& err) {
+  return err.ec == std::errc::resource_unavailable_try_again;
+}
+
 Error invalid(std::string detail) {
   return Error{
     std::make_error_code(std::errc::invalid_argument),

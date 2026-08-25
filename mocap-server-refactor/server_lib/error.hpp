@@ -12,6 +12,11 @@ struct Error {
 };
 
 Error errno_error(std::string detail);
+
+// not a failure: the operation made no progress and should be retried when
+// its fd next wakes up. short circuits an and_then chain without ending it.
+Error retry();
+bool is_retry(const Error& err);
 Error invalid(std::string detail);
 
 } // namespace mocap

@@ -17,14 +17,14 @@ namespace {
 // to be armed before it arrives
 constexpr std::chrono::seconds START_DELAY{2};
 
-struct session_state {
+struct SessionState {
   Config conf;
   ControlSocket control;
   EventLoop loop;
   std::thread thread;
 };
 
-std::optional<session_state> g_session;
+std::optional<SessionState> g_session;
 
 uint64_t start_timestamp() {
   std::chrono::nanoseconds now =
@@ -43,7 +43,7 @@ std::expected<void, Error> session_start(const std::filesystem::path& config_pat
     return std::unexpected(conf.error());
 
   std::expected<ControlSocket, Error> control =
-    ControlSocket::open(conf->control_broadcast, conf->control_port);
+    ControlSocket::open(conf->control.broadcast, conf->control.port);
   if (!control)
     return std::unexpected(control.error());
 

@@ -6,31 +6,28 @@
 #include <netinet/in.h>
 
 #include "error.hpp"
+#include "fd.hpp"
 
 namespace mocap {
 
-// UDP socket for the session control plane. Every Camera binds the same
+// UDP socket for the session control plane. Every camera binds the same
 // control port, so one datagram to the subnet broadcast address starts or
 // stops the whole rig.
 class ControlSocket {
 public:
   static std::expected<ControlSocket, Error> open(in_addr broadcast_addr, uint16_t port);
 
-  ControlSocket(ControlSocket&& other) noexcept;
-  ControlSocket& operator=(ControlSocket&& other) noexcept;
-  ControlSocket(const ControlSocket&) = delete;
-  ControlSocket& operator=(const ControlSocket&) = delete;
-  ~ControlSocket();
-
+  // cameras arm their interval timer against this absolute time, so delivery
+  // jitter between cameras does not affect capture alignment
   std::expected<void, Error> broadcast_start(uint64_t timestamp) const;
   std::expected<void, Error> broadcast_stop() const;
 
 private:
-  ControlSocket(int fd, sockaddr_in dest);
+  ControlSocket(UniqueFd fd, sockaddr_in dest);
 
   std::expected<void, Error> broadcast(const void* msg, size_t len) const;
 
-  int m_fd;
+  UniqueFd m_fd;
   sockaddr_in m_dest;
 };
 

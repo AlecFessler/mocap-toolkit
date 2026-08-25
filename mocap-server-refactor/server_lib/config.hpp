@@ -25,10 +25,14 @@ struct Camera {
   uint16_t tcp_port;
 };
 
+struct Control {
+  in_addr broadcast;
+  uint16_t port;
+};
+
 struct Config {
   StreamParams stream;
-  in_addr control_broadcast;
-  uint16_t control_port;
+  Control control;
   std::vector<Camera> cameras;
 };
 

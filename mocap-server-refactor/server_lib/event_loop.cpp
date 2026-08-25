@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <sys/epoll.h>
@@ -38,20 +39,20 @@ FrameHeader read_frame_header(const uint8_t* data) {
 
 // epoll hands back one 64-bit token per ready fd. We split it into what kind
 // of fd fired and which Camera it belongs to.
-enum class source_kind : uint32_t { stop, listener, stream };
+enum class SourceKind : uint32_t { stop, listener, stream };
 
-struct event_source {
-  source_kind kind;
+struct EventSource {
+  SourceKind kind;
   uint32_t index;
 };
 
-uint64_t encode(source_kind kind, size_t index) {
+uint64_t encode(SourceKind kind, size_t index) {
   return (static_cast<uint64_t>(kind) << 32) | static_cast<uint32_t>(index);
 }
 
-event_source decode(uint64_t key) {
-  return event_source{
-    static_cast<source_kind>(key >> 32),
+EventSource decode(uint64_t key) {
+  return EventSource{
+    static_cast<SourceKind>(key >> 32),
     static_cast<uint32_t>(key)
   };
 }
@@ -106,12 +107,12 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf) {
                  std::move(listeners), std::move(streams));
 
   std::expected<void, Error> watched =
-    loop.watch(loop.m_stop_fd.get(), encode(source_kind::stop, 0));
+    loop.watch(loop.m_stop_fd.get(), encode(SourceKind::stop, 0));
   if (!watched)
     return std::unexpected(watched.error());
 
   for (size_t i = 0; i < loop.m_listeners.size(); i++) {
-    watched = loop.watch(loop.m_listeners[i].fd(), encode(source_kind::listener, i));
+    watched = loop.watch(loop.m_listeners[i].fd(), encode(SourceKind::listener, i));
     if (!watched)
       return std::unexpected(watched.error());
   }
@@ -150,7 +151,7 @@ std::expected<std::span<const epoll_event>, Error> EventLoop::wait() {
 std::expected<void, Error> EventLoop::service(std::span<const epoll_event> events) {
   for (const epoll_event& event : events) {
     std::expected<void, Error> handled = dispatch(event.data.u64);
-    if (!handled)
+    if (!handled && !is_retry(handled.error()))
       return std::unexpected(handled.error());
   }
 
@@ -158,17 +159,17 @@ std::expected<void, Error> EventLoop::service(std::span<const epoll_event> event
 }
 
 std::expected<void, Error> EventLoop::dispatch(uint64_t key) {
-  const event_source source = decode(key);
+  const EventSource source = decode(key);
 
   switch (source.kind) {
-    case source_kind::stop:
+    case SourceKind::stop:
       m_stopping = true;
       return {};
 
-    case source_kind::listener:
+    case SourceKind::listener:
       return accept_camera(source.index);
 
-    case source_kind::stream:
+    case SourceKind::stream:
       return read_camera(source.index);
   }
 
@@ -191,7 +192,7 @@ std::expected<void, Error> EventLoop::accept_camera(size_t index) {
   if (!conn)
     return std::unexpected(conn.error());
 
-  std::expected<void, Error> watched = watch(conn->get(), encode(source_kind::stream, index));
+  std::expected<void, Error> watched = watch(conn->get(), encode(SourceKind::stream, index));
   if (!watched)
     return std::unexpected(watched.error());
 
@@ -204,7 +205,9 @@ std::expected<void, Error> EventLoop::read_camera(size_t index) {
   if (m_streams[index].expected == 0)
     return read_header(index);
 
-  return read_payload(index);
+  return read_payload(index)
+    .and_then([this, index] { return submit_frame(index); })
+    .and_then([this, index] { return drain_frames(index); });
 }
 
 // reads at most the bytes still missing, so a read never crosses into the
@@ -214,8 +217,13 @@ std::expected<size_t, Error> EventLoop::fill(size_t index, uint8_t* dst, size_t 
   StreamState& stream = m_streams[index];
 
   ssize_t got = read(stream.fd.get(), dst + stream.filled, want - stream.filled);
-  if (got < 0)
+  if (got < 0) {
+    // nothing left to read right now, epoll will wake us when there is
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return stream.filled;
+
     return std::unexpected(errno_error("failed to read from stream"));
+  }
 
   if (got == 0) {
     std::printf("[%s] disconnected\n", m_listeners[index].name().c_str());
@@ -223,7 +231,7 @@ std::expected<size_t, Error> EventLoop::fill(size_t index, uint8_t* dst, size_t 
     stream.fd.reset();
     stream.filled = 0;
     stream.expected = 0;
-    return 0;
+    return std::unexpected(retry());
   }
 
   stream.filled += static_cast<size_t>(got);
@@ -238,7 +246,7 @@ std::expected<void, Error> EventLoop::read_header(size_t index) {
     return std::unexpected(filled.error());
 
   if (*filled < FRAME_HEADER_SIZE)
-    return {};
+    return std::unexpected(retry());
 
   const FrameHeader header = read_frame_header(stream.header);
   if (header.size == 0 || header.size > MAX_PAYLOAD_SIZE)
@@ -258,9 +266,9 @@ std::expected<void, Error> EventLoop::read_payload(size_t index) {
     return std::unexpected(filled.error());
 
   if (*filled < stream.expected)
-    return {};
+    return std::unexpected(retry());
 
-  return submit_frame(index);
+  return {};
 }
 
 std::expected<void, Error> EventLoop::submit_frame(size_t index) {
@@ -275,12 +283,11 @@ std::expected<void, Error> EventLoop::submit_frame(size_t index) {
 
   stream.filled = 0;
   stream.expected = 0;
-
-  // the decoder stops accepting input once its queue fills, so every send has
-  // to be followed by draining whatever became ready
-  return drain_frames(index);
+  return {};
 }
 
+// the decoder stops accepting input once its queue fills, so every send has to
+// be followed by draining whatever became ready
 std::expected<void, Error> EventLoop::drain_frames(size_t index) {
   StreamState& stream = m_streams[index];
 
@@ -291,6 +298,7 @@ std::expected<void, Error> EventLoop::drain_frames(size_t index) {
 
     if (!frame->has_value())
       return {};
+
 
     // nothing consumes frames yet, so the frame is dropped here and its
     // surface goes straight back into the decoder pool

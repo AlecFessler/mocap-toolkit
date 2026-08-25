@@ -63,6 +63,21 @@ static std::expected<StreamParams, Error> parse_stream_params(const toml::table&
   return StreamParams{*width, *height, *fps};
 }
 
+static std::expected<Control, Error> parse_control(const toml::table& root) {
+  const toml::node_view<const toml::node> control = root["control"];
+
+  std::optional<std::string> broadcast = control["broadcast"].value<std::string>();
+  std::optional<uint16_t> port = control["port"].value<uint16_t>();
+  if (!broadcast || !port)
+    return std::unexpected(invalid("control: missing or invalid field"));
+
+  std::expected<in_addr, Error> addr = parse_ipv4(*broadcast);
+  if (!addr)
+    return std::unexpected(addr.error());
+
+  return Control{*addr, *port};
+}
+
 static std::expected<Camera, Error> parse_camera(const toml::table& entry) {
   std::optional<std::string> name = entry["name"].value<std::string>();
   std::optional<uint8_t> id = entry["id"].value<uint8_t>();
@@ -138,20 +153,15 @@ static std::expected<Config, Error> parse_toml(std::string contents) {
   if (!stream)
     return std::unexpected(stream.error());
 
-  std::optional<uint16_t> control_port = root["control"]["port"].value<uint16_t>();
-  std::optional<std::string> control_bcast = root["control"]["broadcast"].value<std::string>();
-  if (!control_port || !control_bcast)
-    return std::unexpected(invalid("control: missing or invalid field"));
-
-  std::expected<in_addr, Error> bcast = parse_ipv4(*control_bcast);
-  if (!bcast)
-    return std::unexpected(bcast.error());
+  std::expected<Control, Error> control = parse_control(root);
+  if (!control)
+    return std::unexpected(control.error());
 
   std::expected<std::vector<Camera>, Error> cameras = parse_cameras(root);
   if (!cameras)
     return std::unexpected(cameras.error());
 
-  return Config{*stream, *bcast, *control_port, std::move(*cameras)};
+  return Config{*stream, *control, std::move(*cameras)};
 }
 
 std::expected<Config, Error> parse_config(const fs::path& path) {
