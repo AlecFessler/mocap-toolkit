@@ -18,7 +18,6 @@
 #include "scheduling.hpp"
 #include "sigsets.hpp"
 #include "spsc_queue_wrapper.hpp"
-#include "stop_watchdog.hpp"
 #include "stream_thread.hpp"
 #include "udp_socket.hpp"
 
@@ -26,18 +25,12 @@ constexpr const char* LOG_PATH = "/var/log/picam/picam.log";
 constexpr const char* CONFIG_PATH = "/etc/picam/cam_config.txt";
 constexpr uint32_t QUEUE_SLOTS = 8;
 
-// terminate_flag: set by SIGTERM, exits the process entirely
-static std::atomic<bool> terminate_flag = 0;
-static void terminate_handler(int signum) {
-  (void)signum;
-  terminate_flag.store(1, std::memory_order_relaxed);
-}
-
 int main() {
 try {
-
   Logging::setup_logging(LOG_PATH);
   struct config config = parse_config(CONFIG_PATH);
+  // block signals before spawning any threads to ensure they're never delivered to a thread without a handler
+  sigset_t sigset = setup_sigwait({SIGIO, SIGRTMIN, SIGTERM});
   SPSCQueue<struct frame> frame_queue{QUEUE_SLOTS};
   SPSCQueue<struct packet> packet_queue{QUEUE_SLOTS};
   Camera cam{
@@ -52,34 +45,30 @@ try {
 
   pin_to_core(0);
   set_scheduling_prio(98);
-  setup_sig_handler(SIGTERM, terminate_handler);
-  setup_sig_handler(SIGRTMIN, SIG_IGN);
 
   log_(INFO, "Initialization complete, entering session loop");
 
+  bool terminate = false;
   // session loop: wait for timestamp, stream, cleanup, repeat
-  while (!terminate_flag.load(std::memory_order_relaxed)) {
+  while (!terminate) {
 
     // wait for initial timestamp from server
-    sigset_t sigset = setup_sigwait({SIGIO, SIGTERM});
     std::chrono::nanoseconds initial_timestamp{0};
-
-    while (initial_timestamp == std::chrono::nanoseconds{0} &&
-           !terminate_flag.load(std::memory_order_relaxed)) {
+    while (initial_timestamp == std::chrono::nanoseconds{0} && !terminate) {
       int signal;
       sigwait(&sigset, &signal);
-      if (signal == SIGTERM)
+      if (signal == SIGTERM) {
+        terminate = true;
         break;
-
-      initial_timestamp = udpsock.recv_stream_ctl();
-      if (initial_timestamp == std::chrono::nanoseconds{0}) {
-        log_(WARNING, "Received stop signal while waiting for timestamp, ignoring");
-        continue;
+      } else if (signal == SIGIO) {
+        initial_timestamp = udpsock.recv_stream_ctl();
+        if (initial_timestamp == std::chrono::nanoseconds{0}) {
+          log_(WARNING, "Received stop signal while waiting for timestamp, ignoring");
+          continue;
+        }
       }
     }
-
-    if (terminate_flag.load(std::memory_order_relaxed))
-      break;
+    if (terminate) break;
 
     log_(INFO, "Received initial timestamp, starting session");
 
@@ -107,35 +96,44 @@ try {
         packet_queue,
         session_stop
       };
-      StopWatchdog stop_watcher{session_stop, udpsock};
 
-      stop_watcher.launch();
       encoder_thread.launch();
       stream_thread.launch();
 
-      sigset = setup_sigwait({SIGRTMIN, SIGTERM});
       std::chrono::nanoseconds next_capture = timer.arm_timer();
 
-      while (!session_stop.load(std::memory_order_relaxed) &&
-             !terminate_flag.load(std::memory_order_relaxed)) {
+      while (!terminate && !session_stop.load(std::memory_order::acquire)) {
         int signal;
         sigwait(&sigset, &signal);
-        if (signal == SIGTERM)
+        if (signal == SIGTERM) {
+          terminate = true;
+          session_stop.store(true, std::memory_order::release);
           break;
+        } else if (signal == SIGIO) {
+          std::chrono::nanoseconds stream_ctl = udpsock.recv_stream_ctl();
+          if (stream_ctl == std::chrono::nanoseconds{0}) {
+            session_stop.store(true, std::memory_order::release);
+            break;
+          } else {
+            std::string warning_msg = "Received unexpected stream control while waiting for stop sentinel";
+            log_(WARNING, warning_msg.c_str());
+            continue;
+          }
+        }
 
         cam.capture_frame(next_capture);
         next_capture = timer.arm_timer();
       }
     } // destructors fire: threads joined, TCP closed, timer deleted
 
-    // drain queues so they're clean for next session
-    frame_queue.drain();
-    packet_queue.drain();
-
-    if (terminate_flag.load(std::memory_order_relaxed)) {
+    if (terminate) {
       log_(INFO, "Received SIGTERM, shutting down");
       break;
     }
+
+    // drain queues so they're clean for next session
+    frame_queue.drain();
+    packet_queue.drain();
 
     log_(INFO, "Session ended, waiting for next timestamp...");
   }

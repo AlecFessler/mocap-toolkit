@@ -2,3 +2,10 @@
 **/bin/
 **/obj/
 *.o
+models/
+
+# clangd / LSP (machine-specific: absolute paths, mirrored headers)
+.clangd
+.lsp-sysroot/
+.cache/
+compile_commands.json

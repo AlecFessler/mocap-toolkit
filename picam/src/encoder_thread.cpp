@@ -26,26 +26,19 @@ extern "C" {
 
 constexpr std::chrono::microseconds SLEEP_DURATION{100};
 
-static volatile sig_atomic_t stop_flag = 0;
-static void stop_handler(int signum) {
-  (void)signum;
-  stop_flag = 1;
-}
-
 void* encoder_thread_fn(void* ptr) {
   auto instance = static_cast<EncoderThread*>(ptr);
   try{
     pin_to_core(1);
     set_scheduling_prio(99);
-    stop_flag = 0; // reset from previous session
-    setup_sig_handler(SIGTERM, stop_handler);
-    while (!stop_flag) {
+    while (!instance->m_main_stop_flag.load(std::memory_order::acquire)) {
       std::optional<struct frame> frame = instance->m_frame_queue.try_dequeue();
-      while (!frame.has_value() && !stop_flag) {
+      while (!frame.has_value() && !instance->m_main_stop_flag.load(std::memory_order::acquire)) {
         std::this_thread::sleep_for(SLEEP_DURATION);
         frame = instance->m_frame_queue.try_dequeue();
       }
-      if (stop_flag) break;
+      if (instance->m_main_stop_flag.load(std::memory_order::acquire))
+        break;
 
       log_(BENCHMARK, "Started encoding frame");
 
@@ -65,13 +58,13 @@ void* encoder_thread_fn(void* ptr) {
       bool enqueued = instance->m_packet_queue.try_enqueue(
         instance->m_packet_buffers[instance->m_next_buffer]
       );
-      while (!enqueued && !stop_flag) {
+      while (!enqueued && !instance->m_main_stop_flag.load(std::memory_order::acquire)) {
         std::this_thread::sleep_for(SLEEP_DURATION);
         enqueued = instance->m_packet_queue.try_enqueue(
           instance->m_packet_buffers[instance->m_next_buffer]
         );
       }
-      if (stop_flag) break;
+      if (instance->m_main_stop_flag.load(std::memory_order::acquire)) break;
 
       if (++instance->m_next_buffer == instance->m_packet_buffers.capacity())
         instance->m_next_buffer = 0;
@@ -103,7 +96,6 @@ EncoderThread::EncoderThread(
   m_main_stop_flag(main_stop_flag) {}
 
 EncoderThread::~EncoderThread() {
-  pthread_kill(m_this_thread, SIGTERM);
   pthread_join(m_this_thread, nullptr);
   for (auto* packet : m_avpackets)
     av_packet_free(&packet);

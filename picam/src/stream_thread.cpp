@@ -23,26 +23,19 @@
 
 constexpr std::chrono::microseconds SLEEP_DURATION{100};
 
-static volatile sig_atomic_t stop_flag = 0;
-static void stop_handler(int signum) {
-  (void)signum;
-  stop_flag = 1;
-}
-
 void* stream_thread_fn(void* ptr) {
   auto instance = static_cast<StreamThread*>(ptr);
   try {
     pin_to_core(1);
     set_scheduling_prio(98);
-    stop_flag = 0; // reset from previous session
-    setup_sig_handler(SIGTERM, stop_handler);
-    while (!stop_flag) {
+    while (!instance->m_main_stop_flag.load(std::memory_order::acquire)) {
       std::optional<struct packet> packet = instance->m_packet_queue.try_dequeue();
-      while (!packet.has_value() && !stop_flag) {
+      while (!packet.has_value() && !instance->m_main_stop_flag.load(std::memory_order::acquire)) {
         std::this_thread::sleep_for(SLEEP_DURATION);
         packet = instance->m_packet_queue.try_dequeue();
       }
-      if (stop_flag) break;
+      if (instance->m_main_stop_flag.load(std::memory_order::acquire))
+        break;
 
       log_(BENCHMARK, "Started streaming packet");
 
@@ -74,7 +67,6 @@ StreamThread::StreamThread(
   m_main_stop_flag(main_stop_flag) {}
 
 StreamThread::~StreamThread() {
-  pthread_kill(m_this_thread, SIGTERM);
   pthread_join(m_this_thread, nullptr);
 }
 
