@@ -12,27 +12,27 @@
 
 namespace mocap {
 
-struct stream_params {
+struct StreamParams {
   uint32_t frame_width;
   uint32_t frame_height;
   uint32_t fps;
 };
 
-struct camera {
+struct Camera {
   std::string name;
   uint8_t id;
   in_addr eth_ip;
   uint16_t tcp_port;
 };
 
-struct config {
-  stream_params stream;
+struct Config {
+  StreamParams stream;
   in_addr control_broadcast;
   uint16_t control_port;
-  std::vector<camera> cameras;
+  std::vector<Camera> cameras;
 };
 
-std::expected<config, error> parse_config(const std::filesystem::path& path);
+std::expected<Config, Error> parse_config(const std::filesystem::path& path);
 
 } // namespace mocap
 

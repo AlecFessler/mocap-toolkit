@@ -9,13 +9,13 @@ namespace mocap {
 
 constexpr const char* STOP_SENTINEL = "STOP";
 
-control_socket::control_socket(int fd, sockaddr_in dest)
+ControlSocket::ControlSocket(int fd, sockaddr_in dest)
   : m_fd(fd), m_dest(dest) {}
 
-control_socket::control_socket(control_socket&& other) noexcept
+ControlSocket::ControlSocket(ControlSocket&& other) noexcept
   : m_fd(std::exchange(other.m_fd, -1)), m_dest(other.m_dest) {}
 
-control_socket& control_socket::operator=(control_socket&& other) noexcept {
+ControlSocket& ControlSocket::operator=(ControlSocket&& other) noexcept {
   if (this != &other) {
     if (m_fd >= 0)
       close(m_fd);
@@ -25,19 +25,19 @@ control_socket& control_socket::operator=(control_socket&& other) noexcept {
   return *this;
 }
 
-control_socket::~control_socket() {
+ControlSocket::~ControlSocket() {
   if (m_fd >= 0)
     close(m_fd);
 }
 
-std::expected<control_socket, error> control_socket::open(in_addr broadcast_addr, uint16_t port) {
+std::expected<ControlSocket, Error> ControlSocket::open(in_addr broadcast_addr, uint16_t port) {
   int fd = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd < 0)
     return std::unexpected(errno_error("failed to create control socket"));
 
   int enable = 1;
   if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(enable)) < 0) {
-    error err = errno_error("failed to enable broadcast on control socket");
+    Error err = errno_error("failed to enable broadcast on control socket");
     close(fd);
     return std::unexpected(err);
   }
@@ -47,10 +47,10 @@ std::expected<control_socket, error> control_socket::open(in_addr broadcast_addr
   dest.sin_port = htons(port);
   dest.sin_addr = broadcast_addr;
 
-  return control_socket(fd, dest);
+  return ControlSocket(fd, dest);
 }
 
-std::expected<void, error> control_socket::broadcast(const void* msg, size_t len) const {
+std::expected<void, Error> ControlSocket::broadcast(const void* msg, size_t len) const {
   ssize_t sent = sendto(
     m_fd,
     msg,
@@ -68,11 +68,11 @@ std::expected<void, error> control_socket::broadcast(const void* msg, size_t len
   return {};
 }
 
-std::expected<void, error> control_socket::broadcast_start(uint64_t timestamp) const {
+std::expected<void, Error> ControlSocket::broadcast_start(uint64_t timestamp) const {
   return broadcast(&timestamp, sizeof(timestamp));
 }
 
-std::expected<void, error> control_socket::broadcast_stop() const {
+std::expected<void, Error> ControlSocket::broadcast_stop() const {
   return broadcast(STOP_SENTINEL, std::strlen(STOP_SENTINEL));
 }
 

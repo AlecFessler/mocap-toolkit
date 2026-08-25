@@ -21,6 +21,7 @@ TOOLS = lens_calibration
 BINS  = $(TOOLS:%=$(BIN_DIR)/%)
 
 INCLUDES = -I$(LIB_DIR)
+LIBS     = -lavcodec -lavutil
 # $$ORIGIN lets the binaries find the .so relative to themselves, uninstalled
 RPATH    = -Wl,-rpath,'$$ORIGIN/../$(OUT_LIB)'
 
@@ -31,7 +32,7 @@ DEPS = $(LIB_OBJS:.o=.d) $(TOOLS:%=$(OBJ_DIR)/%.o.d)
 all: $(LIB) $(BINS)
 
 $(LIB): $(LIB_OBJS) | $(OUT_LIB)
-	$(CXX) $(CXXFLAGS) -shared $^ -o $@
+	$(CXX) $(CXXFLAGS) -shared $^ -o $@ $(LIBS)
 
 $(OBJ_DIR)/%.o: $(LIB_DIR)/%.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -fPIC $(INCLUDES) -c $< -o $@

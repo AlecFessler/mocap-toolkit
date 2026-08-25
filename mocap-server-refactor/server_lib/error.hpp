@@ -6,13 +6,13 @@
 
 namespace mocap {
 
-struct error {
+struct Error {
   std::error_code ec;
   std::string detail;
 };
 
-error errno_error(std::string detail);
-error invalid(std::string detail);
+Error errno_error(std::string detail);
+Error invalid(std::string detail);
 
 } // namespace mocap
 

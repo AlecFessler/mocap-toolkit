@@ -5,16 +5,16 @@
 
 namespace mocap {
 
-unique_fd::unique_fd(int fd) : m_fd(fd) {}
+UniqueFd::UniqueFd(int fd) : m_fd(fd) {}
 
-unique_fd::~unique_fd() {
+UniqueFd::~UniqueFd() {
   reset();
 }
 
-unique_fd::unique_fd(unique_fd&& other) noexcept
+UniqueFd::UniqueFd(UniqueFd&& other) noexcept
   : m_fd(std::exchange(other.m_fd, -1)) {}
 
-unique_fd& unique_fd::operator=(unique_fd&& other) noexcept {
+UniqueFd& UniqueFd::operator=(UniqueFd&& other) noexcept {
   if (this != &other) {
     reset();
     m_fd = std::exchange(other.m_fd, -1);
@@ -22,7 +22,7 @@ unique_fd& unique_fd::operator=(unique_fd&& other) noexcept {
   return *this;
 }
 
-void unique_fd::reset() {
+void UniqueFd::reset() {
   if (m_fd >= 0) {
     close(m_fd);
     m_fd = -1;

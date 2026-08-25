@@ -9,26 +9,26 @@
 
 namespace mocap {
 
-// UDP socket for the session control plane. Every camera binds the same
+// UDP socket for the session control plane. Every Camera binds the same
 // control port, so one datagram to the subnet broadcast address starts or
 // stops the whole rig.
-class control_socket {
+class ControlSocket {
 public:
-  static std::expected<control_socket, error> open(in_addr broadcast_addr, uint16_t port);
+  static std::expected<ControlSocket, Error> open(in_addr broadcast_addr, uint16_t port);
 
-  control_socket(control_socket&& other) noexcept;
-  control_socket& operator=(control_socket&& other) noexcept;
-  control_socket(const control_socket&) = delete;
-  control_socket& operator=(const control_socket&) = delete;
-  ~control_socket();
+  ControlSocket(ControlSocket&& other) noexcept;
+  ControlSocket& operator=(ControlSocket&& other) noexcept;
+  ControlSocket(const ControlSocket&) = delete;
+  ControlSocket& operator=(const ControlSocket&) = delete;
+  ~ControlSocket();
 
-  std::expected<void, error> broadcast_start(uint64_t timestamp) const;
-  std::expected<void, error> broadcast_stop() const;
+  std::expected<void, Error> broadcast_start(uint64_t timestamp) const;
+  std::expected<void, Error> broadcast_stop() const;
 
 private:
-  control_socket(int fd, sockaddr_in dest);
+  ControlSocket(int fd, sockaddr_in dest);
 
-  std::expected<void, error> broadcast(const void* msg, size_t len) const;
+  std::expected<void, Error> broadcast(const void* msg, size_t len) const;
 
   int m_fd;
   sockaddr_in m_dest;

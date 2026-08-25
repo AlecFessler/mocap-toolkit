@@ -6,16 +6,16 @@ namespace mocap {
 // Owns a file descriptor. Move-only: copying would give two owners one
 // descriptor, and the second close would hit whatever fd number the kernel
 // had since recycled.
-class unique_fd {
+class UniqueFd {
 public:
-  unique_fd() = default;
-  explicit unique_fd(int fd);
-  ~unique_fd();
+  UniqueFd() = default;
+  explicit UniqueFd(int fd);
+  ~UniqueFd();
 
-  unique_fd(unique_fd&& other) noexcept;
-  unique_fd& operator=(unique_fd&& other) noexcept;
-  unique_fd(const unique_fd&) = delete;
-  unique_fd& operator=(const unique_fd&) = delete;
+  UniqueFd(UniqueFd&& other) noexcept;
+  UniqueFd& operator=(UniqueFd&& other) noexcept;
+  UniqueFd(const UniqueFd&) = delete;
+  UniqueFd& operator=(const UniqueFd&) = delete;
 
   int get() const { return m_fd; }
   bool valid() const { return m_fd >= 0; }

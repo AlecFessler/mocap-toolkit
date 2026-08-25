@@ -10,11 +10,11 @@ namespace {
 constexpr int LISTEN_BACKLOG = 1;
 }
 
-stream_listener::stream_listener(unique_fd fd, std::string name)
+StreamListener::StreamListener(UniqueFd fd, std::string name)
   : m_fd(std::move(fd)), m_name(std::move(name)) {}
 
-std::expected<stream_listener, error> stream_listener::open(uint16_t port, std::string name) {
-  unique_fd fd{socket(AF_INET, SOCK_STREAM, 0)};
+std::expected<StreamListener, Error> StreamListener::open(uint16_t port, std::string name) {
+  UniqueFd fd{socket(AF_INET, SOCK_STREAM, 0)};
   if (!fd.valid())
     return std::unexpected(errno_error("failed to create listen socket for " + name));
 
@@ -35,11 +35,11 @@ std::expected<stream_listener, error> stream_listener::open(uint16_t port, std::
   if (listen(fd.get(), LISTEN_BACKLOG) < 0)
     return std::unexpected(errno_error("failed to listen for " + name));
 
-  return stream_listener(std::move(fd), std::move(name));
+  return StreamListener(std::move(fd), std::move(name));
 }
 
-std::expected<unique_fd, error> stream_listener::accept() const {
-  unique_fd conn{::accept(m_fd.get(), nullptr, nullptr)};
+std::expected<UniqueFd, Error> StreamListener::accept() const {
+  UniqueFd conn{::accept(m_fd.get(), nullptr, nullptr)};
   if (!conn.valid())
     return std::unexpected(errno_error("failed to accept connection for " + m_name));
 

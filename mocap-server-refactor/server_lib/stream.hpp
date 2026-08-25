@@ -10,21 +10,21 @@
 
 namespace mocap {
 
-// Listening socket for one camera. Cameras dial out to the server, so each
-// camera's identity is established by which listener accepted it.
-class stream_listener {
+// Listening socket for one Camera. Cameras dial out to the server, so each
+// Camera's identity is established by which listener accepted it.
+class StreamListener {
 public:
-  static std::expected<stream_listener, error> open(uint16_t port, std::string name);
+  static std::expected<StreamListener, Error> open(uint16_t port, std::string name);
 
-  std::expected<unique_fd, error> accept() const;
+  std::expected<UniqueFd, Error> accept() const;
 
   int fd() const { return m_fd.get(); }
   const std::string& name() const { return m_name; }
 
 private:
-  stream_listener(unique_fd fd, std::string name);
+  StreamListener(UniqueFd fd, std::string name);
 
-  unique_fd m_fd;
+  UniqueFd m_fd;
   std::string m_name;
 };
 
