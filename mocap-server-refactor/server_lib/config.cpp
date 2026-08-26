@@ -102,7 +102,7 @@ static std::expected<Camera, Error> parse_camera(const toml::table& entry) {
 static std::expected<void, Error> validate_cameras(const std::vector<Camera>& cameras) {
   std::set<uint16_t> ports;
 
-  for (size_t i = 0; i < cameras.size(); i++) {
+  for (size_t i = 0; i < cameras.size(); i += 1) {
     if (static_cast<size_t>(cameras[i].id) != i)
       return std::unexpected(invalid(std::format(
         "cameras[{}]: id must be {}, got {}", i, i, cameras[i].id)));
@@ -123,7 +123,7 @@ static std::expected<std::vector<Camera>, Error> parse_cameras(const toml::table
   std::vector<Camera> cameras;
   cameras.reserve(entries->size());
 
-  for (size_t i = 0; i < entries->size(); i++) {
+  for (size_t i = 0; i < entries->size(); i += 1) {
     const toml::table* entry = entries->at(i).as_table();
     if (!entry)
       return std::unexpected(invalid(std::format("cameras[{}]: not a table", i)));

@@ -64,12 +64,14 @@ EventSource decode(uint64_t key) {
 
 EventLoop::EventLoop(UniqueFd epoll_fd, UniqueFd stop_fd, HwContext hw,
                      std::vector<StreamListener> listeners, std::vector<StreamState> streams,
-                     size_t pool_slots, uint64_t session_start)
+                     size_t pool_slots, uint64_t session_start,
+                     uint32_t frame_width, uint32_t frame_height)
   : m_epoll_fd(std::move(epoll_fd)),
     m_stop_fd(std::move(stop_fd)),
     m_hw(std::move(hw)),
     m_listeners(std::move(listeners)),
-    m_pool(std::make_unique<FramesetPool>(m_listeners.size(), pool_slots, session_start)),
+    m_pool(std::make_unique<FramesetPool>(m_listeners.size(), pool_slots, session_start,
+                                         frame_width, frame_height)),
     m_streams(std::move(streams)),
     m_events(MAX_EVENTS) {}
 
@@ -109,14 +111,15 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t ses
   }
 
   EventLoop loop(std::move(epoll_fd), std::move(stop_fd), std::move(*hw),
-                 std::move(listeners), std::move(streams), POOL_SLOTS, session_start);
+                 std::move(listeners), std::move(streams), POOL_SLOTS, session_start,
+                 conf.stream.frame_width, conf.stream.frame_height);
 
   std::expected<void, Error> watched =
     loop.watch(loop.m_stop_fd.get(), encode(SourceKind::stop, 0));
   if (!watched)
     return std::unexpected(watched.error());
 
-  for (size_t i = 0; i < loop.m_listeners.size(); i++) {
+  for (size_t i = 0; i < loop.m_listeners.size(); i += 1) {
     watched = loop.watch(loop.m_listeners[i].fd(), encode(SourceKind::listener, i));
     if (!watched)
       return std::unexpected(watched.error());

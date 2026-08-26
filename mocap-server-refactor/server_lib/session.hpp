@@ -7,11 +7,9 @@
 #include <optional>
 #include <span>
 
+#include "config.hpp"
 #include "error.hpp"
-
-// everything in the library is hidden by default, so the public entry points
-// have to opt back in
-#define MOCAP_API __attribute__((visibility("default")))
+#include "visibility.hpp"
 
 namespace mocap {
 
@@ -20,7 +18,9 @@ namespace mocap {
 struct FrameView {
   uint8_t camera_id;
   const uint8_t* device_ptr;
-  uint32_t pitch;
+  uint32_t width;
+  uint32_t height;
+  uint32_t pitch;    // padded wider than width for alignment, so copies stride
 };
 
 // A set of frames that share a capture timestamp. May hold fewer than one per
@@ -46,6 +46,14 @@ MOCAP_API std::expected<void, Error> stop_session();
 
 // Takes the oldest ready frameset, or nullopt if none is ready. Safe to call
 // from a different thread than the one that started the session.
+// The config the running session was started from. Owned by the library and
+// valid until stop_session, so copy out anything needed after that.
+//
+// Calling this without a running session is a caller bug rather than a
+// condition to handle, so it aborts rather than handing back a null nobody
+// checks.
+MOCAP_API const Config& session_config();
+
 MOCAP_API std::optional<Frameset> try_acquire_frameset();
 
 // Returns a frameset's GPU surfaces to the decoders. Hold sets briefly: the

@@ -28,7 +28,8 @@ namespace mocap {
 // the producer popping the consumer's end.
 class FramesetPool {
 public:
-  FramesetPool(size_t cameras, size_t slots, uint64_t session_start);
+  FramesetPool(size_t cameras, size_t slots, uint64_t session_start,
+               uint32_t frame_width, uint32_t frame_height);
 
   // event loop thread
   void push(size_t camera_index, DecodedFrame frame);
@@ -59,6 +60,8 @@ private:
   // every camera agrees on its stale timestamp, so it forms a set that looks
   // valid. nothing captured before the session started is real.
   uint64_t m_session_start;
+  uint32_t m_frame_width;
+  uint32_t m_frame_height;
 };
 
 } // namespace mocap

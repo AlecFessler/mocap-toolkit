@@ -1,4 +1,6 @@
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <optional>
 #include <thread>
@@ -25,6 +27,15 @@ struct SessionState {
 };
 
 std::optional<SessionState> g_session;
+
+// calling into a session that was never started is a bug in the caller, not a
+// runtime condition, so there is nothing to hand back that they could act on.
+// exiting rather than aborting keeps the diagnostic, since abort does not
+// flush stdio.
+[[noreturn]] void no_session(const char* function) {
+  std::fprintf(stderr, "[session] %s called with no session running\n", function);
+  std::exit(EXIT_FAILURE);
+}
 
 uint64_t start_timestamp() {
   std::chrono::nanoseconds now =
@@ -68,35 +79,58 @@ std::expected<void, Error> start_session(const std::filesystem::path& config_pat
 }
 
 std::expected<void, Error> stop_session() {
-  if (!g_session)
-    return std::unexpected(invalid("session not started"));
+  // stopping a session that was never started is not something a caller can
+  // act on, so it is a no op rather than an error they have to handle
+  if (!g_session) {
+    std::fprintf(stderr, "[session] stop_session with no session running\n");
+    return {};
+  }
 
   std::expected<void, Error> stopped = g_session->control.broadcast_stop();
 
+  // the eventfd is the only way to wake the loop, so if the write fails the
+  // join below would block forever. there is no path back from that, and
+  // checking after the join would never run.
   std::expected<void, Error> signalled = g_session->loop.stop();
+  if (!signalled) {
+    // not exit: the loop thread is still running and joinable, so running its
+    // destructor on the way out would terminate anyway
+    std::fprintf(stderr, "[session] cannot signal the event loop to stop: %s: %s\n",
+                 signalled.error().detail.c_str(),
+                 signalled.error().ec.message().c_str());
+    std::abort();
+  }
+
   if (g_session->thread.joinable())
     g_session->thread.join();
 
   g_session.reset();
 
+  // the only failure a caller can act on: the cameras were never told to stop,
+  // so they keep capturing until their stream write fails
   if (!stopped)
     return std::unexpected(stopped.error());
-  if (!signalled)
-    return std::unexpected(signalled.error());
 
   return {};
 }
 
+const Config& session_config() {
+  if (!g_session)
+    no_session("session_config");
+
+  return g_session->conf;
+}
+
 std::optional<Frameset> try_acquire_frameset() {
   if (!g_session)
-    return std::nullopt;
+    no_session("try_acquire_frameset");
 
   return g_session->loop.pool().try_acquire();
 }
 
 void release_frameset(const Frameset& set) {
   if (!g_session)
-    return;
+    no_session("release_frameset");
 
   g_session->loop.pool().release(set.slot);
 }

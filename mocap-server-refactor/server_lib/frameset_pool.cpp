@@ -13,10 +13,12 @@ constexpr size_t MIN_USEFUL_FRAMES = 2;
 
 } // namespace
 
-FramesetPool::FramesetPool(size_t cameras, size_t slots, uint64_t session_start)
+FramesetPool::FramesetPool(size_t cameras, size_t slots, uint64_t session_start,
+                           uint32_t frame_width, uint32_t frame_height)
   : m_slots(slots), m_camera_count(cameras),
-    m_session_start(session_start) {
-  for (uint32_t i = 0; i < slots; i++) {
+    m_session_start(session_start),
+    m_frame_width(frame_width), m_frame_height(frame_height) {
+  for (uint32_t i = 0; i < slots; i += 1) {
     m_slots[i].surfaces.reserve(cameras);
     m_slots[i].views.reserve(cameras);
     m_unused_slots.push(i);
@@ -97,6 +99,8 @@ void FramesetPool::push(size_t camera_index, DecodedFrame frame) {
   set.views.push_back(FrameView{
     static_cast<uint8_t>(camera_index),
     frame.device_ptr(),
+    m_frame_width,
+    m_frame_height,
     frame.pitch()
   });
   set.surfaces.push_back(std::move(frame));

@@ -53,7 +53,8 @@ public:
 private:
   EventLoop(UniqueFd epoll_fd, UniqueFd stop_fd, HwContext hw,
             std::vector<StreamListener> listeners, std::vector<StreamState> streams,
-            size_t pool_slots, uint64_t session_start);
+            size_t pool_slots, uint64_t session_start,
+            uint32_t frame_width, uint32_t frame_height);
 
   std::expected<void, Error> watch(int fd, uint64_t key) const;
 
