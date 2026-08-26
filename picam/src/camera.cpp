@@ -152,6 +152,16 @@ Camera::Camera(
   m_cam->requestCompleted.connect(this, &Camera::request_complete);
 
   auto frame_duration = std::chrono::microseconds{std::chrono::seconds{1}} / fps / 2;
+
+  // short enough to freeze limb motion. a full frame duration exposure smears
+  // a fast gesture across roughly ten pixels, which is a systematic error
+  // floor on every moving keypoint.
+  constexpr auto exposure_time = std::chrono::microseconds{4000};
+
+  // the sensor supports roughly 1.0 to 16.0. at unity the short exposure is
+  // far too dark, so this trades noise for light. starting point, wants
+  // tuning against real frames.
+  constexpr float analogue_gain = 8.0f;
   auto controls = std::make_unique<libcamera::ControlList>();
   controls->set(
     libcamera::controls::FrameDurationLimits,
@@ -165,7 +175,11 @@ Camera::Camera(
   );
   controls->set(
     libcamera::controls::ExposureTime,
-    frame_duration.count()
+    exposure_time.count()
+  );
+  controls->set(
+    libcamera::controls::AnalogueGain,
+    analogue_gain
   );
 
   status = m_cam->start(controls.get());
