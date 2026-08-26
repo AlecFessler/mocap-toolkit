@@ -18,7 +18,7 @@ namespace mocap {
 
 namespace fs = std::filesystem;
 
-static std::expected<std::string, Error> read_file(const fs::path& path) {
+static Result<std::string> read_file(const fs::path& path) {
   errno = 0;
   std::ifstream file(path, std::ios::binary);
   if (!file)
@@ -34,7 +34,7 @@ static std::expected<std::string, Error> read_file(const fs::path& path) {
   return contents;
 }
 
-static std::expected<in_addr, Error> parse_ipv4(const std::string& text) {
+static Result<in_addr> parse_ipv4(const std::string& text) {
   in_addr addr;
   if (inet_pton(AF_INET, text.c_str(), &addr) != 1)
     return std::unexpected(invalid(std::format("invalid ipv4 address: {}", text)));
@@ -51,7 +51,7 @@ static bool valid_camera_name(std::string_view name) {
       && std::isdigit(static_cast<unsigned char>(name[7]));
 }
 
-static std::expected<StreamParams, Error> parse_stream_params(const toml::table& root) {
+static Result<StreamParams> parse_stream_params(const toml::table& root) {
   const toml::node_view<const toml::node> params = root["stream_params"];
 
   std::optional<uint32_t> width = params["frame_width"].value<uint32_t>();
@@ -63,7 +63,7 @@ static std::expected<StreamParams, Error> parse_stream_params(const toml::table&
   return StreamParams{*width, *height, *fps};
 }
 
-static std::expected<Control, Error> parse_control(const toml::table& root) {
+static Result<Control> parse_control(const toml::table& root) {
   const toml::node_view<const toml::node> control = root["control"];
 
   std::optional<std::string> broadcast = control["broadcast"].value<std::string>();
@@ -71,14 +71,14 @@ static std::expected<Control, Error> parse_control(const toml::table& root) {
   if (!broadcast || !port)
     return std::unexpected(invalid("control: missing or invalid field"));
 
-  std::expected<in_addr, Error> addr = parse_ipv4(*broadcast);
+  Result<in_addr> addr = parse_ipv4(*broadcast);
   if (!addr)
     return std::unexpected(addr.error());
 
   return Control{*addr, *port};
 }
 
-static std::expected<Camera, Error> parse_camera(const toml::table& entry) {
+static Result<Camera> parse_camera(const toml::table& entry) {
   std::optional<std::string> name = entry["name"].value<std::string>();
   std::optional<uint8_t> id = entry["id"].value<uint8_t>();
   std::optional<std::string> eth_ip = entry["eth_ip"].value<std::string>();
@@ -89,7 +89,7 @@ static std::expected<Camera, Error> parse_camera(const toml::table& entry) {
   if (!valid_camera_name(*name))
     return std::unexpected(invalid(std::format("name must match rpicamXX, got {}", *name)));
 
-  std::expected<in_addr, Error> eth = parse_ipv4(*eth_ip);
+  Result<in_addr> eth = parse_ipv4(*eth_ip);
   if (!eth)
     return std::unexpected(eth.error());
 
@@ -99,7 +99,7 @@ static std::expected<Camera, Error> parse_camera(const toml::table& entry) {
 // invariants that only make sense across the whole set: ids index the set,
 // and no two cameras share a stream port. the control port is deliberately
 // shared, and tcp/udp are separate port spaces, so it needs no cross-check.
-static std::expected<void, Error> validate_cameras(const std::vector<Camera>& cameras) {
+static Result<void> validate_cameras(const std::vector<Camera>& cameras) {
   std::set<uint16_t> ports;
 
   for (size_t i = 0; i < cameras.size(); i += 1) {
@@ -115,7 +115,7 @@ static std::expected<void, Error> validate_cameras(const std::vector<Camera>& ca
   return {};
 }
 
-static std::expected<std::vector<Camera>, Error> parse_cameras(const toml::table& root) {
+static Result<std::vector<Camera>> parse_cameras(const toml::table& root) {
   const toml::array* entries = root["cameras"].as_array();
   if (!entries || entries->empty())
     return std::unexpected(invalid("cameras: missing or empty"));
@@ -128,43 +128,43 @@ static std::expected<std::vector<Camera>, Error> parse_cameras(const toml::table
     if (!entry)
       return std::unexpected(invalid(std::format("cameras[{}]: not a table", i)));
 
-    std::expected<Camera, Error> cam = parse_camera(*entry);
+    Result<Camera> cam = parse_camera(*entry);
     if (!cam)
       return std::unexpected(invalid(std::format("cameras[{}]: {}", i, cam.error().detail)));
 
     cameras.push_back(std::move(*cam));
   }
 
-  std::expected<void, Error> valid = validate_cameras(cameras);
+  Result<void> valid = validate_cameras(cameras);
   if (!valid)
     return std::unexpected(valid.error());
 
   return cameras;
 }
 
-static std::expected<Config, Error> parse_toml(std::string contents) {
+static Result<Config> parse_toml(std::string contents) {
   toml::parse_result result = toml::parse(contents);
   if (!result)
     return std::unexpected(invalid(std::string(result.error().description())));
 
   const toml::table& root = result.table();
 
-  std::expected<StreamParams, Error> stream = parse_stream_params(root);
+  Result<StreamParams> stream = parse_stream_params(root);
   if (!stream)
     return std::unexpected(stream.error());
 
-  std::expected<Control, Error> control = parse_control(root);
+  Result<Control> control = parse_control(root);
   if (!control)
     return std::unexpected(control.error());
 
-  std::expected<std::vector<Camera>, Error> cameras = parse_cameras(root);
+  Result<std::vector<Camera>> cameras = parse_cameras(root);
   if (!cameras)
     return std::unexpected(cameras.error());
 
   return Config{*stream, *control, std::move(*cameras)};
 }
 
-std::expected<Config, Error> parse_config(const fs::path& path) {
+Result<Config> parse_config(const fs::path& path) {
   return read_file(path).and_then(parse_toml);
 }
 

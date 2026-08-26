@@ -1,6 +1,7 @@
 #ifndef MOCAP_ERROR_HPP
 #define MOCAP_ERROR_HPP
 
+#include <expected>
 #include <string>
 #include <system_error>
 
@@ -10,6 +11,11 @@ struct Error {
   std::error_code ec;
   std::string detail;
 };
+
+// Every fallible operation in this codebase fails the same way, so the error
+// half never varies and spelling it out at each site is noise.
+template <typename T>
+using Result = std::expected<T, Error>;
 
 Error errno_error(std::string detail);
 

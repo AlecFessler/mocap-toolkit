@@ -36,7 +36,7 @@ struct Config {
   std::vector<Camera> cameras;
 };
 
-std::expected<Config, Error> parse_config(const std::filesystem::path& path);
+Result<Config> parse_config(const std::filesystem::path& path);
 
 } // namespace mocap
 

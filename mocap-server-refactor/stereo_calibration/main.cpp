@@ -103,7 +103,7 @@ void collect_shared_views(mocap::Session& session,
 } // namespace
 
 int main() {
-  std::expected<mocap::Session, mocap::Error> session = mocap::Session::start(CONFIG_PATH);
+  mocap::Result<mocap::Session> session = mocap::Session::start(CONFIG_PATH);
   if (!session) {
     std::println(stderr, "session: {}: {}",
                  session.error().detail, session.error().ec.message());

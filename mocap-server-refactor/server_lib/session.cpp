@@ -42,12 +42,12 @@ Session::Session(std::unique_ptr<State> state) : m_state(std::move(state)) {}
 Session::Session(Session&& other) noexcept = default;
 Session& Session::operator=(Session&& other) noexcept = default;
 
-std::expected<Session, Error> Session::start(const std::filesystem::path& config_path) {
-  std::expected<Config, Error> conf = parse_config(config_path);
+Result<Session> Session::start(const std::filesystem::path& config_path) {
+  Result<Config> conf = parse_config(config_path);
   if (!conf)
     return std::unexpected(conf.error());
 
-  std::expected<ControlSocket, Error> control =
+  Result<ControlSocket> control =
     ControlSocket::open(conf->control.broadcast, conf->control.port);
   if (!control)
     return std::unexpected(control.error());
@@ -58,11 +58,11 @@ std::expected<Session, Error> Session::start(const std::filesystem::path& config
 
   // listeners must be bound before the cameras are told to start, otherwise
   // their first connect is refused and they back off for a retry interval
-  std::expected<EventLoop, Error> loop = EventLoop::open(*conf, timestamp);
+  Result<EventLoop> loop = EventLoop::open(*conf, timestamp);
   if (!loop)
     return std::unexpected(loop.error());
 
-  std::expected<void, Error> started = control->broadcast_start(timestamp);
+  Result<void> started = control->broadcast_start(timestamp);
   if (!started)
     return std::unexpected(started.error());
 
@@ -82,12 +82,12 @@ Session::~Session() {
   if (!m_state)
     return;
 
-  std::expected<void, Error> stopped = m_state->control.broadcast_stop();
+  Result<void> stopped = m_state->control.broadcast_stop();
 
   // the eventfd is the only way to wake the loop, so if the write fails the
   // join below would block forever. not exit: the loop thread is still
   // joinable, so running its destructor on the way out would terminate anyway.
-  std::expected<void, Error> signalled = m_state->loop.stop();
+  Result<void> signalled = m_state->loop.stop();
   if (!signalled) {
     std::fprintf(stderr, "[session] cannot signal the event loop to stop: %s: %s\n",
                  signalled.error().detail.c_str(),

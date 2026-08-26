@@ -13,7 +13,7 @@ constexpr int LISTEN_BACKLOG = 1;
 StreamListener::StreamListener(UniqueFd fd, std::string name)
   : m_fd(std::move(fd)), m_name(std::move(name)) {}
 
-std::expected<StreamListener, Error> StreamListener::open(uint16_t port, std::string name) {
+Result<StreamListener> StreamListener::open(uint16_t port, std::string name) {
   UniqueFd fd{socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)};
   if (!fd.valid())
     return std::unexpected(errno_error("failed to create listen socket for " + name));
@@ -40,7 +40,7 @@ std::expected<StreamListener, Error> StreamListener::open(uint16_t port, std::st
 
 // non blocking, so a read that outruns the data returns EAGAIN instead of
 // parking the loop thread and stalling every other camera
-std::expected<UniqueFd, Error> StreamListener::accept() const {
+Result<UniqueFd> StreamListener::accept() const {
   UniqueFd conn{::accept4(m_fd.get(), nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC)};
   if (!conn.valid())
     return std::unexpected(errno_error("failed to accept connection for " + m_name));

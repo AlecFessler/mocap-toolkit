@@ -14,9 +14,9 @@ namespace mocap {
 // Camera's identity is established by which listener accepted it.
 class StreamListener {
 public:
-  static std::expected<StreamListener, Error> open(uint16_t port, std::string name);
+  static Result<StreamListener> open(uint16_t port, std::string name);
 
-  std::expected<UniqueFd, Error> accept() const;
+  Result<UniqueFd> accept() const;
 
   int fd() const { return m_fd.get(); }
   const std::string& name() const { return m_name; }

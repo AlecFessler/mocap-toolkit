@@ -13,7 +13,7 @@ constexpr const char* STOP_SENTINEL = "STOP";
 ControlSocket::ControlSocket(UniqueFd fd, sockaddr_in dest)
   : m_fd(std::move(fd)), m_dest(dest) {}
 
-std::expected<ControlSocket, Error> ControlSocket::open(in_addr broadcast_addr, uint16_t port) {
+Result<ControlSocket> ControlSocket::open(in_addr broadcast_addr, uint16_t port) {
   UniqueFd fd{socket(AF_INET, SOCK_DGRAM, 0)};
   if (!fd.valid())
     return std::unexpected(errno_error("failed to create control socket"));
@@ -30,7 +30,7 @@ std::expected<ControlSocket, Error> ControlSocket::open(in_addr broadcast_addr, 
   return ControlSocket(std::move(fd), dest);
 }
 
-std::expected<void, Error> ControlSocket::broadcast(const void* msg, size_t len) const {
+Result<void> ControlSocket::broadcast(const void* msg, size_t len) const {
   ssize_t sent = sendto(
     m_fd.get(),
     msg,
@@ -48,11 +48,11 @@ std::expected<void, Error> ControlSocket::broadcast(const void* msg, size_t len)
   return {};
 }
 
-std::expected<void, Error> ControlSocket::broadcast_start(uint64_t timestamp) const {
+Result<void> ControlSocket::broadcast_start(uint64_t timestamp) const {
   return broadcast(&timestamp, sizeof(timestamp));
 }
 
-std::expected<void, Error> ControlSocket::broadcast_stop() const {
+Result<void> ControlSocket::broadcast_stop() const {
   return broadcast(STOP_SENTINEL, std::strlen(STOP_SENTINEL));
 }
 } // namespace mocap

@@ -47,7 +47,7 @@ struct Frameset {
 // a caller would do differently.
 class MOCAP_API Session {
 public:
-  static std::expected<Session, Error> start(const std::filesystem::path& config_path);
+  static Result<Session> start(const std::filesystem::path& config_path);
 
   Session(Session&& other) noexcept;
   Session& operator=(Session&& other) noexcept;

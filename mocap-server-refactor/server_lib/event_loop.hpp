@@ -37,16 +37,16 @@ struct StreamState {
 // all cameras, so the work done per wakeup needs to stay bounded.
 class EventLoop {
 public:
-  static std::expected<EventLoop, Error> open(const Config& conf, uint64_t session_start);
+  static Result<EventLoop> open(const Config& conf, uint64_t session_start);
 
   EventLoop(EventLoop&&) noexcept = default;
   EventLoop& operator=(EventLoop&&) noexcept = default;
 
   // blocks until stop() is called
-  std::expected<void, Error> run();
+  Result<void> run();
 
   // wakes run() from another thread
-  std::expected<void, Error> stop() const;
+  Result<void> stop() const;
 
   FramesetPool& pool() { return *m_pool; }
 
@@ -56,22 +56,22 @@ private:
             size_t pool_slots, uint64_t session_start,
             uint32_t frame_width, uint32_t frame_height);
 
-  std::expected<void, Error> watch(int fd, uint64_t key) const;
+  Result<void> watch(int fd, uint64_t key) const;
 
-  std::expected<std::span<const epoll_event>, Error> wait();
-  std::expected<void, Error> service(std::span<const epoll_event> events);
-  std::expected<void, Error> dispatch(uint64_t key);
+  Result<std::span<const epoll_event>> wait();
+  Result<void> service(std::span<const epoll_event> events);
+  Result<void> dispatch(uint64_t key);
 
-  std::expected<void, Error> accept_camera(size_t index);
-  std::expected<void, Error> read_camera(size_t index);
-  std::expected<void, Error> read_header(size_t index);
-  std::expected<void, Error> read_payload(size_t index);
-  std::expected<void, Error> submit_frame(size_t index);
-  std::expected<void, Error> drain_frames(size_t index);
-  std::expected<size_t, Error> fill(size_t index, uint8_t* dst, size_t want);
+  Result<void> accept_camera(size_t index);
+  Result<void> read_camera(size_t index);
+  Result<void> read_header(size_t index);
+  Result<void> read_payload(size_t index);
+  Result<void> submit_frame(size_t index);
+  Result<void> drain_frames(size_t index);
+  Result<size_t> fill(size_t index, uint8_t* dst, size_t want);
 
   void drop_camera(size_t index);
-  std::expected<void, Error> absorb_stream_error(size_t index, Error err);
+  Result<void> absorb_stream_error(size_t index, Error err);
 
   UniqueFd m_epoll_fd;
   UniqueFd m_stop_fd;

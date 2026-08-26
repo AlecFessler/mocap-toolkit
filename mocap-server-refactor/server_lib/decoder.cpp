@@ -44,7 +44,7 @@ HwContext::~HwContext() {
     av_buffer_unref(&m_ctx);
 }
 
-std::expected<HwContext, Error> HwContext::open() {
+Result<HwContext> HwContext::open() {
   AVBufferRef* ctx = nullptr;
 
   int ret = av_hwdevice_ctx_create(&ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0);
@@ -116,7 +116,7 @@ Decoder::~Decoder() {
     avcodec_free_context(&m_ctx);
 }
 
-std::expected<Decoder, Error> Decoder::open(const StreamParams& params,
+Result<Decoder> Decoder::open(const StreamParams& params,
                                             uint32_t surfaces,
                                             const HwContext& hw) {
   const AVCodec* codec = avcodec_find_decoder_by_name(CODEC_NAME);
@@ -155,7 +155,7 @@ std::expected<Decoder, Error> Decoder::open(const StreamParams& params,
   return decoder;
 }
 
-std::expected<void, Error> Decoder::send_packet(std::span<const uint8_t> data, uint64_t timestamp) {
+Result<void> Decoder::send_packet(std::span<const uint8_t> data, uint64_t timestamp) {
   // the packet only borrows the caller's buffer; avcodec_send_packet copies
   // what it needs before returning
   m_packet->data = const_cast<uint8_t*>(data.data());
@@ -169,7 +169,7 @@ std::expected<void, Error> Decoder::send_packet(std::span<const uint8_t> data, u
   return {};
 }
 
-std::expected<std::optional<DecodedFrame>, Error> Decoder::receive_frame() {
+Result<std::optional<DecodedFrame>> Decoder::receive_frame() {
   AVFrame* frame = av_frame_alloc();
   if (!frame)
     return std::unexpected(invalid("failed to allocate frame"));

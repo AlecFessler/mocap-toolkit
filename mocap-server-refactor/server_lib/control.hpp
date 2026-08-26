@@ -15,17 +15,17 @@ namespace mocap {
 // stops the whole rig.
 class ControlSocket {
 public:
-  static std::expected<ControlSocket, Error> open(in_addr broadcast_addr, uint16_t port);
+  static Result<ControlSocket> open(in_addr broadcast_addr, uint16_t port);
 
   // cameras arm their interval timer against this absolute time, so delivery
   // jitter between cameras does not affect capture alignment
-  std::expected<void, Error> broadcast_start(uint64_t timestamp) const;
-  std::expected<void, Error> broadcast_stop() const;
+  Result<void> broadcast_start(uint64_t timestamp) const;
+  Result<void> broadcast_stop() const;
 
 private:
   ControlSocket(UniqueFd fd, sockaddr_in dest);
 
-  std::expected<void, Error> broadcast(const void* msg, size_t len) const;
+  Result<void> broadcast(const void* msg, size_t len) const;
 
   UniqueFd m_fd;
   sockaddr_in m_dest;

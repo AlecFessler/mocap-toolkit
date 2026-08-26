@@ -75,7 +75,7 @@ EventLoop::EventLoop(UniqueFd epoll_fd, UniqueFd stop_fd, HwContext hw,
     m_streams(std::move(streams)),
     m_events(MAX_EVENTS) {}
 
-std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t session_start) {
+Result<EventLoop> EventLoop::open(const Config& conf, uint64_t session_start) {
   UniqueFd epoll_fd{epoll_create1(EPOLL_CLOEXEC)};
   if (!epoll_fd.valid())
     return std::unexpected(errno_error("failed to create epoll fd"));
@@ -84,7 +84,7 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t ses
   if (!stop_fd.valid())
     return std::unexpected(errno_error("failed to create stop eventfd"));
 
-  std::expected<HwContext, Error> hw = HwContext::open();
+  Result<HwContext> hw = HwContext::open();
   if (!hw)
     return std::unexpected(hw.error());
 
@@ -94,12 +94,12 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t ses
   streams.reserve(conf.cameras.size());
 
   for (const Camera& cam : conf.cameras) {
-    std::expected<StreamListener, Error> listener =
+    Result<StreamListener> listener =
       StreamListener::open(cam.tcp_port, cam.name);
     if (!listener)
       return std::unexpected(listener.error());
 
-    std::expected<Decoder, Error> decoder =
+    Result<Decoder> decoder =
       Decoder::open(conf.stream, DECODE_SURFACES, *hw);
     if (!decoder)
       return std::unexpected(decoder.error());
@@ -114,7 +114,7 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t ses
                  std::move(listeners), std::move(streams), POOL_SLOTS, session_start,
                  conf.stream.frame_width, conf.stream.frame_height);
 
-  std::expected<void, Error> watched =
+  Result<void> watched =
     loop.watch(loop.m_stop_fd.get(), encode(SourceKind::stop, 0));
   if (!watched)
     return std::unexpected(watched.error());
@@ -128,15 +128,15 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t ses
   return loop;
 }
 
-std::expected<void, Error> EventLoop::run() {
+Result<void> EventLoop::run() {
   m_stopping = false;
 
   while (!m_stopping) {
-    std::expected<std::span<const epoll_event>, Error> events = wait();
+    Result<std::span<const epoll_event>> events = wait();
     if (!events)
       return std::unexpected(events.error());
 
-    std::expected<void, Error> serviced = service(*events);
+    Result<void> serviced = service(*events);
     if (!serviced)
       return std::unexpected(serviced.error());
   }
@@ -144,7 +144,7 @@ std::expected<void, Error> EventLoop::run() {
   return {};
 }
 
-std::expected<std::span<const epoll_event>, Error> EventLoop::wait() {
+Result<std::span<const epoll_event>> EventLoop::wait() {
   for (;;) {
     int ready = epoll_wait(m_epoll_fd.get(), m_events.data(), m_events.size(), -1);
     if (ready >= 0)
@@ -156,10 +156,10 @@ std::expected<std::span<const epoll_event>, Error> EventLoop::wait() {
   }
 }
 
-std::expected<void, Error> EventLoop::service(std::span<const epoll_event> events) {
+Result<void> EventLoop::service(std::span<const epoll_event> events) {
   for (const epoll_event& event : events) {
     // only fatal errors reach here now, per stream ones are absorbed below
-    std::expected<void, Error> handled = dispatch(event.data.u64);
+    Result<void> handled = dispatch(event.data.u64);
     if (!handled)
       return std::unexpected(handled.error());
   }
@@ -167,7 +167,7 @@ std::expected<void, Error> EventLoop::service(std::span<const epoll_event> event
   return {};
 }
 
-std::expected<void, Error> EventLoop::dispatch(uint64_t key) {
+Result<void> EventLoop::dispatch(uint64_t key) {
   const EventSource source = decode(key);
 
   switch (source.kind) {
@@ -186,7 +186,7 @@ std::expected<void, Error> EventLoop::dispatch(uint64_t key) {
   return std::unexpected(invalid("unknown epoll event source"));
 }
 
-std::expected<void, Error> EventLoop::watch(int fd, uint64_t key) const {
+Result<void> EventLoop::watch(int fd, uint64_t key) const {
   epoll_event ev{};
   ev.events = EPOLLIN;
   ev.data.u64 = key;
@@ -197,12 +197,12 @@ std::expected<void, Error> EventLoop::watch(int fd, uint64_t key) const {
   return {};
 }
 
-std::expected<void, Error> EventLoop::accept_camera(size_t index) {
-  std::expected<UniqueFd, Error> conn = m_listeners[index].accept();
+Result<void> EventLoop::accept_camera(size_t index) {
+  Result<UniqueFd> conn = m_listeners[index].accept();
   if (!conn)
     return std::unexpected(conn.error());
 
-  std::expected<void, Error> watched = watch(conn->get(), encode(SourceKind::stream, index));
+  Result<void> watched = watch(conn->get(), encode(SourceKind::stream, index));
   if (!watched)
     return std::unexpected(watched.error());
 
@@ -214,7 +214,7 @@ std::expected<void, Error> EventLoop::accept_camera(size_t index) {
 // a camera failing is not a reason to stop serving the others, so everything
 // below this point is absorbed rather than propagated. the listener stays
 // registered, so a dropped camera rejoins on its next connect attempt.
-std::expected<void, Error> EventLoop::read_camera(size_t index) {
+Result<void> EventLoop::read_camera(size_t index) {
   if (m_streams[index].expected == 0)
     return read_header(index)
       .or_else([this, index](Error err) { return absorb_stream_error(index, std::move(err)); });
@@ -239,7 +239,7 @@ void EventLoop::drop_camera(size_t index) {
 // the one place a stream is torn down. a desynced stream cannot be resynced in
 // place and a failed decoder keeps failing, so anything short of "try again"
 // means dropping the camera and letting it reconnect clean.
-std::expected<void, Error> EventLoop::absorb_stream_error(size_t index, Error err) {
+Result<void> EventLoop::absorb_stream_error(size_t index, Error err) {
   if (is_retry(err))
     return {};
 
@@ -258,7 +258,7 @@ std::expected<void, Error> EventLoop::absorb_stream_error(size_t index, Error er
 // reads at most the bytes still missing, so a read never crosses into the
 // next frame. whatever else arrived stays in the socket buffer and wakes us
 // again, which keeps every read aligned to a frame boundary.
-std::expected<size_t, Error> EventLoop::fill(size_t index, uint8_t* dst, size_t want) {
+Result<size_t> EventLoop::fill(size_t index, uint8_t* dst, size_t want) {
   StreamState& stream = m_streams[index];
 
   ssize_t got = read(stream.fd.get(), dst + stream.filled, want - stream.filled);
@@ -277,10 +277,10 @@ std::expected<size_t, Error> EventLoop::fill(size_t index, uint8_t* dst, size_t 
   return stream.filled;
 }
 
-std::expected<void, Error> EventLoop::read_header(size_t index) {
+Result<void> EventLoop::read_header(size_t index) {
   StreamState& stream = m_streams[index];
 
-  std::expected<size_t, Error> filled = fill(index, stream.header, FRAME_HEADER_SIZE);
+  Result<size_t> filled = fill(index, stream.header, FRAME_HEADER_SIZE);
   if (!filled)
     return std::unexpected(filled.error());
 
@@ -297,10 +297,10 @@ std::expected<void, Error> EventLoop::read_header(size_t index) {
   return {};
 }
 
-std::expected<void, Error> EventLoop::read_payload(size_t index) {
+Result<void> EventLoop::read_payload(size_t index) {
   StreamState& stream = m_streams[index];
 
-  std::expected<size_t, Error> filled = fill(index, stream.buffer.data(), stream.expected);
+  Result<size_t> filled = fill(index, stream.buffer.data(), stream.expected);
   if (!filled)
     return std::unexpected(filled.error());
 
@@ -310,10 +310,10 @@ std::expected<void, Error> EventLoop::read_payload(size_t index) {
   return {};
 }
 
-std::expected<void, Error> EventLoop::submit_frame(size_t index) {
+Result<void> EventLoop::submit_frame(size_t index) {
   StreamState& stream = m_streams[index];
 
-  std::expected<void, Error> sent = stream.decoder.send_packet(
+  Result<void> sent = stream.decoder.send_packet(
     std::span<const uint8_t>(stream.buffer.data(), stream.expected),
     stream.timestamp
   );
@@ -327,11 +327,11 @@ std::expected<void, Error> EventLoop::submit_frame(size_t index) {
 
 // the decoder stops accepting input once its queue fills, so every send has to
 // be followed by draining whatever became ready
-std::expected<void, Error> EventLoop::drain_frames(size_t index) {
+Result<void> EventLoop::drain_frames(size_t index) {
   StreamState& stream = m_streams[index];
 
   for (;;) {
-    std::expected<std::optional<DecodedFrame>, Error> frame = stream.decoder.receive_frame();
+    Result<std::optional<DecodedFrame>> frame = stream.decoder.receive_frame();
     if (!frame)
       return std::unexpected(frame.error());
 
@@ -344,7 +344,7 @@ std::expected<void, Error> EventLoop::drain_frames(size_t index) {
   }
 }
 
-std::expected<void, Error> EventLoop::stop() const {
+Result<void> EventLoop::stop() const {
   uint64_t one = 1;
   if (write(m_stop_fd.get(), &one, sizeof(one)) != sizeof(one))
     return std::unexpected(errno_error("failed to signal stop eventfd"));

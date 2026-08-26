@@ -20,7 +20,7 @@ namespace mocap {
 // same GPU and their surfaces live in one address space.
 class HwContext {
 public:
-  static std::expected<HwContext, Error> open();
+  static Result<HwContext> open();
 
   HwContext(HwContext&& other) noexcept;
   HwContext& operator=(HwContext&& other) noexcept;
@@ -68,7 +68,7 @@ private:
 // h264_cuvid Decoder for a single Camera stream.
 class Decoder {
 public:
-  static std::expected<Decoder, Error> open(const StreamParams& params,
+  static Result<Decoder> open(const StreamParams& params,
                                             uint32_t surfaces,
                                             const HwContext& hw);
 
@@ -78,9 +78,9 @@ public:
   Decoder& operator=(const Decoder&) = delete;
   ~Decoder();
 
-  std::expected<void, Error> send_packet(std::span<const uint8_t> data, uint64_t timestamp);
+  Result<void> send_packet(std::span<const uint8_t> data, uint64_t timestamp);
 
-  std::expected<std::optional<DecodedFrame>, Error> receive_frame();
+  Result<std::optional<DecodedFrame>> receive_frame();
 
 private:
   Decoder(AVCodecContext* ctx, AVPacket* packet);
