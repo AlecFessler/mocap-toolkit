@@ -22,7 +22,10 @@ constexpr size_t MAX_PAYLOAD_SIZE = MAX_FRAME_SIZE - FRAME_HEADER_SIZE;
 
 // NVDEC surface pool per stream. Every frame handed out holds one, so this is
 // the ceiling on frames in flight before the decoder stalls.
-constexpr uint32_t DECODE_SURFACES = 16;
+// framesets the consumer may have outstanding. each one pins a surface per
+// camera, so the decoder pool has to cover this plus its own working set.
+constexpr size_t POOL_SLOTS = 4;
+constexpr uint32_t DECODE_SURFACES = POOL_SLOTS + 12;
 
 // picam frames a packet as [uint64 capture timestamp][uint32 payload size]
 struct FrameHeader {
@@ -60,15 +63,17 @@ EventSource decode(uint64_t key) {
 } // namespace
 
 EventLoop::EventLoop(UniqueFd epoll_fd, UniqueFd stop_fd, HwContext hw,
-                     std::vector<StreamListener> listeners, std::vector<StreamState> streams)
+                     std::vector<StreamListener> listeners, std::vector<StreamState> streams,
+                     size_t pool_slots, uint64_t session_start)
   : m_epoll_fd(std::move(epoll_fd)),
     m_stop_fd(std::move(stop_fd)),
     m_hw(std::move(hw)),
     m_listeners(std::move(listeners)),
+    m_pool(std::make_unique<FramesetPool>(m_listeners.size(), pool_slots, session_start)),
     m_streams(std::move(streams)),
     m_events(MAX_EVENTS) {}
 
-std::expected<EventLoop, Error> EventLoop::open(const Config& conf) {
+std::expected<EventLoop, Error> EventLoop::open(const Config& conf, uint64_t session_start) {
   UniqueFd epoll_fd{epoll_create1(EPOLL_CLOEXEC)};
   if (!epoll_fd.valid())
     return std::unexpected(errno_error("failed to create epoll fd"));
@@ -104,7 +109,7 @@ std::expected<EventLoop, Error> EventLoop::open(const Config& conf) {
   }
 
   EventLoop loop(std::move(epoll_fd), std::move(stop_fd), std::move(*hw),
-                 std::move(listeners), std::move(streams));
+                 std::move(listeners), std::move(streams), POOL_SLOTS, session_start);
 
   std::expected<void, Error> watched =
     loop.watch(loop.m_stop_fd.get(), encode(SourceKind::stop, 0));
@@ -300,8 +305,7 @@ std::expected<void, Error> EventLoop::drain_frames(size_t index) {
       return {};
 
 
-    // nothing consumes frames yet, so the frame is dropped here and its
-    // surface goes straight back into the decoder pool
+    m_pool->push(index, std::move(**frame));
 
   }
 }

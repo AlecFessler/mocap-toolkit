@@ -3,12 +3,14 @@
 
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <span>
 #include <sys/epoll.h>
 #include <vector>
 
 #include "config.hpp"
 #include "decoder.hpp"
+#include "frameset_pool.hpp"
 #include "error.hpp"
 #include "fd.hpp"
 #include "stream.hpp"
@@ -35,7 +37,7 @@ struct StreamState {
 // all cameras, so the work done per wakeup needs to stay bounded.
 class EventLoop {
 public:
-  static std::expected<EventLoop, Error> open(const Config& conf);
+  static std::expected<EventLoop, Error> open(const Config& conf, uint64_t session_start);
 
   EventLoop(EventLoop&&) noexcept = default;
   EventLoop& operator=(EventLoop&&) noexcept = default;
@@ -46,9 +48,12 @@ public:
   // wakes run() from another thread
   std::expected<void, Error> stop() const;
 
+  FramesetPool& pool() { return *m_pool; }
+
 private:
   EventLoop(UniqueFd epoll_fd, UniqueFd stop_fd, HwContext hw,
-            std::vector<StreamListener> listeners, std::vector<StreamState> streams);
+            std::vector<StreamListener> listeners, std::vector<StreamState> streams,
+            size_t pool_slots, uint64_t session_start);
 
   std::expected<void, Error> watch(int fd, uint64_t key) const;
 
@@ -67,7 +72,13 @@ private:
   UniqueFd m_epoll_fd;
   UniqueFd m_stop_fd;
   HwContext m_hw;
+  // declared before m_pool: members initialise in declaration order, and the
+  // pool is sized from m_listeners.size()
   std::vector<StreamListener> m_listeners;
+
+  // by pointer so EventLoop stays movable (the pool holds a mutex) and so the
+  // consumer thread's reference survives EventLoop being moved into the session
+  std::unique_ptr<FramesetPool> m_pool;
   std::vector<StreamState> m_streams;
   std::vector<epoll_event> m_events;
   bool m_stopping = false;

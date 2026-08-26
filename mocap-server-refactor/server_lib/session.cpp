@@ -47,13 +47,17 @@ std::expected<void, Error> session_start(const std::filesystem::path& config_pat
   if (!control)
     return std::unexpected(control.error());
 
+  // computed before the loop opens so the frameset builder can reject frames
+  // captured before this session began
+  const uint64_t timestamp = start_timestamp();
+
   // listeners must be bound before the cameras are told to start, otherwise
   // their first connect is refused and they back off for a retry interval
-  std::expected<EventLoop, Error> loop = EventLoop::open(*conf);
+  std::expected<EventLoop, Error> loop = EventLoop::open(*conf, timestamp);
   if (!loop)
     return std::unexpected(loop.error());
 
-  std::expected<void, Error> started = control->broadcast_start(start_timestamp());
+  std::expected<void, Error> started = control->broadcast_start(timestamp);
   if (!started)
     return std::unexpected(started.error());
 
@@ -81,6 +85,20 @@ std::expected<void, Error> session_stop() {
     return std::unexpected(signalled.error());
 
   return {};
+}
+
+std::optional<Frameset> try_acquire_frameset() {
+  if (!g_session)
+    return std::nullopt;
+
+  return g_session->loop.pool().try_acquire();
+}
+
+void release_frameset(const Frameset& set) {
+  if (!g_session)
+    return;
+
+  g_session->loop.pool().release(set.slot);
 }
 
 } // namespace mocap
