@@ -5,9 +5,10 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
+#include "calibration_params.hpp"
+
 namespace mocap {
 
-constexpr int MIN_FRAMES = 10;
 constexpr double MIN_ERR = 1.0;
 
 class LensCalibration {
@@ -27,8 +28,6 @@ private:
 
   cv::Mat cam_matrix;
   cv::Mat dist_coeffs;
-  std::vector<cv::Mat> rvecs;
-  std::vector<cv::Mat> tvecs;
 
   double reprojection_err;
 
@@ -44,20 +43,8 @@ public:
   void draw_corners(cv::Mat& bgr_frame) const;
   double calibrate();
   bool check_status();
-  void save_params(const std::string& filename);
+  bool save_params(const std::string& filename) const;
 };
-
-struct calibration_params {
-  cv::Mat cam_matrix;
-  cv::Mat dist_coeffs;
-  int image_width;
-  int image_height;
-};
-
-bool load_calibration_params(
-  const std::string& filename,
-  struct calibration_params& params
-);
 
 } // namespace mocap
 

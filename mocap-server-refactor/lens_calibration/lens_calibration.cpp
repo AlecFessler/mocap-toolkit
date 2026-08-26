@@ -30,8 +30,6 @@ LensCalibration::LensCalibration(
   corners.reserve(board_width * board_height);
   img_pts.reserve(MIN_FRAMES);
   obj_pts.reserve(MIN_FRAMES);
-  rvecs.reserve(MIN_FRAMES);
-  tvecs.reserve(MIN_FRAMES);
 }
 
 bool LensCalibration::try_frame(cv::Mat& gray_frame) {
@@ -80,8 +78,6 @@ double LensCalibration::calibrate() {
   if (frame_count < MIN_FRAMES) return -1.0;
 
   cv::Size img_size(frame_width, frame_height);
-  rvecs.clear();
-  tvecs.clear();
 
   cam_matrix = cv::Mat::eye(3, 3, CV_64F);
   dist_coeffs = cv::Mat::zeros(5, 1, CV_64F);
@@ -96,8 +92,8 @@ double LensCalibration::calibrate() {
     img_size,
     cam_matrix,
     dist_coeffs,
-    rvecs,
-    tvecs
+    cv::noArray(),   // per view rotations, not used
+    cv::noArray()    // per view translations, not used
   );
 
   return reprojection_err;
@@ -108,36 +104,25 @@ bool LensCalibration::check_status() {
   return reprojection_err < 1.0;
 }
 
-void LensCalibration::save_params(const std::string& filename) {
+// image size, reproj_err and images_used are provenance: they record what this
+// was solved from, and nothing reads them back
+bool LensCalibration::save_params(const std::string& filename) const {
   cv::FileStorage fs(filename, cv::FileStorage::WRITE);
-
-  fs << "image_width" << frame_width;
-  fs << "image_height" << frame_height;
-  fs << "cam_matrix" << cam_matrix;
-  fs << "dist_coeffs" << dist_coeffs;
-
-  fs << "reproj_err" << reprojection_err;
-  fs << "images_used" << frame_count;
-
-  fs.release();
-}
-
-bool load_calibration_params(
-  const std::string& filename,
-  struct calibration_params& params
-) {
-  cv::FileStorage fs(filename, cv::FileStorage::READ);
 
   if (!fs.isOpened())
     return false;
 
-  fs["cam_matrix"] >> params.cam_matrix;
-  fs["dist_coeffs"] >> params.dist_coeffs;
-  fs["image_width"] >> params.image_width;
-  fs["image_height"] >> params.image_height;
+  fs << "cam_matrix" << cam_matrix;
+  fs << "dist_coeffs" << dist_coeffs;
+
+  fs << "image_width" << frame_width;
+  fs << "image_height" << frame_height;
+  fs << "reproj_err" << reprojection_err;
+  fs << "images_used" << frame_count;
 
   fs.release();
   return true;
 }
+
 
 } // namespace mocap

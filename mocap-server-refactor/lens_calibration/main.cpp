@@ -74,15 +74,16 @@ bool show(const cv::Mat& image, const std::string& window) {
   return cv::waitKey(1) != ESC_KEY;
 }
 
-void collect_until_calibrated(std::vector<mocap::LensCalibration>& calibrators,
+void collect_until_calibrated(mocap::Session& session,
+                              std::vector<mocap::LensCalibration>& calibrators,
                               std::vector<CameraProgress>& progress,
-                              const std::vector<std::string>& names) {
+                              const std::vector<mocap::Camera>& cameras) {
   cv::Mat gray;
   cv::Mat preview;
   bool running = true;
 
   while (running && !all_calibrated(progress)) {
-    std::optional<mocap::Frameset> set = mocap::try_acquire_frameset();
+    std::optional<mocap::Frameset> set = session.try_acquire_frameset();
     if (!set) {
       std::this_thread::sleep_for(POLL_INTERVAL);
       continue;
@@ -102,7 +103,7 @@ void collect_until_calibrated(std::vector<mocap::LensCalibration>& calibrators,
       if (found)
         calibrators[view.camera_id].draw_corners(preview);
 
-      if (!show(preview, names[view.camera_id]))
+      if (!show(preview, cameras[view.camera_id].name))
         running = false;
 
       if (!found)
@@ -111,57 +112,55 @@ void collect_until_calibrated(std::vector<mocap::LensCalibration>& calibrators,
       camera.accepted += 1;
 
       if (due_for_calibration(camera))
-        attempt_calibration(calibrators[view.camera_id], camera, names[view.camera_id]);
+        attempt_calibration(calibrators[view.camera_id], camera, cameras[view.camera_id].name);
     }
 
-    mocap::release_frameset(*set);
+    session.release_frameset(*set);
   }
 }
 
 void save_all(std::vector<mocap::LensCalibration>& calibrators,
               const std::vector<CameraProgress>& progress,
-              const std::vector<std::string>& names) {
-  for (size_t i = 0; i < names.size(); i += 1) {
+              const std::vector<mocap::Camera>& cameras) {
+  for (size_t i = 0; i < cameras.size(); i += 1) {
     if (!progress[i].calibrated) {
       std::println("{}: not calibrated, {} frames accepted, nothing saved",
-                   names[i], progress[i].accepted);
+                   cameras[i].name, progress[i].accepted);
       continue;
     }
 
-    std::string filename = names[i] + "_calibration.yaml";
-    calibrators[i].save_params(filename);
+    std::string filename = cameras[i].name + "_calibration.yaml";
+    if (!calibrators[i].save_params(filename)) {
+      std::println(stderr, "{}: could not write {}", cameras[i].name, filename);
+      continue;
+    }
+
     std::println("{}: {:.4f} px from {} frames -> {}",
-                 names[i], progress[i].error, progress[i].accepted, filename);
+                 cameras[i].name, progress[i].error, progress[i].accepted, filename);
   }
 }
 
 } // namespace
 
 int main() {
-  std::expected<void, mocap::Error> started = mocap::start_session(CONFIG_PATH);
-  if (!started) {
-    std::println(stderr, "start_session: {}: {}",
-                 started.error().detail, started.error().ec.message());
+  std::expected<mocap::Session, mocap::Error> session = mocap::Session::start(CONFIG_PATH);
+  if (!session) {
+    std::println(stderr, "session: {}: {}",
+                 session.error().detail, session.error().ec.message());
     return 1;
   }
 
-  // the session already parsed the config, and session_config points at state
-  // stop_session frees, so anything needed later is copied out now
-  const mocap::Config& conf = mocap::session_config();
-  const uint32_t width = conf.stream.frame_width;
-  const uint32_t height = conf.stream.frame_height;
-
-  std::vector<std::string> names;
-  names.reserve(conf.cameras.size());
-  for (const mocap::Camera& cam : conf.cameras)
-    names.push_back(cam.name);
+  // the session outlives this scope, so the config it owns can be read
+  // directly rather than copied out
+  const mocap::Config& conf = session->config();
 
   std::vector<mocap::LensCalibration> calibrators;
-  std::vector<CameraProgress> progress(names.size());
-  calibrators.reserve(names.size());
-  for (size_t i = 0; i < names.size(); i += 1)
+  std::vector<CameraProgress> progress(conf.cameras.size());
+  calibrators.reserve(conf.cameras.size());
+  for (size_t i = 0; i < conf.cameras.size(); i += 1)
     calibrators.emplace_back(
-      static_cast<int>(width), static_cast<int>(height),
+      static_cast<int>(conf.stream.frame_width),
+      static_cast<int>(conf.stream.frame_height),
       BOARD_WIDTH, BOARD_HEIGHT, SQUARE_SIZE
     );
 
@@ -171,19 +170,12 @@ int main() {
                mocap::MIN_FRAMES, mocap::MIN_ERR);
   std::println("escape to stop early\n");
 
-  collect_until_calibrated(calibrators, progress, names);
+  collect_until_calibrated(*session, calibrators, progress, conf.cameras);
 
-  std::expected<void, mocap::Error> stopped = mocap::stop_session();
   cv::destroyAllWindows();
 
   std::println("");
-  save_all(calibrators, progress, names);
-
-  if (!stopped) {
-    std::println(stderr, "stop_session: {}: {}",
-                 stopped.error().detail, stopped.error().ec.message());
-    return 1;
-  }
+  save_all(calibrators, progress, conf.cameras);
 
   return 0;
 }

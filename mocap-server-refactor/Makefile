@@ -23,7 +23,7 @@ LIB_SRCS = $(wildcard $(LIB_DIR)/*.cpp)
 LIB_OBJS = $(LIB_SRCS:$(LIB_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
 # each tool is a standalone binary linking the shared library
-TOOLS = lens_calibration
+TOOLS = lens_calibration stereo_calibration
 BINS  = $(TOOLS:%=$(BIN_DIR)/%)
 
 INCLUDES = -I$(LIB_DIR)
@@ -50,7 +50,7 @@ RPATH    = -Wl,-rpath,'$$ORIGIN/../$(OUT_LIB)'
 
 DEPS = $(LIB_OBJS:.o=.d) $(TOOLS:%=$(OBJ_DIR)/%.o.d)
 
-.PHONY: all release clean run_lens
+.PHONY: all release clean run_lens run_stereo
 
 all: $(LIB) $(BINS)
 
@@ -70,6 +70,9 @@ $(OBJ_DIR) $(BIN_DIR) $(OUT_LIB):
 	@mkdir -p $@
 
 run_lens: $(BIN_DIR)/lens_calibration
+	@./$<
+
+run_stereo: $(BIN_DIR)/stereo_calibration
 	@./$<
 
 release:

@@ -1,8 +1,8 @@
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
-#include <optional>
+#include <memory>
 #include <thread>
 #include <utility>
 
@@ -12,30 +12,22 @@
 #include "session.hpp"
 
 namespace mocap {
-namespace {
 
-// cameras need roughly a second between receiving the timestamp and having a
-// TCP stream up, so the start time is placed far enough ahead for every Camera
-// to be armed before it arrives
-constexpr std::chrono::seconds START_DELAY{2};
-
-struct SessionState {
+// everything a running session owns. lives on the heap so its address is
+// stable across moves, which the loop thread relies on.
+struct Session::State {
   Config conf;
   ControlSocket control;
   EventLoop loop;
   std::thread thread;
 };
 
-std::optional<SessionState> g_session;
+namespace {
 
-// calling into a session that was never started is a bug in the caller, not a
-// runtime condition, so there is nothing to hand back that they could act on.
-// exiting rather than aborting keeps the diagnostic, since abort does not
-// flush stdio.
-[[noreturn]] void no_session(const char* function) {
-  std::fprintf(stderr, "[session] %s called with no session running\n", function);
-  std::exit(EXIT_FAILURE);
-}
+// cameras need roughly a second between receiving the timestamp and having a
+// TCP stream up, so the start time is placed far enough ahead for every camera
+// to be armed before it arrives
+constexpr std::chrono::seconds START_DELAY{2};
 
 uint64_t start_timestamp() {
   std::chrono::nanoseconds now =
@@ -45,10 +37,12 @@ uint64_t start_timestamp() {
 
 } // namespace
 
-std::expected<void, Error> start_session(const std::filesystem::path& config_path) {
-  if (g_session)
-    return std::unexpected(invalid("session already started"));
+Session::Session(std::unique_ptr<State> state) : m_state(std::move(state)) {}
 
+Session::Session(Session&& other) noexcept = default;
+Session& Session::operator=(Session&& other) noexcept = default;
+
+std::expected<Session, Error> Session::start(const std::filesystem::path& config_path) {
   std::expected<Config, Error> conf = parse_config(config_path);
   if (!conf)
     return std::unexpected(conf.error());
@@ -72,67 +66,56 @@ std::expected<void, Error> start_session(const std::filesystem::path& config_pat
   if (!started)
     return std::unexpected(started.error());
 
-  g_session.emplace(std::move(*conf), std::move(*control), std::move(*loop), std::thread{});
-  g_session->thread = std::thread([] { (void)g_session->loop.run(); });
+  std::unique_ptr<State> state = std::make_unique<State>(
+    std::move(*conf), std::move(*control), std::move(*loop), std::thread{}
+  );
 
-  return {};
+  // the state is heap allocated and never relocates, so the thread can hold a
+  // raw pointer to it even as the Session that owns it moves
+  State* running = state.get();
+  state->thread = std::thread([running] { (void)running->loop.run(); });
+
+  return Session(std::move(state));
 }
 
-std::expected<void, Error> stop_session() {
-  // stopping a session that was never started is not something a caller can
-  // act on, so it is a no op rather than an error they have to handle
-  if (!g_session) {
-    std::fprintf(stderr, "[session] stop_session with no session running\n");
-    return {};
-  }
+Session::~Session() {
+  if (!m_state)
+    return;
 
-  std::expected<void, Error> stopped = g_session->control.broadcast_stop();
+  std::expected<void, Error> stopped = m_state->control.broadcast_stop();
 
   // the eventfd is the only way to wake the loop, so if the write fails the
-  // join below would block forever. there is no path back from that, and
-  // checking after the join would never run.
-  std::expected<void, Error> signalled = g_session->loop.stop();
+  // join below would block forever. not exit: the loop thread is still
+  // joinable, so running its destructor on the way out would terminate anyway.
+  std::expected<void, Error> signalled = m_state->loop.stop();
   if (!signalled) {
-    // not exit: the loop thread is still running and joinable, so running its
-    // destructor on the way out would terminate anyway
     std::fprintf(stderr, "[session] cannot signal the event loop to stop: %s: %s\n",
                  signalled.error().detail.c_str(),
                  signalled.error().ec.message().c_str());
     std::abort();
   }
 
-  if (g_session->thread.joinable())
-    g_session->thread.join();
+  if (m_state->thread.joinable())
+    m_state->thread.join();
 
-  g_session.reset();
-
-  // the only failure a caller can act on: the cameras were never told to stop,
-  // so they keep capturing until their stream write fails
+  // the only failure worth reporting: the cameras were never told to stop, so
+  // they keep capturing until their stream write fails
   if (!stopped)
-    return std::unexpected(stopped.error());
-
-  return {};
+    std::fprintf(stderr, "[session] stop did not reach the cameras: %s: %s\n",
+                 stopped.error().detail.c_str(),
+                 stopped.error().ec.message().c_str());
 }
 
-const Config& session_config() {
-  if (!g_session)
-    no_session("session_config");
-
-  return g_session->conf;
+const Config& Session::config() const {
+  return m_state->conf;
 }
 
-std::optional<Frameset> try_acquire_frameset() {
-  if (!g_session)
-    no_session("try_acquire_frameset");
-
-  return g_session->loop.pool().try_acquire();
+std::optional<Frameset> Session::try_acquire_frameset() {
+  return m_state->loop.pool().try_acquire();
 }
 
-void release_frameset(const Frameset& set) {
-  if (!g_session)
-    no_session("release_frameset");
-
-  g_session->loop.pool().release(set.slot);
+void Session::release_frameset(const Frameset& set) {
+  m_state->loop.pool().release(set.slot);
 }
 
 } // namespace mocap

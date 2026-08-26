@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 
@@ -33,33 +34,45 @@ struct Frameset {
   uint32_t slot;   // opaque, hand back to release_frameset
 };
 
-// Starts a capture session: reads the camera config, then broadcasts a start
-// timestamp to every camera at once. Cameras arm their capture timers against
-// that absolute time, so they begin in lockstep regardless of delivery jitter.
+// A running capture session. Starting one reads the camera config and
+// broadcasts a start timestamp to every camera at once, so they arm their
+// capture timers against the same absolute time and begin in lockstep
+// regardless of delivery jitter. Letting it go out of scope stops them.
 //
-// One session per process. Not thread safe.
-MOCAP_API std::expected<void, Error> start_session(const std::filesystem::path& config_path);
-
-// Broadcasts the stop sentinel and tears down the session. Safe to call only
-// on a started session.
-MOCAP_API std::expected<void, Error> stop_session();
-
-// Takes the oldest ready frameset, or nullopt if none is ready. Safe to call
-// from a different thread than the one that started the session.
-// The config the running session was started from. Owned by the library and
-// valid until stop_session, so copy out anything needed after that.
+// Framesets may be acquired from a different thread than the one holding the
+// session, but the session itself is not thread safe to move or destroy.
 //
-// Calling this without a running session is a caller bug rather than a
-// condition to handle, so it aborts rather than handing back a null nobody
-// checks.
-MOCAP_API const Config& session_config();
+// The destructor cannot report failure, so a stop that never reaches the
+// cameras is written to stderr. It is the only way a stop fails, and nothing
+// a caller would do differently.
+class MOCAP_API Session {
+public:
+  static std::expected<Session, Error> start(const std::filesystem::path& config_path);
 
-MOCAP_API std::optional<Frameset> try_acquire_frameset();
+  Session(Session&& other) noexcept;
+  Session& operator=(Session&& other) noexcept;
+  Session(const Session&) = delete;
+  Session& operator=(const Session&) = delete;
+  ~Session();
 
-// Returns a frameset's GPU surfaces to the decoders. Hold sets briefly: the
-// surface pool is fixed, and the library drops the oldest ready set when it
-// runs out of slots.
-MOCAP_API void release_frameset(const Frameset& set);
+  // The config this session was started from, valid for its lifetime.
+  const Config& config() const;
+
+  // The oldest ready frameset, or nullopt if none is ready. Every acquired set
+  // must be handed back to release_frameset or its GPU surfaces are never
+  // reused.
+  std::optional<Frameset> try_acquire_frameset();
+  void release_frameset(const Frameset& set);
+
+private:
+  // held by pointer so this header needs no decoder, socket or epoll types,
+  // which keeps ffmpeg out of anything that links the library
+  struct State;
+  explicit Session(std::unique_ptr<State> state);
+
+  std::unique_ptr<State> m_state;
+};
+
 
 } // namespace mocap
 
