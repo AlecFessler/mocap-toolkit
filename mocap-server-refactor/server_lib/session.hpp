@@ -9,6 +9,10 @@
 
 #include "error.hpp"
 
+// everything in the library is hidden by default, so the public entry points
+// have to opt back in
+#define MOCAP_API __attribute__((visibility("default")))
+
 namespace mocap {
 
 // One camera's decoded frame, still resident on the GPU. NV12, chroma follows
@@ -34,20 +38,20 @@ struct Frameset {
 // that absolute time, so they begin in lockstep regardless of delivery jitter.
 //
 // One session per process. Not thread safe.
-std::expected<void, Error> session_start(const std::filesystem::path& config_path);
+MOCAP_API std::expected<void, Error> start_session(const std::filesystem::path& config_path);
 
 // Broadcasts the stop sentinel and tears down the session. Safe to call only
 // on a started session.
-std::expected<void, Error> session_stop();
+MOCAP_API std::expected<void, Error> stop_session();
 
 // Takes the oldest ready frameset, or nullopt if none is ready. Safe to call
 // from a different thread than the one that started the session.
-std::optional<Frameset> try_acquire_frameset();
+MOCAP_API std::optional<Frameset> try_acquire_frameset();
 
 // Returns a frameset's GPU surfaces to the decoders. Hold sets briefly: the
 // surface pool is fixed, and the library drops the oldest ready set when it
 // runs out of slots.
-void release_frameset(const Frameset& set);
+MOCAP_API void release_frameset(const Frameset& set);
 
 } // namespace mocap
 

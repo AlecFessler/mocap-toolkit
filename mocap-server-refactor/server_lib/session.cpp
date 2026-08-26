@@ -34,7 +34,7 @@ uint64_t start_timestamp() {
 
 } // namespace
 
-std::expected<void, Error> session_start(const std::filesystem::path& config_path) {
+std::expected<void, Error> start_session(const std::filesystem::path& config_path) {
   if (g_session)
     return std::unexpected(invalid("session already started"));
 
@@ -67,7 +67,7 @@ std::expected<void, Error> session_start(const std::filesystem::path& config_pat
   return {};
 }
 
-std::expected<void, Error> session_stop() {
+std::expected<void, Error> stop_session() {
   if (!g_session)
     return std::unexpected(invalid("session not started"));
 

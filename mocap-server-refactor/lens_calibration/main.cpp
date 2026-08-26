@@ -11,9 +11,9 @@ constexpr std::chrono::seconds CAPTURE_WINDOW{5};
 constexpr std::chrono::microseconds POLL_INTERVAL{500};
 
 int main() {
-  std::expected<void, mocap::Error> started = mocap::session_start(CONFIG_PATH);
+  std::expected<void, mocap::Error> started = mocap::start_session(CONFIG_PATH);
   if (!started) {
-    std::println(stderr, "session_start: {}: {}",
+    std::println(stderr, "start_session: {}: {}",
                  started.error().detail, started.error().ec.message());
     return 1;
   }
@@ -51,9 +51,9 @@ int main() {
     mocap::release_frameset(*set);
   }
 
-  std::expected<void, mocap::Error> stopped = mocap::session_stop();
+  std::expected<void, mocap::Error> stopped = mocap::stop_session();
   if (!stopped) {
-    std::println(stderr, "session_stop: {}: {}",
+    std::println(stderr, "stop_session: {}: {}",
                  stopped.error().detail, stopped.error().ec.message());
     return 1;
   }

@@ -155,8 +155,9 @@ std::expected<std::span<const epoll_event>, Error> EventLoop::wait() {
 
 std::expected<void, Error> EventLoop::service(std::span<const epoll_event> events) {
   for (const epoll_event& event : events) {
+    // only fatal errors reach here now, per stream ones are absorbed below
     std::expected<void, Error> handled = dispatch(event.data.u64);
-    if (!handled && !is_retry(handled.error()))
+    if (!handled)
       return std::unexpected(handled.error());
   }
 
@@ -172,7 +173,8 @@ std::expected<void, Error> EventLoop::dispatch(uint64_t key) {
       return {};
 
     case SourceKind::listener:
-      return accept_camera(source.index);
+      return accept_camera(source.index)
+        .or_else([this, i = source.index](Error err) { return absorb_stream_error(i, std::move(err)); });
 
     case SourceKind::stream:
       return read_camera(source.index);
@@ -206,13 +208,48 @@ std::expected<void, Error> EventLoop::accept_camera(size_t index) {
   return {};
 }
 
+// a camera failing is not a reason to stop serving the others, so everything
+// below this point is absorbed rather than propagated. the listener stays
+// registered, so a dropped camera rejoins on its next connect attempt.
 std::expected<void, Error> EventLoop::read_camera(size_t index) {
   if (m_streams[index].expected == 0)
-    return read_header(index);
+    return read_header(index)
+      .or_else([this, index](Error err) { return absorb_stream_error(index, std::move(err)); });
 
   return read_payload(index)
     .and_then([this, index] { return submit_frame(index); })
-    .and_then([this, index] { return drain_frames(index); });
+    .and_then([this, index] { return drain_frames(index); })
+    .or_else([this, index](Error err) { return absorb_stream_error(index, std::move(err)); });
+}
+
+void EventLoop::drop_camera(size_t index) {
+  StreamState& stream = m_streams[index];
+  if (!stream.fd.valid())
+    return;
+
+  epoll_ctl(m_epoll_fd.get(), EPOLL_CTL_DEL, stream.fd.get(), nullptr);
+  stream.fd.reset();
+  stream.filled = 0;
+  stream.expected = 0;
+}
+
+// the one place a stream is torn down. a desynced stream cannot be resynced in
+// place and a failed decoder keeps failing, so anything short of "try again"
+// means dropping the camera and letting it reconnect clean.
+std::expected<void, Error> EventLoop::absorb_stream_error(size_t index, Error err) {
+  if (is_retry(err))
+    return {};
+
+  if (is_closed(err))
+    std::printf("[%s] disconnected\n", m_listeners[index].name().c_str());
+  else
+    std::printf("[%s] dropped: %s: %s\n",
+                m_listeners[index].name().c_str(),
+                err.detail.c_str(),
+                err.ec.message().c_str());
+
+  drop_camera(index);
+  return {};
 }
 
 // reads at most the bytes still missing, so a read never crosses into the
@@ -230,14 +267,8 @@ std::expected<size_t, Error> EventLoop::fill(size_t index, uint8_t* dst, size_t 
     return std::unexpected(errno_error("failed to read from stream"));
   }
 
-  if (got == 0) {
-    std::printf("[%s] disconnected\n", m_listeners[index].name().c_str());
-    epoll_ctl(m_epoll_fd.get(), EPOLL_CTL_DEL, stream.fd.get(), nullptr);
-    stream.fd.reset();
-    stream.filled = 0;
-    stream.expected = 0;
-    return std::unexpected(retry());
-  }
+  if (got == 0)
+    return std::unexpected(closed());
 
   stream.filled += static_cast<size_t>(got);
   return stream.filled;

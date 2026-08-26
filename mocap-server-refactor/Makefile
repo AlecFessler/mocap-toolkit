@@ -22,6 +22,9 @@ BINS  = $(TOOLS:%=$(BIN_DIR)/%)
 
 INCLUDES = -I$(LIB_DIR)
 LIBS     = -lavcodec -lavutil
+# library symbols are hidden unless marked MOCAP_API, so the exported surface
+# is what session.hpp declares rather than every template instantiation
+VISIBILITY = -fvisibility=hidden -fvisibility-inlines-hidden
 # $$ORIGIN lets the binaries find the .so relative to themselves, uninstalled
 RPATH    = -Wl,-rpath,'$$ORIGIN/../$(OUT_LIB)'
 
@@ -35,7 +38,7 @@ $(LIB): $(LIB_OBJS) | $(OUT_LIB)
 	$(CXX) $(CXXFLAGS) -shared $^ -o $@ $(LIBS)
 
 $(OBJ_DIR)/%.o: $(LIB_DIR)/%.cpp | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -fPIC $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -fPIC $(VISIBILITY) $(INCLUDES) -c $< -o $@
 
 $(BIN_DIR)/%: %/main.cpp $(LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(INCLUDES) $< -o $@ -L$(OUT_LIB) -lmocapserver $(RPATH)

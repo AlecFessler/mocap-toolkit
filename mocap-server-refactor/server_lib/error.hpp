@@ -17,6 +17,11 @@ Error errno_error(std::string detail);
 // its fd next wakes up. short circuits an and_then chain without ending it.
 Error retry();
 bool is_retry(const Error& err);
+
+// not a failure either: the stream is gone and has already been torn down.
+// the listener stays registered, so the camera is re-accepted when it retries.
+Error closed();
+bool is_closed(const Error& err);
 Error invalid(std::string detail);
 
 } // namespace mocap

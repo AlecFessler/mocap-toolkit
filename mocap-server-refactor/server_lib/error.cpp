@@ -23,6 +23,17 @@ bool is_retry(const Error& err) {
   return err.ec == std::errc::resource_unavailable_try_again;
 }
 
+Error closed() {
+  return Error{
+    std::make_error_code(std::errc::connection_reset),
+    "stream closed"
+  };
+}
+
+bool is_closed(const Error& err) {
+  return err.ec == std::errc::connection_reset;
+}
+
 Error invalid(std::string detail) {
   return Error{
     std::make_error_code(std::errc::invalid_argument),

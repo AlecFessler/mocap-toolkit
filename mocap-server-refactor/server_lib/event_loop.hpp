@@ -69,6 +69,9 @@ private:
   std::expected<void, Error> drain_frames(size_t index);
   std::expected<size_t, Error> fill(size_t index, uint8_t* dst, size_t want);
 
+  void drop_camera(size_t index);
+  std::expected<void, Error> absorb_stream_error(size_t index, Error err);
+
   UniqueFd m_epoll_fd;
   UniqueFd m_stop_fd;
   HwContext m_hw;
